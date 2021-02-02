@@ -41,6 +41,10 @@ invalidblk(Blk *b, int h, Kvp *lo, Kvp *hi)
 		}
 		if(b->type == Pivot){
 			c = getblk(x.bp, x.bh);
+			if(blkfill(c) != x.fill){
+				fprint(2, "mismatched block fill");
+				fail++;
+			}
 			if(invalidblk(c, h + 1, &x, &y))
 				fail++;
 		}

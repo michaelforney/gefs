@@ -43,6 +43,20 @@ blkhash(Blk *b)
 	return siphash(b->data, Blksz);
 }
 
+ushort
+blkfill(Blk *b)
+{
+	switch(b->type){
+	case Pivot:
+		return 2*b->nmsg + b->bufsz +  2*b->nent + b->valsz;
+	case Leaf:
+		return 2*b->nent + b->valsz;
+	default:
+		abort();
+		return 0; // shut up kencc
+	}
+}
+
 int
 putblk(Blk *b)
 {

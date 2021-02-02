@@ -41,7 +41,8 @@ Pconv(Fmt *fmt)
 	if(kv->type == Vinl)
 		return fmtprint(fmt, "Kvp(%.*s,%.*s)", kv->nk, kv->k, kv->nv, kv->v);
 	else
-		return fmtprint(fmt, "Kvp(%.*s,(%llx,%llx))", kv->nk, kv->k, kv->bp, kv->bh);
+		return fmtprint(fmt, "Kvp(%.*s,(%llux,%llux,%ud))",
+			kv->nk, kv->k, kv->bp, kv->bh, kv->fill);
 }
 
 static int

@@ -19,7 +19,7 @@ enum {
 	Leafspc = Blkspc,
 	Keymax	= 16,
 	Inlmax	= 64,
-	Ptrsz	= 16,
+	Ptrsz	= 18,
 	Kvmax	= Keymax + Inlmax,	/* Key and value */
 	Kpmax	= Keymax + Ptrsz,	/* Key and pointer */
 	Msgmax  = 1 + (Kvmax > Kpmax ? Kvmax : Kpmax)
@@ -92,6 +92,7 @@ struct Val {
 		struct {
 			uvlong	bp;
 			uvlong	bh;
+			ushort	fill;
 		};
 		/* inline values */
 		struct {
@@ -123,7 +124,17 @@ struct Path {
 	Blk	*l;	/* left of split */
 	Blk	*r;	/* right of split */
 	Blk	*n;	/* shadowed node */
-	int	split;	/* did we split? */
+	/*
+	 * If we merged or rotated, at least
+	 * one of these nodes is not nil,
+	 * and midx points at the left of
+	 * the two nodes.
+	 */
+	Blk	*ml;	/* merged/rotated left */
+	Blk	*mr;	/* merged/rotated right */
+	int	midx;	/* merged index */
+	char	split;	/* did we split? */
+	char	merge;	/* did we merge? */
 };
 
 struct Blk {

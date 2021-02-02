@@ -14,6 +14,7 @@ Blk*	shadow(Blk*, Path*, Path*);
 int	putblk(Blk*);
 Blk*	getblk(uvlong bp, uvlong bh);
 void	freeblk(Blk *b);
+ushort	blkfill(Blk*);
 uvlong	blkhash(Blk*);
 uvlong	siphash(void*, usize);
 

@@ -62,6 +62,7 @@ getval(Blk *b, int i, Kvp *kv)
 		kv->k = b->data + o + 2;
 		kv->bp = GBIT64(kv->k + kv->nk + 0);
 		kv->bh = GBIT64(kv->k + kv->nk + 8);
+		kv->fill = GBIT16(kv->k + kv->nk + 16);
 	}else{
 		kv->type = Vinl;
 		kv->nk = GBIT16(b->data + o);
@@ -120,6 +121,7 @@ setval(Blk *b, int i, Kvp *kv, int replace)
 		memcpy(p +  2, kv->k, kv->nk);
 		PBIT64(p + kv->nk +  2, kv->bp);
 		PBIT64(p + kv->nk + 10, kv->bh);
+		PBIT16(p + kv->nk + 18, kv->fill);
 	} else {
 		assert(kv->type == Vinl);
 		PBIT16(b->data + 2*i, o);
@@ -305,6 +307,7 @@ blksearch(Blk *b, Key *k, Kvp *rp, int *idx, int *same)
 		*idx = lo;
 	return 0;
 }
+
 int
 filledbuf(Blk *b, int needed)
 {
@@ -343,6 +346,7 @@ copyup(Blk *n, int i, Path *pp, int *nbytes)
 		kv.type = Vref;
 		kv.bp = (uintptr)pp->l;
 		kv.bh = blkhash(pp->l);
+		kv.fill = blkfill(pp->l);
 		setval(n, i++, &kv, 0);
 		if(nbytes != nil)
 			*nbytes += 2 + valsz(&kv);
@@ -351,6 +355,7 @@ copyup(Blk *n, int i, Path *pp, int *nbytes)
 		kv.type = Vref;
 		kv.bp = (uintptr)pp->r;
 		kv.bh = blkhash(pp->r);
+		kv.fill = blkfill(pp->r);
 		setval(n, i++, &kv, 0);
 		if(nbytes != nil)
 			*nbytes += 2 + valsz(&kv);
@@ -359,6 +364,7 @@ copyup(Blk *n, int i, Path *pp, int *nbytes)
 		kv.type = Vref;
 		kv.bp = (uintptr)pp->n;
 		kv.bh = blkhash(pp->n);
+		kv.fill = blkfill(pp->n);
 		setval(n, i++, &kv, 1);
 		if(nbytes != nil)
 			*nbytes += 2 + valsz(&kv);
@@ -374,21 +380,32 @@ copyup(Blk *n, int i, Path *pp, int *nbytes)
  *
  * When pidx != -1, 
  */
-Blk*
-update(Blk *b, Path *p, Path *pp)
+int
+update(Path *p, Path *pp)
 {
-	int i, j, lo, hi, pidx;
-	Blk *n;
+	int i, j, lo, hi, pidx, midx;
+	Blk *b, *n;
 	Msg m;
 
 	j = 0;
+	b = p->b;
 	lo = (p != nil) ? p->lo : -1;
 	hi = (p != nil) ? p->hi : -1;
 	pidx = (p != nil) ? p->idx : -1;
-	n = newblk(b->type);
+	midx = (p != nil && p->merge) ? p->midx : -1;
+	if((n = newblk(b->type)) == nil)
+		return -1;
 	for(i = 0; i < b->nent; i++){
 		if(i == pidx){
 			j = copyup(n, j, pp, nil);
+			continue;
+		}else if(i == midx){
+			getval(p->ml, 0, &m);
+			setval(n, j++, &m, 0);
+			if(p->mr){
+				getval(p->mr, 0, &m);
+				setval(n, j++, &m, 0);
+			}
 			continue;
 		}
 		getval(b, i, &m);
@@ -407,7 +424,8 @@ update(Blk *b, Path *p, Path *pp)
 		}
 		b->nmsg = j;
 	}
-	return n;
+	p->n = n;
+	return 0;
 }
 
 
@@ -432,8 +450,11 @@ split(Blk *b, Path *p, Path *pp, Kvp *mid)
 	 */
 	l = newblk(b->type);
 	r = newblk(b->type);
-	if(l == nil || r == nil)
-		goto error;
+	if(l == nil || r == nil){
+		freeblk(l);
+		freeblk(r);
+		return -1;
+	}
 
 	lo = (p != nil) ? p->lo : -1;
 	hi = (p != nil) ? p->hi : -1;
@@ -486,10 +507,6 @@ split(Blk *b, Path *p, Path *pp, Kvp *mid)
 	p->l = l;
 	p->r = r;
 	return 0;
-error:
-	if(l != nil) freeblk(l);
-	if(r != nil) freeblk(r);
-	return -1;
 }
 
 int
@@ -512,6 +529,215 @@ apply(Blk *b, Msg *m)
 error:
 	werrstr("invalid upsert");
 	return -1;
+}
+
+int
+merge(Path *p, int idx, Blk *a, Blk *b)
+{
+	int i, o;
+	Msg m;
+	Blk *d;
+
+	USED(p);
+	if((d = newblk(a->type)) == nil)
+		return -1;
+	o = 0;
+	for(i = 0; i < a->nent; i++){
+		getval(a, i, &m);
+		setval(d, o++, &m, 0);
+	}
+	for(i = 0; i < b->nent; i++){
+		getval(b, i, &m);
+		setval(d, o++, &m, 0);
+	}
+	if(a->type == Pivot){
+		for(i = 0; i < a->nmsg; i++){
+			getmsg(a, i, &m);
+			setmsg(d, o++, &m);
+		}
+		for(i = 0; i < b->nmsg; i++){
+			getmsg(b, i, &m);
+			setmsg(d, o++, &m);
+		}
+	}
+	p->merge = 1;
+	p->midx = idx;
+	p->ml = d;
+	p->mr = nil;
+	return 0;
+}
+
+/*
+ * Returns whether the keys in b between
+ * idx and m would spill out of the buffer
+ * of d.
+ */
+int
+spillsbuf(Blk *d, Blk *b, Msg *m, int *idx)
+{
+	int i, used;
+	Msg n;
+
+	if(b->type == Leaf)
+		return 0;
+	used = 2*d->nmsg + d->bufsz;
+	for(i = *idx; i < b->nmsg; i++){
+		getmsg(b, i, &n);
+		if(keycmp(&n, m) > 0)
+			break;
+		used += 2 + msgsz(&n);
+		if(used >= Bufspc)
+			return 1;
+	}
+	print("does not spill");
+	*idx = i;
+	return 0;
+}
+
+int
+rotate(Path *p, int idx, Blk *a, Blk *b, int halfbuf)
+{
+	int i, o, copied, split, ovfidx;
+	Blk *d, *l, *r;
+	Msg m;
+
+	l = newblk(a->type);
+	r = newblk(a->type);
+	if(l == nil || r == nil){
+		freeblk(l);
+		freeblk(r);
+		return -1;
+	}
+	o = 0;
+	d = l;
+	split = -1;
+	ovfidx = 0;
+	copied = 0;
+	for(i = 0; i < a->nent; i++){
+		getval(a, i, &m);
+		if(d == l && (copied >= halfbuf || spillsbuf(d, a, &m, &ovfidx))){
+			split = i;
+			o = 0;
+			d = r;
+		}
+		setval(d, o++, &m, 0);
+		copied += valsz(&m);
+	}
+	for(i = 0; i < b->nent; i++){
+		if(d == l && (copied >= halfbuf || spillsbuf(d, b, &m, &ovfidx))){
+			split = i;
+			o = 0;
+			d = r;
+		}
+		getval(b, i, &m);
+		setval(d, o++, &m, 0);
+		copied += valsz(&m);
+	}
+	if(a->type == Pivot){
+		d = l;
+		o = 0;
+		for(i = 0; i < a->nmsg; i++){
+			if(i == split){
+				d = r;
+				o = 0;
+			}
+			getmsg(a, i, &m);
+			setmsg(d, o++, &m);
+		}
+		for(i = 0; i < b->nmsg; i++){
+			if(i == split){
+				d = r;
+				o = 0;
+			}
+			getmsg(b, i, &m);
+			setmsg(d, o++, &m);
+		}
+	}
+	p->merge = 1;
+	p->midx = idx;
+	p->ml = l;
+	p->mr = r;
+	return 0;
+}
+
+int
+rotmerge(Path *p, int idx, Blk *a, Blk *b)
+{
+	int na, nb, ma, mb, imbalance;
+
+	assert(a->type == b->type);
+
+	na = 2*a->nent + a->valsz;
+	nb = 2*b->nent + b->valsz;
+	if(a->type == Leaf){
+		ma = 0;
+		mb = 0;
+	}else{
+		ma = 2*a->nmsg + a->bufsz;
+		mb = 2*b->nmsg + b->bufsz;
+	}
+	imbalance = na - nb;
+	if(imbalance < 0)
+		imbalance *= -1;
+	/* works for leaf, because 0 always < Bufspc */
+	if(na + nb < Pivspc && ma + mb < Bufspc)
+		return merge(p, idx, a, b);
+	else if(imbalance < 4*Msgmax)
+		return rotate(p, idx, a, b, (na + nb)/2);
+	else
+		return 0;
+}
+
+int
+trymerge(Path *p, Path *pp, int idx)
+{
+	Blk *l,*m, *r;
+	Kvp km, kl, kr;
+	int ret;
+
+	l = nil;
+	r = nil;
+	ret = -1;
+	if(p->idx == -1)
+		return 0;
+	if(pp != nil){
+		if((m = pp->n) == nil)
+			return 0;
+	}else{
+		if((m = getblk(km.bp, km.bh)) == nil)
+			return -1;
+	}
+	/* Try merging left */
+	getval(p->b, idx, &km);
+	if(idx > 0){
+		getval(p->b, idx-1, &kl);
+		if(kl.fill + km.fill >= Blkspc)
+			goto next;
+		if((l = getblk(kl.bp, kl.bh)) == nil)
+			goto out;
+		if(rotmerge(p, idx-1, l, m) == -1)
+			goto out;
+		goto done;
+	}
+next:
+	if(idx < p->b->nent){
+		getval(p->b, idx+1, &kr);
+		if(kr.fill + km.fill >= Blkspc)
+			goto done;
+		if((r = getblk(kr.bp, kr.bh)) == nil)
+			goto out;
+		if(rotmerge(p, idx, m, r) == -1)
+			goto out;
+		goto done;
+	}
+done:
+	ret = 0;
+out:
+	putblk(l);
+	putblk(r);
+	if(pp == nil)
+		putblk(m);
+	return ret;
 }
 
 static int
@@ -538,7 +764,8 @@ flush(Path *path, int npath, Msg *ins, int *redo)
 	p = &path[npath - 1];
 	if(p->b->type == Leaf){
 		if(!filledleaf(p->b, p[-1].sz)){
-			p->n = update(p->b, p, pp);
+			if(update(p, pp) == -1)
+				return -1;
 			for(i = p[-1].lo; i < p[-1].hi; i++){
 				getmsg(p[-1].b, i, &m);
 				if(filledleaf(p->n, msgsz(&m)))
@@ -560,12 +787,19 @@ flush(Path *path, int npath, Msg *ins, int *redo)
 			}
 		}
 		assert(p->n || (p->l && p->r));
+		p->midx = -1;
 		pp = p;
 		p--;
 	}
 	for(; p > path; p--){
 		if(!filledpiv(p->b, 1)){
-			p->n = update(p->b, p, pp);
+			if(trymerge(p, pp, p->idx) == -1)
+				goto error;
+			/* If we merged the root node, break out. */
+			if(p[-1].b == nil && p[0].merge && p[0].mr == nil && p[0].b->nent == 2)
+				break;
+			if(update(p, pp) == -1)
+				goto error;
 			for(i = p[-1].lo; i < p[-1].hi; i++){
 				getmsg(p[-1].b, i, &m);
 				if(filledbuf(p->n, msgsz(&m)))
@@ -682,6 +916,7 @@ again:
 	path = emalloc((fs->height + 2)*sizeof(Path));
 	path[npath].b = nil;
 	path[npath].idx = -1;
+	path[npath].midx = -1;
 	npath++;
 
 	b = fs->root;
@@ -703,12 +938,16 @@ again:
 	npath++;
 	if(flush(path, npath, m, &redo) == -1)
 		goto error;
-	b = path[0].n;
-	if(b != nil)
+	if(path[0].n != nil){
 		fs->height++;
-	else
-		b = path[1].n;
-	fs->root = b;
+		fs->root = path[0].n;
+	}else if(path[1].n != nil){
+		fs->root = path[1].n;
+	}else if(npath >2 && path[2].n != nil){
+		fs->height--;
+		fs->root = path[2].n;
+	}else
+		abort();
 	free(path);
 	if(redo)
 		goto again;

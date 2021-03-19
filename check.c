@@ -1,14 +1,15 @@
 #include <u.h>
 #include <libc.h>
-#include <bio.h>
+#include <fcall.h>
+#include <avl.h>
+
 #include "dat.h"
 #include "fns.h"
 
 char	spc[128];
-int	debug;
 
 static int
-invalidblk(Blk *b, int h, Kvp *lo, Kvp *hi)
+badblk(Blk *b, int h, Kvp *lo, Kvp *hi)
 {
 	Kvp x, y;
 	int i, r;
@@ -16,36 +17,40 @@ invalidblk(Blk *b, int h, Kvp *lo, Kvp *hi)
 	int fail;
 
 	fail = 0;
-	if(b->type == Leaf){
-		if(h != fs->height){
+	if(b->type == Tleaf){
+		if(h != 0){
 			fprint(2, "unbalanced leaf\n");
 			fail++;
 		}
-		if(h != 1 && b->nent < 2){
+		if(h != 0 && b->nval < 2){
 			fprint(2, "underfilled leaf\n");
 			fail++;
 		}
 	}
-	if(b->type == Pivot && b->nent < 2){
+	if(b->type == Tpivot && b->nval < 2){
 		fprint(2, "underfilled  pivot\n");
 		fail++;
 	}
 	getval(b, 0, &x);
 	if(lo && keycmp(lo, &x) != 0)
 		fprint(2, "out of range keys %P != %P\n", lo, &x);
-	for(i = 1; i < b->nent; i++){
+	for(i = 1; i < b->nval; i++){
 		getval(b, i, &y);
 		if(hi && keycmp(&y, hi) >= 0){
 			fprint(2, "out of range keys %P >= %P\n", &y, hi);
 			fail++;
 		}
-		if(b->type == Pivot){
-			c = getblk(x.bp, x.bh);
+		if(b->type == Tpivot){
+			if((c = getblk(x.bp, x.bh)) == nil){
+				fprint(2, "corrupt block: %r\n");
+				fail++;
+				continue;
+			}
 			if(blkfill(c) != x.fill){
-				fprint(2, "mismatched block fill");
+				fprint(2, "mismatched block fill\n");
 				fail++;
 			}
-			if(invalidblk(c, h + 1, &x, &y))
+			if(badblk(c, h - 1, &x, &y))
 				fail++;
 		}
 		r = keycmp(&x, &y);
@@ -65,17 +70,25 @@ invalidblk(Blk *b, int h, Kvp *lo, Kvp *hi)
 	}
 	return fail;
 }
-	
 
 /* TODO: this will grow into fsck. */
 int
 checkfs(void)
 {
-	return invalidblk(fs->root, 1, nil, nil) == 0;
+	int ok, height;
+	Blk *b;
+
+	ok = 1;
+	if((b = getroot(&height)) != nil){
+		if(badblk(b, height-1, nil, 0))
+			ok = 0;
+		putblk(b);
+	}
+	return ok;
 }
 
-static void
-rshowblk(Blk *b, int indent)
+void
+rshowblk(int fd, Blk *b, int indent, int recurse)
 {
 	Blk *c;
 	int i;
@@ -85,22 +98,24 @@ rshowblk(Blk *b, int indent)
 	if(indent > sizeof(spc)/4)
 		indent = sizeof(spc)/4;
 	if(b == nil){
-		print("NIL\n");
+		fprint(fd, "NIL\n");
 		return;
 	}
-	if(b->type == Pivot){
-		for(i = 0; i < b->nmsg; i++){
+	if(b->type == Tpivot){
+		for(i = 0; i < b->nbuf; i++){
 			getmsg(b, i, &m);
-			print("%.*s|%M\n", 4*indent, spc, &m);
+			fprint(fd, "%.*s|%M\n", 4*indent, spc, &m);
 		}
 	}
-	for(i = 0; i < b->nent; i++){
+	for(i = 0; i < b->nval; i++){
 		getval(b, i, &kv);
-		print("%.*s|%P\n", 4*indent, spc, &kv);
-		if(b->type == Pivot){
+		fprint(fd, "%.*s|%P\n", 4*indent, spc, &kv);
+		if(b->type == Tpivot){
 			if((c = getblk(kv.bp, kv.bh)) == nil)
-				sysfatal("falied load: %r");
-			rshowblk(c, indent + 1);
+				sysfatal("failed load: %r");
+			if(recurse)
+				rshowblk(fd, c, indent + 1, 1);
+			putblk(c);
 		}
 	}
 }
@@ -117,21 +132,28 @@ initshow(void)
 }
 
 void
-showblk(Blk *b, char *m)
+showblk(Blk *b, char *m, int recurse)
 {
-	if(m != nil)
-		print("=== %s\n", m);
-	rshowblk(b, 0);
+	fprint(2, "=== %s\n", m);
+	rshowblk(2, b, 0, recurse);
+}
+
+void
+fshowfs(int fd, char *m)
+{
+	int h;
+
+	fprint(fd, "=== %s\n", m);
+	fprint(fd, "fs->height: %d\n", fs->height);
+	rshowblk(fd, getroot(&h), 0, 1);
 }
 
 void
 showfs(char *m)
 {
-	if(m != nil)
-		print("=== %s\n", m);
-	rshowblk(fs->root, 0);
+	if(debug)
+		fshowfs(2, m);
 }
-
 
 void
 showpath(Path *p, int np)
@@ -142,5 +164,21 @@ showpath(Path *p, int np)
 		print("==> b=%p, n=%p, idx=%d\n", p[i].b, p[i].n, p[i].idx);
 		print("\tclear=(%d, %d):%d\n", p[i].lo, p[i].hi, p[i].sz);
 		print("\tl=%p, r=%p, n=%p, split=%d\n", p[i].l, p[i].r, p[i].n, p[i].split);
+	}
+}
+
+void
+showfree(char *m)
+{
+	Arange *r;
+	int i;
+
+	if(!debug)
+		return;
+	print("=== %s\n", m);
+	for(i = 0; i < fs->narena; i++){
+		print("allocs[%d]:\n", i);
+		for(r = (Arange*)avlmin(fs->arenas[i].free); r != nil; r = (Arange*)avlnext(r))
+			print("\t%llx+%llx\n", r->off, r->len);
 	}
 }

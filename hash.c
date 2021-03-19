@@ -30,6 +30,10 @@
 #include <u.h>
 #include <libc.h>
 #include <fcall.h>
+#include <avl.h>
+
+#include "dat.h"
+#include "fns.h"
 
 #define _le64toh(x) \
 	GBIT64((char*)&x)
@@ -96,4 +100,19 @@ siphash(void *src, usize len)
 {
 	char key[16] = "gefsgefsgefsgefs";
 	return siphash24(src, len, key);
+}
+
+uvlong
+blkhash(Blk *b)
+{
+	return siphash(b->buf, Blksz);
+}
+
+u32int
+ihash(vlong x)
+{
+    x = (x ^ (x >> 30)) * 0xbf58476d1ce4e5b9ULL;
+    x = (x ^ (x >> 27)) * 0x94d049bb133111ebULL;
+    x = x ^ (x >> 31);
+    return x;
 }

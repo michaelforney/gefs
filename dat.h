@@ -1,35 +1,80 @@
 typedef struct Blk	Blk;
 typedef struct Gefs	Gefs;
+typedef struct Fmsg	Fmsg;
+typedef struct Fid	Fid;
 typedef struct Msg	Msg;
 typedef struct Key	Key;
 typedef struct Val	Val;
 typedef struct Kvp	Kvp;
+typedef struct Bptr	Bptr;
 typedef struct Path	Path;
+typedef struct Scan	Scan;
+typedef struct Dent	Dent;
+typedef struct Scanp	Scanp;
+typedef struct Arena	Arena;
+typedef struct Arange	Arange;
+typedef struct Bucket	Bucket;
+typedef struct Chan	Chan;
 
 enum {
-	// buffer for the whole block
-	Blksz	= 256,
-	// will store what type of block
-	Hdrsz	= 16,
-	Blkspc	= Blksz - Hdrsz,
-	// space for message buffer
-	Bufspc  = Blkspc / 2,
-	// space for pivot keys and offsets
-	Pivspc	= Blkspc - Bufspc,
-	Leafspc = Blkspc,
-	Keymax	= 16,
-	Inlmax	= 64,
-	Ptrsz	= 18,
+	KiB	= 1024ULL,
+	MiB	= 1024ULL*KiB,
+	GiB	= 1024ULL*MiB,
+	TiB	= 1024ULL*GiB,
+
+	Lgblk	= 9,
+	Blksz	= (1ULL<<Lgblk),
+
+	Nrefbuf	= 1024,			/* number of ref incs before syncing */
+	Nfidtab	= 1024,			/* number of fit hash entries */
+	Ndtab	= 1024,			/* number of dir tab entries */
+	Max9p	= 16*KiB,		/* biggest message size we're willing to negotiate */
+	Nsec	= 1000*1000*1000,	/* nanoseconds to the second */
+	Maxname	= 256,			/* maximum size of a name element */
+	Maxent	= 9+Maxname+1,		/* maximum size of ent key, with terminator */
+
+	/*
+	 * Kpmax must be no more than 1/4 of pivspc, or
+	 * there is no way to get a valid split of a
+	 * maximally filled tree.
+	 */
+	Keymax	= 32,			/* key data limit */
+	Inlmax	= 128,			/* inline data limit */
+	Ptrsz	= 18,			/* off, hash, fill */
 	Kvmax	= Keymax + Inlmax,	/* Key and value */
 	Kpmax	= Keymax + Ptrsz,	/* Key and pointer */
+
+	Hdrsz	= 10,
+	Blkspc	= Blksz - Hdrsz,
+	Bufspc  = Blkspc / 2,
+	Pivspc	= Blkspc - Bufspc,
+	Leafspc = Blkspc,
 	Msgmax  = 1 + (Kvmax > Kpmax ? Kvmax : Kpmax)
 };
 
 enum {
-	Bdirty = 1 << 0,
+	/*
+	 * dent: pqid[8] qid[8] -- a directory entry key.
+	 * ptr:  off[8] hash[8] -- a key for an Dir block.
+	 * dir:  fixed statbuf header, user ids
+	 */
+	Kref,	/* off[8] => ptr[16]:		pointer to refcount page */
+	Kdat,	/* qid[8] off[8] => ptr[16]:	pointer to data page */
+	Kent,	/* pqid[8] name[n] => dir[n]:	serialized Dir */
+	Ksnap,	/* name[n] => dent[16] ptr[16]:	snapshot root */
+	Ksuper,	/* qid[8] => pqid[8]:		parent dir */
+};
+
+enum {
+	Bdirty	= 1 << 0,
+	Bqueued	= 1 << 1,
+	Bfinal	= 1 << 2,
+	Bcache	= 1 << 3,
 };
 
 #define Efs	"i will not buy this fs, it is scratched"
+#define Efid	"bad fid"
+#define Edscan	"invalid dir scan offset"
 #define Eexist	"does not exist"
 #define Ebotch	"protocol botch"
 #define Emode	"unknown mode"
@@ -37,20 +82,93 @@ enum {
 #define Eauth	"authentication failed"
 #define Elength	"name too long"
 #define Eperm	"permission denied"
+#define Einuse	"resource in use"
+#define Ebadf	"invalid file"
+#define Emem	"out of memory"
+#define Ename	"invalid file name"
+#define Enomem	"out of memory"
 
 /*
- * The type of block. Pivot nodes are internal to the tree,
- * while leaves inhabit the edges. Pivots are split in half,
- * containing a buffer for the data, and keys to direct the
- * searches. Their buffers contain messages en-route to the
- * leaves.
+ * All metadata blocks share a common header:
+ * 
+ *	type[2]
  *
- * Leaves contain the key, and some chunk of data as the
- * value.
+ * The None type is reserved for file data blocks
+ * and refcount blocks.
+ *
+ * The superblock has this layout:
+ *	version[8]	always "gefs0001"
+ *	flags[4]	status flags:
+ *				dirty=1<<0,
+ *	blksz[4]	block size in bytes
+ *	bufsz[4]	portion of leaf nodes
+ *			allocated to buffers,
+ *			in bytes
+ *	hdrsz[4]	size of tree node header,
+ *			in bytes.
+ *	height[4]	tree height of root node
+ *	rootb[8]	address of root in last
+ *			snapshot.
+ *	rooth[8]	hash of root node
+ *	narena[4]	number of arenas in tree
+ *	arenasz[8]	maximum size of arenas;
+ *			they may be smaller.
+ *	gen[8]		The flush generation
+ *
+ * The arena zone blocks have this layout, and
+ * are overwritten in place:
+ *
+ *	log[8]		The head of the alloc log
+ *	logh[8]		The hash of the alloc log
+ *
+ * The log blocks have this layout, and are one of
+ * two types of blocks that get overwritten in place:
+ *
+ *	hash[8]		The hash of the rest of the block
+ *	link[8]		The next block, or -1 if nil.
+ *	entsz[8]	number of bytes of log entries.
+ *
+ *	The remainder of the block is filled with log
+ *	entries. Each log entry has at least 8 bytes
+ *	of entry. Some are longer. The opcode is or'ed
+ *	into the low order bits of the first vlong.
+ *	These ops take the following form:
+ *
+ *	Alloc, Free:
+ *		off[8] len[8]
+ *	Alloc1, Free1:
+ *		off[8]
+ *	Ref:
+ *		off[8]
+ *	Flush:	
+ *		gen[8]
+ *
+ * Pivots have the following layout:
+ *
+ *	nval[2]
+ *	valsz[2]
+ *	nbuf[2]
+ *	bufsz[2]
+ *
+ * Leaves have the following layout:
+ *
+ *	nval[2]
+ *	valsz[2]
+ *	_pad[4]
+ *
+ * Within these nodes, pointers have the following
+ * layout:
+ *
+ *	off[8] hash[8] fill[2]
  */
 enum {
-	Pivot,
-	Leaf,
+	Tnone,
+	Traw,
+	Tsuper,
+	Tarena,
+	Tlog,
+	Tpivot,
+	Tleaf,
 };
 
 enum {
@@ -59,10 +177,50 @@ enum {
 };
 
 enum {
-	Ocreate,
+	GBraw	= 1<<0,
+	GBwrite	= 1<<1,
+};
+
+enum {
+	Oinsert,
 	Odelete,
-	Owrite,
 	Owstat,
+	/* wstat flags */
+	Owsize	= 1<<4,
+	Owname	= 1<<5,
+	Owmode	= 1<<6,
+	Owmtime	= 1<<7,
+};
+
+/*
+ * Operations for the allocation log.
+ */
+enum {
+	LgFree,		/* free a range: 16 byte */
+	LgAlloc,	/* alloc a range: 16 byte */
+	LgAlloc1,	/* alloc a block */
+	LgRef1,		/* ref a block */
+	LgUnref1,	/* free a block */
+	LgFlush,	/* flush log, bump gen */
+};
+
+struct Arange {
+	Avl;
+	vlong	off;
+	vlong	len;
+};
+
+struct Bucket {
+	Lock;
+	Blk	*b;
+};
+
+struct Fmsg {
+	Fcall;
+	int	fd;	/* the fd to repsond on */
+	QLock	*wrlk;	/* write lock on fd */
+	int	sz;	/* the size of the message buf */
+	uchar	buf[];
 };
 
 /*
@@ -75,9 +233,57 @@ struct Gefs {
 	int	pivsz;
 	int	hdrsz;
 
+	QLock	snaplk;
+	Blk*	super;
+
+	Chan	*wrchan;
+	Chan	*rdchan;
+
+	int	fd;
+	long	broken;
+
+	Lock	rootlk;
+	/* protected by rootlk */
+	vlong	rootb;
+	vlong	rooth;
 	int	height;
-	Blk	*root;
-	
+
+	Lock	genlk;
+	vlong	gen;
+	Lock	qidlk;
+	vlong	nextqid;
+
+	Arena	*arenas;
+	int	narena;
+	long	nextarena;
+	vlong	arenasz;
+
+	Lock	fidtablk;
+	Fid	*fidtab[Nfidtab];
+	Lock	dtablk;
+	Dent	*dtab[Ndtab];
+
+	Lock	lrulk;
+	/* protected by lrulk */
+	Bucket	*cache;
+	Blk	*chead;
+	Blk	*ctail;
+	int	ccount;
+	int	cmax;
+};
+
+struct Arena {
+	Lock;
+	Avltree *free;
+	Avltree *partial;
+
+	vlong	log;	/* log head */
+	vlong	logh;	/* log head hash */
+	Blk	*logtl;	/* tail block open for writing */
+	Blk	*b;	/* arena block */
+
+	Blk	**q;	/* write queue */
+	vlong	nq;
 };
 
 struct Key{
@@ -112,6 +318,39 @@ struct Msg {
 	Kvp;
 };
 
+struct Dent {
+	RWLock;
+	Key;
+	Dent	*next;
+	long	ref;
+
+	Qid	qid;
+	vlong	length;
+	vlong	rootb;
+	char	buf[Maxent];
+};
+
+struct Fid {
+	Lock;
+	Fid	*next;
+	/*
+	 * if opened with OEXEC, we want to use a snapshot,
+	 * instead of the most recent root, to prevent
+	 * paging in the wrong executable.
+	 */
+	vlong	rootb;
+	vlong	rooth;
+	int	height;
+
+	u32int	fid;
+	vlong	qpath;
+	int	mode;
+	int	iounit;
+
+	Scan	*scan;	/* in progres scan */
+	Dent	*dent;	/* (pqid, name) ref, modified on rename */
+};
+
 struct Path {
 	/* Flowing down for flush */
 	Blk	*b;	/* insertion */
@@ -130,21 +369,65 @@ struct Path {
 	 * and midx points at the left of
 	 * the two nodes.
 	 */
-	Blk	*ml;	/* merged/rotated left */
-	Blk	*mr;	/* merged/rotated right */
+	Blk	*nl;	/* merged/rotated left */
+	Blk	*nr;	/* merged/rotated right */
 	int	midx;	/* merged index */
 	char	split;	/* did we split? */
 	char	merge;	/* did we merge? */
 };
 
+struct Scanp {
+	int	bi;
+	int	vi;
+	Blk	*b;
+};
+
+struct Scan {
+	vlong	offset;	/* last read offset */
+	vlong	rootb;
+	vlong	rooth;
+	int	height;
+
+	int	done;
+	Kvp	kv;
+	Key	pfx;
+	char	kvbuf[Kvmax];
+	char	pfxbuf[Keymax];
+	Scanp	*path;
+};
+
 struct Blk {
-	char	type;
-	char	flag;
-	short	nent;
-	short	valsz;
-	short   nmsg;
-	short   bufsz;
+	RWLock;
+
+	/* cache entry */
+	Blk	*cnext;
+	Blk	*cprev;
+	Blk	*hnext;
+
+	short	flag;
+
+	/* serialized to disk in header */
+	short	type;	/* @0, for all */
+	short	nval;	/* @2, for Leaf, Pivot: data[0:2] */
+	short	valsz;	/* @4, for Leaf, Pivot: data[2:4] */
+	short   nbuf;	/* @6, for Pivot */
+	short   bufsz;	/* @8, for Pivot */
+
+	vlong	logsz;	/* for allocation log */
+	vlong	lognxt;	/* for allocation log */
+
 	vlong	off;	/* -1 for unallocated */
-	int	refs;	/* TODO: move out */
-	char	data[Blksz];
+	long	ref;	/* TODO: move out */
+	char	*data;
+	char	buf[Blksz];
+};
+
+struct Chan {
+	int	size;	/* size of queue */
+	long	count;	/* how many in queue (semaphore) */
+	long	avail;	/* how many available to send (semaphore) */
+	Lock	rl, wl;	/* circular pointers */
+	void	**rp;
+	void	**wp;
+	void*	args[];	/* list of saved pointers, [->size] */
 };

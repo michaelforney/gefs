@@ -1,21 +1,42 @@
 #include <u.h>
 #include <libc.h>
 #include <fcall.h>
+#include <avl.h>
 
 #include "dat.h"
 #include "fns.h"
 
-int lookup;
 void
-dprint(char *fmt, ...)
+cpkey(Key *dst, Key *src, char *buf, int nbuf)
 {
-	va_list ap;
+	assert(src->nk <= nbuf);
+	dst->k = buf;
+	dst->nk = src->nk;
+	memcpy(dst->k, src->k, src->nk);
+}
 
-	if(!debug)
-		return;
-	va_start(ap, fmt);
-	vfprint(2, fmt, ap);
-	va_end(ap);
+void
+cpkvp(Kvp *dst, Kvp *src, char *buf, int nbuf)
+{
+	assert(src->nk+src->nv <= nbuf);
+	cpkey(dst, src, buf, nbuf);
+	dst->type = src->type;
+	if(src->type == Vinl){
+		dst->v = buf+src->nk;
+		dst->nv = src->nv;
+	}else{
+		dst->bp = src->bp;
+		dst->bh = src->bh;
+		dst->fill = src->fill;
+	}
+	memcpy(dst->v, src->v, src->nv);
+}
+
+void
+cpmsg(Msg *dst, Msg *src, char *buf, int nbuf)
+{
+	dst->op = src->op;
+	cpkvp(dst, src, buf, nbuf);
 }
 
 int
@@ -54,9 +75,9 @@ getval(Blk *b, int i, Kvp *kv)
 {
 	int o;
 
-	assert(i >= 0 && i < b->nent);
+	assert(i >= 0 && i < b->nval);
 	o = GBIT16(b->data + 2*i);
-	if(b->type == Pivot){
+	if(b->type == Tpivot){
 		kv->type = Vref;
 		kv->nk = GBIT16(b->data + o);
 		kv->k = b->data + o + 2;
@@ -78,16 +99,16 @@ setval(Blk *b, int i, Kvp *kv, int replace)
 	int o, nk, nv, ksz, vsz, spc;
 	char *p;
 
-	assert(i >= 0 && i <= b->nent);
-	spc = (b->type == Leaf) ? Leafspc : Pivspc;
+	assert(i >= 0 && i <= b->nval);
+	spc = (b->type == Tleaf) ? Leafspc : Pivspc;
 	p = b->data + 2*i;
 	nk = 2 + kv->nk;
 	nv = (kv->type == Vref) ? Ptrsz : 2 + kv->nv;
 	if (i < 0)
 		i = 0;
-	if(!replace || b->nent == i){
-		memmove(p + 2, p, 2*(b->nent - i));
-		b->nent++;
+	if(!replace || b->nval == i){
+		memmove(p + 2, p, 2*(b->nval - i));
+		b->nval++;
 		b->valsz += nk + nv;
 		o = spc - b->valsz;
 	}else{
@@ -99,7 +120,7 @@ setval(Blk *b, int i, Kvp *kv, int replace)
 		 */
 		o = GBIT16(b->data + 2*i);
 		ksz = 2 + GBIT16(b->data + o);
-		if(b->type == Leaf)
+		if(b->type == Tleaf)
 			vsz = 2 + GBIT16(b->data + o + ksz);
 		else
 			vsz = 16;
@@ -109,13 +130,16 @@ setval(Blk *b, int i, Kvp *kv, int replace)
 		}
 	}
 
-	if(2*b->nent + b->valsz > spc)
-		showblk(b, "setval overflow");
-	assert(2*b->nent + b->valsz <= spc);
-	assert(2*b->nent < o);
+	if(2*b->nval + b->valsz > spc){
+		dprint("2*%d + %d > %d [ksz: %d, vsz: %d]\n",
+			2*b->nval, b->valsz, spc, kv->nk, kv->nv);
+		showblk(b, "setval overflow", 1);
+		abort();
+	}
+	assert(2*b->nval + b->valsz <= spc);
+	assert(2*b->nval <= o);
 	p = b->data + o;
-	if(b->type == Pivot){
-		assert(kv->type == Vref);
+	if(b->type == Tpivot){
 		PBIT16(b->data + 2*i, o);
 		PBIT16(p +  0, kv->nk);
 		memcpy(p +  2, kv->k, kv->nk);
@@ -123,7 +147,6 @@ setval(Blk *b, int i, Kvp *kv, int replace)
 		PBIT64(p + kv->nk + 10, kv->bh);
 		PBIT16(p + kv->nk + 18, kv->fill);
 	} else {
-		assert(kv->type == Vinl);
 		PBIT16(b->data + 2*i, o);
 		PBIT16(p +  0, kv->nk);
 		memcpy(p +  2, kv->k, kv->nk);
@@ -137,10 +160,10 @@ delval(Blk *b, int i)
 {
 	char *p;
 
-	assert(i >= 0 && i <= b->nent);
-	b->nent--;
+	assert(i >= 0 && i <= b->nval);
+	b->nval--;
 	p = b->data + 2*i;
-	memmove(p, p + 2, 2*(b->nent - i));
+	memmove(p, p + 2, 2*(b->nval - i));
 	return 0;
 }
 
@@ -150,15 +173,15 @@ setmsg(Blk *b, int i, Msg *m)
 	char *p;
 	int o;
 
-	assert(b->type == Pivot);
-	assert(i >= 0 && i <= b->nmsg);
-	b->nmsg++;
+	assert(b->type == Tpivot);
+	assert(i >= 0 && i <= b->nbuf);
+	b->nbuf++;
 	b->bufsz += msgsz(m);
-	assert(2*b->nent + b->bufsz <= Bufspc);
+	assert(2*b->nbuf + b->bufsz <= Bufspc);
 
 	p = b->data + Pivspc;
 	o = Pivspc - b->bufsz;
-	memmove(p + 2*(i+1), p+2*i, 2*(b->nmsg - i));
+	memmove(p + 2*(i+1), p+2*i, 2*(b->nbuf - i));
 	PBIT16(p + 2*i, o);
 
 	p = b->data + Bufspc + o;
@@ -175,8 +198,8 @@ getmsg(Blk *b, int i, Msg *m)
 	char *p;
 	int o;
 
-	assert(b->type == Pivot);
-	assert(i >= 0 && i < b->nmsg);
+	assert(b->type == Tpivot);
+	assert(i >= 0 && i < b->nbuf);
 	o = GBIT16(b->data + Pivspc + 2*i);
 
 	p = b->data + Pivspc + o;
@@ -196,7 +219,7 @@ blkinsert(Blk *b, Kvp *kv)
 
 	r = -1;
 	lo = 0;
-	hi = b->nent;
+	hi = b->nval;
 	while(lo < hi){
 		mid = (hi + lo) / 2;
 		getval(b, mid, &cmp);
@@ -206,7 +229,7 @@ blkinsert(Blk *b, Kvp *kv)
 		else
 			lo = mid + 1;
 	}
-	if(lo < b->nent){
+	if(lo < b->nval){
 		getval(b, lo, &cmp);
 		r = keycmp(kv, &cmp);
 	}
@@ -220,12 +243,12 @@ bufinsert(Blk *b, Msg *m)
 	Msg cmp;
 
 	lo = 0;
-	hi = b->nmsg;
+	hi = b->nbuf;
 	while(lo < hi){
 		mid = (hi + lo) / 2;
 		getmsg(b, mid, &cmp);
 		r = keycmp(m, &cmp);
-		if(r <= 0)
+		if(r < 0)
 			hi = mid;
 		else
 			lo = mid + 1;
@@ -234,26 +257,30 @@ bufinsert(Blk *b, Msg *m)
 }
 
 static int
-bufsearch(Blk *b, Key *k, Msg *m, int *idx)
+bufsearch(Blk *b, Key *k, Msg *m, int *same)
 {
 	int lo, hi, mid, r;
 
+	r = -1;
 	lo = 0;
-	hi = b->nmsg - 1;
+	hi = b->nbuf - 1;
 	while(lo <= hi){
 		mid = (hi + lo) / 2;
 		getmsg(b, mid, m);
 		r = keycmp(k, m);
-		if(r == 0){
-			*idx = mid;
-			return 0;
-		}
 		if(r < 0)
 			hi = mid - 1;
 		else
 			lo = mid + 1;
 	}
-	return -1;
+	lo--;
+	if(lo >= 0){
+		getmsg(b, lo, m);
+		r = keycmp(k, m);
+	}
+	if(same != nil)
+		*same = (r == 0);
+	return lo;
 }
 
 int
@@ -263,7 +290,7 @@ blkdelete(Blk *b, Kvp *kv)
 	Kvp cmp;
 
 	lo = 0;
-	hi = b->nent - 1;
+	hi = b->nval - 1;
 	while(lo <= hi){
 		mid = (hi + lo) / 2;
 		getval(b, mid, &cmp);
@@ -279,14 +306,14 @@ blkdelete(Blk *b, Kvp *kv)
 }
 
 int
-blksearch(Blk *b, Key *k, Kvp *rp, int *idx, int *same)
+blksearch(Blk *b, Key *k, Kvp *rp, int *same)
 {
 	int lo, hi, mid, r;
 	Kvp cmp;
 
 	r = -1;
 	lo = 0;
-	hi = b->nent;
+	hi = b->nval;
 	while(lo < hi){
 		mid = (hi + lo) / 2;
 		getval(b, mid, &cmp);
@@ -303,24 +330,22 @@ blksearch(Blk *b, Key *k, Kvp *rp, int *idx, int *same)
 	}
 	if(same != nil)
 		*same = (r == 0);
-	if(idx != nil)
-		*idx = lo;
-	return 0;
+	return lo;
 }
 
 int
 filledbuf(Blk *b, int needed)
 {
-	assert(b->type == Pivot);
-	return 2*b->nmsg + b->bufsz > Bufspc - needed;
+	assert(b->type == Tpivot);
+	return 2*(b->nbuf+1) + b->bufsz + needed > Bufspc;
 }
 
 
 int
 filledleaf(Blk *b, int needed)
 {
-	assert(b->type == Leaf);
-	return 2*b->nent + b->valsz > Leafspc - needed;
+	assert(b->type == Tleaf);
+	return 2*(b->nval+1) + b->valsz + needed > Leafspc;
 }
 
 int
@@ -329,10 +354,10 @@ filledpiv(Blk *b, int reserve)
 	/* 
 	 * We need to guarantee there's room for one message
 	 * at all times, so that splits along the whole path
-	 * have somewhere to go.
+	 * have somewhere to go as they propagate up.
 	 */
-	assert(b->type == Pivot);
-	return 2*b->nent + b->valsz > Pivspc - reserve*Kpmax;
+	assert(b->type == Tpivot);
+	return 2*(b->nval+1) + b->valsz + reserve*Kpmax > Pivspc;
 }
 
 int
@@ -344,7 +369,7 @@ copyup(Blk *n, int i, Path *pp, int *nbytes)
 	if(pp->split){
 		getval(pp->l, 0, &kv);
 		kv.type = Vref;
-		kv.bp = (uintptr)pp->l;
+		kv.bp = pp->l->off;
 		kv.bh = blkhash(pp->l);
 		kv.fill = blkfill(pp->l);
 		setval(n, i++, &kv, 0);
@@ -353,7 +378,7 @@ copyup(Blk *n, int i, Path *pp, int *nbytes)
 
 		getval(pp->r, 0, &kv);
 		kv.type = Vref;
-		kv.bp = (uintptr)pp->r;
+		kv.bp = pp->r->off;
 		kv.bh = blkhash(pp->r);
 		kv.fill = blkfill(pp->r);
 		setval(n, i++, &kv, 0);
@@ -362,7 +387,7 @@ copyup(Blk *n, int i, Path *pp, int *nbytes)
 	}else{
 		getval(pp->n, 0, &kv);
 		kv.type = Vref;
-		kv.bp = (uintptr)pp->n;
+		kv.bp = pp->n->off;
 		kv.bh = blkhash(pp->n);
 		kv.fill = blkfill(pp->n);
 		setval(n, i++, &kv, 1);
@@ -395,15 +420,15 @@ update(Path *p, Path *pp)
 	midx = (p != nil && p->merge) ? p->midx : -1;
 	if((n = newblk(b->type)) == nil)
 		return -1;
-	for(i = 0; i < b->nent; i++){
+	for(i = 0; i < b->nval; i++){
 		if(i == pidx){
 			j = copyup(n, j, pp, nil);
 			continue;
 		}else if(i == midx){
-			getval(p->ml, 0, &m);
+			getval(p->nl, 0, &m);
 			setval(n, j++, &m, 0);
-			if(p->mr){
-				getval(p->mr, 0, &m);
+			if(p->nr){
+				getval(p->nr, 0, &m);
 				setval(n, j++, &m, 0);
 			}
 			continue;
@@ -411,18 +436,18 @@ update(Path *p, Path *pp)
 		getval(b, i, &m);
 		setval(n, j++, &m, 0);
 	}
-	if(b->type == Pivot){
+	if(b->type == Tpivot){
 		i = 0;
 		j = 0;
-		while(i < b->nmsg){
+		while(i < b->nbuf){
 			if(i == lo)
 				i = hi;
-			if(i == b->nmsg)
+			if(i == b->nbuf)
 				break;
 			getmsg(b, i++, &m);
 			setmsg(n, j++, &m);
 		}
-		b->nmsg = j;
+		b->nbuf = j;
 	}
 	p->n = n;
 	return 0;
@@ -462,8 +487,20 @@ split(Blk *b, Path *p, Path *pp, Kvp *mid)
 
 	j = 0;
 	copied = 0;
-	halfsz = (2*b->nent + b->valsz)/2;
-	for(i = 0; copied < halfsz; i++){
+	halfsz = (2*b->nval + b->valsz)/2;
+	assert(b->nval >= 4);
+	for(i = 0; i < b->nval; i++){
+		/*
+		 * We're trying to balance size,
+		 * but we need at least 2 nodes
+		 * in each half of the split if
+		 * we want a valid tree.
+		 */
+		if(i == b->nval-2)
+			break;
+		if(i >= 2 && copied >= halfsz)
+			break;
+
 		if(i == pidx){
 			j = copyup(l, j, pp, &copied);
 			continue;
@@ -474,7 +511,7 @@ split(Blk *b, Path *p, Path *pp, Kvp *mid)
 	}
 	j = 0;
 	getval(b, i, mid);
-	for(; i < b->nent; i++){
+	for(; i < b->nval; i++){
 		if(i == pidx){
 			j = copyup(r, j, pp, nil);
 			continue;
@@ -482,22 +519,22 @@ split(Blk *b, Path *p, Path *pp, Kvp *mid)
 		getval(b, i, &t);
 		setval(r, j++, &t, 0);
 	}
-	if(b->type == Pivot){
+	if(b->type == Tpivot){
 		i = 0;
-		for(j = 0; i < b->nmsg; i++, j++){
+		for(j = 0; i < b->nbuf; i++, j++){
 			if(i == lo)
 				i = hi;
-			if(i == b->nmsg)
+			if(i == b->nbuf)
 				break;
 			getmsg(b, i, &m);
 			if(keycmp(&m, mid) >= 0)
 				break;
 			setmsg(l, j, &m);
 		}
-		for(j = 0; i < b->nmsg; i++, j++){
+		for(j = 0; i < b->nbuf; i++, j++){
 			if(i == lo)
 				i = hi;
-			if(i == b->nmsg)
+			if(i == b->nbuf)
 				break;
 			getmsg(b, i, &m);
 			setmsg(r, j, &m);
@@ -512,23 +549,55 @@ split(Blk *b, Path *p, Path *pp, Kvp *mid)
 int
 apply(Blk *b, Msg *m)
 {
-	assert(b->type == Leaf);
+	int idx, same;
+	vlong v;
+	char *p;
+	Kvp kv;
+
+	assert(b->type == Tleaf);
 	assert(b->flag & Bdirty);
-	switch(m->op){
-	case Ocreate:
+	switch(m->op&0xf){
+	case Oinsert:
 		blkinsert(b, m);
 		break;
 	case Odelete:
 		blkdelete(b, m);
 		break;
-	case Owrite:
-		werrstr("unimplemented");
-		goto error;
+	case Owstat:
+		p = m->v;
+		idx = blksearch(b, m, &kv, &same);
+		if(idx == -1 || !same)
+			abort();
+		/* bump version */
+		v = GBIT32(kv.v+8);
+		PBIT32(kv.v+8, v+1);
+		if(m->op & Owmtime){
+			v = GBIT64(p);
+			p += 8;
+			PBIT32(kv.v+25, v);
+		}
+		if(m->op & Owsize){
+			fprint(2, "wstat: incrementing size");
+			v = GBIT64(p);
+			p += 8;
+			PBIT64(kv.v+33, v);
+		}
+		if(m->op & Owmode){
+			v = GBIT32(p);
+			p += 4;
+			PBIT32(kv.v+33, v);
+		}
+		if(m->op & Owname){
+			fprint(2, "renames not yet supported");
+			abort();
+		}
+		if(p != m->v + m->nv)
+			fprint(2, "malformed wstat message");
+		break;
+	default:
+		abort();
 	}
 	return 0;
-error:
-	werrstr("invalid upsert");
-	return -1;
 }
 
 int
@@ -542,28 +611,57 @@ merge(Path *p, int idx, Blk *a, Blk *b)
 	if((d = newblk(a->type)) == nil)
 		return -1;
 	o = 0;
-	for(i = 0; i < a->nent; i++){
+	for(i = 0; i < a->nval; i++){
 		getval(a, i, &m);
 		setval(d, o++, &m, 0);
 	}
-	for(i = 0; i < b->nent; i++){
+	for(i = 0; i < b->nval; i++){
 		getval(b, i, &m);
 		setval(d, o++, &m, 0);
 	}
-	if(a->type == Pivot){
-		for(i = 0; i < a->nmsg; i++){
+	if(a->type == Tpivot){
+		o = 0;
+		for(i = 0; i < a->nbuf; i++){
 			getmsg(a, i, &m);
 			setmsg(d, o++, &m);
 		}
-		for(i = 0; i < b->nmsg; i++){
+		for(i = 0; i < b->nbuf; i++){
 			getmsg(b, i, &m);
 			setmsg(d, o++, &m);
 		}
 	}
 	p->merge = 1;
 	p->midx = idx;
-	p->ml = d;
-	p->mr = nil;
+	p->nl = d;
+	p->nr = nil;
+	return 0;
+}
+
+/*
+ * Scan a single block for the split offset;
+ * returns 1 if we'd spill out of the buffer,
+ * updates *idx and returns 0 otherwise.
+ */
+int
+spillscan(Blk *d, Blk *b, Msg *m, int *idx, int o)
+{
+	int i, used;
+	Msg n;
+
+	used = 2*d->nbuf + d->bufsz;
+	for(i = 0; i < b->nbuf; i++){
+		getmsg(b, i, &n);
+		print("check %P before %P: %d\n", &n.Kvp, &m->Kvp, keycmp(&n, m));
+		if(keycmp(m, &n) <= 0){
+			*idx = i + o;
+			return 0;
+		}
+		print("would copy %P before %P: %d\n", &n.Kvp, &m->Kvp, keycmp(&n, m));
+		used += 2 + msgsz(&n);
+		if(used > Bufspc)
+			return 1;
+	}
+	*idx = b->nbuf;
 	return 0;
 }
 
@@ -573,31 +671,22 @@ merge(Path *p, int idx, Blk *a, Blk *b)
  * of d.
  */
 int
-spillsbuf(Blk *d, Blk *b, Msg *m, int *idx)
+spillsbuf(Blk *d, Blk *l, Blk *r, Msg *m, int *idx)
 {
-	int i, used;
-	Msg n;
-
-	if(b->type == Leaf)
+	if(l->type == Tleaf)
 		return 0;
-	used = 2*d->nmsg + d->bufsz;
-	for(i = *idx; i < b->nmsg; i++){
-		getmsg(b, i, &n);
-		if(keycmp(&n, m) > 0)
-			break;
-		used += 2 + msgsz(&n);
-		if(used >= Bufspc)
-			return 1;
-	}
-	print("does not spill");
-	*idx = i;
+
+	if(*idx < l->nbuf && spillscan(d, l, m, idx, 0))
+		return 1;
+	if(*idx >= l->nbuf && spillscan(d, r, m, idx, l->nbuf))
+		return 1;
 	return 0;
 }
 
 int
-rotate(Path *p, int idx, Blk *a, Blk *b, int halfbuf)
+rotate(Path *p, int midx, Blk *a, Blk *b, int halfpiv)
 {
-	int i, o, copied, split, ovfidx;
+	int i, o, cp, sp, idx;
 	Blk *d, *l, *r;
 	Msg m;
 
@@ -610,42 +699,43 @@ rotate(Path *p, int idx, Blk *a, Blk *b, int halfbuf)
 	}
 	o = 0;
 	d = l;
-	split = -1;
-	ovfidx = 0;
-	copied = 0;
-	for(i = 0; i < a->nent; i++){
+	cp = 0;
+	sp = -1;
+	idx = 0;
+	for(i = 0; i < a->nval; i++){
 		getval(a, i, &m);
-		if(d == l && (copied >= halfbuf || spillsbuf(d, a, &m, &ovfidx))){
-			split = i;
-			o = 0;
+		
+		if(d == l && (cp >= halfpiv || spillsbuf(d, a, b, &m, &idx))){
+			sp = idx;
 			d = r;
+			o = 0;
 		}
 		setval(d, o++, &m, 0);
-		copied += valsz(&m);
+		cp += valsz(&m);
 	}
-	for(i = 0; i < b->nent; i++){
-		if(d == l && (copied >= halfbuf || spillsbuf(d, b, &m, &ovfidx))){
-			split = i;
-			o = 0;
-			d = r;
-		}
+	for(i = 0; i < b->nval; i++){
 		getval(b, i, &m);
+		if(d == l && (cp >= halfpiv || spillsbuf(d, a, b, &m, &idx))){
+			sp = idx;
+			d = r;
+			o = 0;
+		}
 		setval(d, o++, &m, 0);
-		copied += valsz(&m);
+		cp += valsz(&m);
 	}
-	if(a->type == Pivot){
+	if(a->type == Tpivot){
 		d = l;
 		o = 0;
-		for(i = 0; i < a->nmsg; i++){
-			if(i == split){
+		for(i = 0; i < a->nbuf; i++){
+			if(o == sp){
 				d = r;
 				o = 0;
 			}
 			getmsg(a, i, &m);
 			setmsg(d, o++, &m);
 		}
-		for(i = 0; i < b->nmsg; i++){
-			if(i == split){
+		for(i = 0; i < b->nbuf; i++){
+			if(o == sp){
 				d = r;
 				o = 0;
 			}
@@ -654,9 +744,9 @@ rotate(Path *p, int idx, Blk *a, Blk *b, int halfbuf)
 		}
 	}
 	p->merge = 1;
-	p->midx = idx;
-	p->ml = l;
-	p->mr = r;
+	p->midx = midx;
+	p->nl = l;
+	p->nr = r;
 	return 0;
 }
 
@@ -667,14 +757,14 @@ rotmerge(Path *p, int idx, Blk *a, Blk *b)
 
 	assert(a->type == b->type);
 
-	na = 2*a->nent + a->valsz;
-	nb = 2*b->nent + b->valsz;
-	if(a->type == Leaf){
+	na = 2*a->nval + a->valsz;
+	nb = 2*b->nval + b->valsz;
+	if(a->type == Tleaf){
 		ma = 0;
 		mb = 0;
 	}else{
-		ma = 2*a->nmsg + a->bufsz;
-		mb = 2*b->nmsg + b->bufsz;
+		ma = 2*a->nbuf + a->bufsz;
+		mb = 2*b->nbuf + b->bufsz;
 	}
 	imbalance = na - nb;
 	if(imbalance < 0)
@@ -682,7 +772,7 @@ rotmerge(Path *p, int idx, Blk *a, Blk *b)
 	/* works for leaf, because 0 always < Bufspc */
 	if(na + nb < Pivspc && ma + mb < Bufspc)
 		return merge(p, idx, a, b);
-	else if(imbalance < 4*Msgmax)
+	else if(imbalance > 4*Msgmax)
 		return rotate(p, idx, a, b, (na + nb)/2);
 	else
 		return 0;
@@ -709,7 +799,7 @@ trymerge(Path *p, Path *pp, int idx)
 	}
 	/* Try merging left */
 	getval(p->b, idx, &km);
-	if(idx > 0){
+	if(idx-1 >= 0){
 		getval(p->b, idx-1, &kl);
 		if(kl.fill + km.fill >= Blkspc)
 			goto next;
@@ -720,7 +810,7 @@ trymerge(Path *p, Path *pp, int idx)
 		goto done;
 	}
 next:
-	if(idx < p->b->nent){
+	if(idx+1 < p->b->nval){
 		getval(p->b, idx+1, &kr);
 		if(kr.fill + km.fill >= Blkspc)
 			goto done;
@@ -741,17 +831,15 @@ out:
 }
 
 static int
-flush(Path *path, int npath, Msg *ins, int *redo)
+flush(Path *path, int npath)
 {
-	static int nins;
 
 	Path *p, *pp;
 	Blk *b;
 	Kvp mid;
 	Msg m;
-	int i, ret;
+	int i;
 
-	ret = -1;
 	/*
 	 * The path must contain at minimum two elements:
 	 * we must have 1 node we're inserting into, and
@@ -759,10 +847,9 @@ flush(Path *path, int npath, Msg *ins, int *redo)
 	 * we put the new root into if the root gets split.
 	 */
 	assert(npath >= 2);
-	*redo = 0;
 	pp = nil;
 	p = &path[npath - 1];
-	if(p->b->type == Leaf){
+	if(p->b->type == Tleaf){
 		if(!filledleaf(p->b, p[-1].sz)){
 			if(update(p, pp) == -1)
 				return -1;
@@ -772,6 +859,7 @@ flush(Path *path, int npath, Msg *ins, int *redo)
 					break;
 				apply(p->n, &m);
 			}
+			finalize(p->n);
 		}else{
 			if(split(p->b, p, pp, &mid) == -1)
 				goto error;
@@ -785,6 +873,8 @@ flush(Path *path, int npath, Msg *ins, int *redo)
 				if(apply(b, &m) == -1)
 					goto error;
 			}
+			finalize(p->l);
+			finalize(p->r);
 		}
 		assert(p->n || (p->l && p->r));
 		p->midx = -1;
@@ -793,11 +883,17 @@ flush(Path *path, int npath, Msg *ins, int *redo)
 	}
 	for(; p > path; p--){
 		if(!filledpiv(p->b, 1)){
+#ifdef NOPE
 			if(trymerge(p, pp, p->idx) == -1)
 				goto error;
+#endif
 			/* If we merged the root node, break out. */
-			if(p[-1].b == nil && p[0].merge && p[0].mr == nil && p[0].b->nent == 2)
+			if(p[-1].b == nil && p[0].merge && p[0].nr == nil && p[0].b->nval == 2){
+				/* FIXME: shouldn't p[1].n already be right? */
+				p[1].n = p[0].nl;
+				p[0].n = nil;
 				break;
+			}
 			if(update(p, pp) == -1)
 				goto error;
 			for(i = p[-1].lo; i < p[-1].hi; i++){
@@ -806,7 +902,9 @@ flush(Path *path, int npath, Msg *ins, int *redo)
 					break;
 				bufinsert(p->n, &m);
 			}
+			finalize(p->n);
 		}else{
+			dprint("-- split\n");
 			if(split(p->b, p, pp, &mid) == -1)
 				goto error;
 			b = p->l;
@@ -818,24 +916,28 @@ flush(Path *path, int npath, Msg *ins, int *redo)
 					continue;
 				bufinsert(b, &m);
 			}
+			finalize(p->l);
+			Blk *x = getblk(p->l->off, -1);
+			assert(p->l == x);
+			finalize(p->r);
 		}
 		pp = p;
 	}
 	if(path[1].split){
-		if((path[0].n = newblk(Pivot)) == nil)
+		if((path[0].n = newblk(Tpivot)) == nil)
 			goto error;
 		copyup(path[0].n, 0, &path[1], nil);
-		bufinsert(path[0].n, ins);
-	}else{
-		if(path[1].b->type == Leaf && !filledleaf(path[1].b, msgsz(ins)))
-			apply(path[1].n, ins);
-		else if(!filledbuf(path[1].n, msgsz(ins)))
-			bufinsert(path[1].n, ins);
-		else
-			*redo = 1;
 	}
-	ret = 0;
+	return 0;
 error:
+	return -1;
+}
+
+void
+freepath(Path *path, int npath)
+{
+	Path *p;
+
 	for(p = path; p != path + npath; p++){
 		if(p->b != nil)
 			putblk(p->b);
@@ -846,7 +948,6 @@ error:
 		if(p->r != nil)
 			putblk(p->r);
 	}
-	return ret;
 }
 
 /*
@@ -869,13 +970,13 @@ victim(Blk *b, Path *p)
 	 * go to the first node. Stop *after* the last entry,
 	 * because entries >= the last entry all go into it.
 	 */
-	for(i = 1; i <= b->nent; i++){
-		if(i < b->nent)
+	for(i = 1; i <= b->nval; i++){
+		if(i < b->nval)
 			getval(b, i, &kv);
 		cursz = 0;
-		for(; j < b->nmsg; j++){
+		for(; j < b->nbuf; j++){
 			getmsg(b, j, &m);
-			if(i < b->nent && keycmp(&m, &kv) >= 0)
+			if(i < b->nval && keycmp(&m, &kv) >= 0)
 				break;
 			/* 2 bytes for offset, plus message size in buffer */
 			cursz += 2 + msgsz(&m);
@@ -892,36 +993,59 @@ victim(Blk *b, Path *p)
 }
 
 int
-fsupsert(Msg *m)
+btupsert(Msg *msg, int nmsg)
 {
-	Blk *b, *n, *s;
-	int npath, redo;
+	int i, npath, redo, dh, nm, height;
+	vlong rh;
 	Path *path;
+	Blk *b, *rb;
 	Kvp sep;
 
-	if(m->nk + 2 > Keymax){
-		werrstr("overlong key");
+	nm = 0;
+	for(i = 0; i < nmsg; i++){
+		if(msg[i].nk + 2 > Keymax){
+			werrstr("overlong key");
+			return -1;
+		}
+		nm += msgsz(&msg[i]);
+	}
+
+again:
+	if((b = getroot(&height)) == nil){
+		werrstr("get root: %r");
 		return -1;
 	}
+
+	/*
+	 * Fast path: the root of the tree has room,
+	 * and nobody else has observed the node, so
+	 * we can modify it with gleeful abandon.
+	 */
+	if(b->type == Tpivot && canwlock(b)) {
+		if((b->flag & Bdirty) && !filledbuf(b, nm)){
+			for(i = 0; i < nmsg; i++)
+				bufinsert(b, &msg[i]);
+			wunlock(b);
+			return 0;
+		}
+	}
+
 	/*
 	 * The tree can grow in height by 1 when we
 	 * split, so we allocate room for one extra
 	 * node in the path.
 	 */
-again:
-	n = nil;
-	s = nil;
 	redo = 0;
 	npath = 0;
-	path = emalloc((fs->height + 2)*sizeof(Path));
+	if((path = calloc((height + 2), sizeof(Path))) == nil)
+		return -1;
 	path[npath].b = nil;
 	path[npath].idx = -1;
 	path[npath].midx = -1;
 	npath++;
 
-	b = fs->root;
-	path[0].sz = msgsz(m);
-	while(b->type == Pivot){
+	path[0].sz = nm;
+	while(b->type == Tpivot){
 		if(!filledbuf(b, path[npath - 1].sz))
 			break;
 		victim(b, &path[npath]);
@@ -936,75 +1060,352 @@ again:
 	path[npath].lo = 0;
 	path[npath].hi = 0;
 	npath++;
-	if(flush(path, npath, m, &redo) == -1)
+
+	dh = -1;
+	rb = nil;
+//	showfs("flushing");
+	if(flush(path, npath) == -1)
 		goto error;
+
 	if(path[0].n != nil){
-		fs->height++;
-		fs->root = path[0].n;
+		dh = 1;
+		rb = path[0].n;
 	}else if(path[1].n != nil){
-		fs->root = path[1].n;
+		dh = 0;
+		rb = path[1].n;
 	}else if(npath >2 && path[2].n != nil){
-		fs->height--;
-		fs->root = path[2].n;
+		dh = -1;
+		rb = path[2].n;
 	}else
 		abort();
+
+	if(rb->type == Tleaf && !filledleaf(rb, nm))
+		for(i = 0; i < nmsg; i++)
+			apply(rb, &msg[i]);
+	else if(rb->type == Tpivot && !filledbuf(rb, nm))
+		for(i = 0; i < nmsg; i++)
+			bufinsert(rb, &msg[i]);
+	else
+		redo = 1;
+	finalize(rb);
+
+	assert(rb->off != 0);
+	rh = blkhash(rb);
+	lock(&fs->rootlk);
+	fs->height += dh;
+	fs->rootb = rb->off;
+	fs->rooth = rh;
+	unlock(&fs->rootlk);
+
+	freepath(path, npath);
 	free(path);
+	if(!checkfs()){
+		showfs("broken");
+		abort();
+	}
 	if(redo)
 		goto again;
+//	showfs("fs");
+	snapshot();
 	return 0;
 error:
-	if(n != nil) freeblk(n);
-	if(s != nil) freeblk(s);
+	freepath(path, npath);
 	free(path);
 	return -1;
+}
+
+Blk*
+getroot(int *h)
+{
+	vlong bp, bh;
+
+	lock(&fs->rootlk);
+	bp = fs->rootb;
+	bh = fs->rooth;
+	if(h != nil)
+		*h = fs->height;
+	unlock(&fs->rootlk);
+	return getblk(bp, bh);
 }
 
 static char*
 collect(Blk *b, Key *k, Kvp *r, int *done)
 {
-	int i, idx;
+	int i, idx, same;
+	char *err;
 	Msg m;
 
 	*done = 0;
-	if(bufsearch(b, k, &m, &idx) != 0)
+dprint("collecting %K\n", k);
+//showblk(b, "collecting from", 0);
+	idx = bufsearch(b, k, &m, &same);
+dprint("idx=%d, same=%d\n", idx, same);
+	if(!same)
 		return nil;
-	for(i = idx; i < b->nmsg; i++){
+	err = Eexist;
+	for(i = idx; i < b->nbuf; i++){
 		getmsg(b, i, &m);
+dprint("msg=%M\n", &m);
+dprint("cmp=%d\n", keycmp(&m, k));
 		if(keycmp(&m, k) != 0)
 			break;
 		switch(m.op){
-		case Ocreate:
+		case Oinsert:
 			*r = m.Kvp;
 			*done = 1;
-			return nil;
+			err = nil;
+			break;
 		case Odelete:
 			*done = 1;
-			return Eexist;
-		/* The others don't affect walks */
+			err = Eexist;
+			break;
+		default:
+			return Efs;
 		}
 	}
-	return nil;
+	return err;
 }
 
 char*
-fswalk1(Key *k, Kvp *r)
+btlookupat(Blk *b0, Key *k, Kvp *r, Blk **bp)
 {
 	int idx, same, done;
 	char *ret;
 	Blk *b;
 
-	b = fs->root;
-	while(b->type == Pivot){
+	*bp = nil;
+	b = pinblk(b0);
+	assert(k != r);
+	while(b->type == Tpivot){
 		ret = collect(b, k, r, &done);
 		if(done)
 			return ret;
-		if(blksearch(b, k, r, &idx, nil) == -1 || idx == -1)
+		idx = blksearch(b, k, r, nil);
+		if(idx == -1)
 			return Eexist;
+		putblk(b);
 		if((b = getblk(r->bp, r->bh)) == nil)
 			return Efs;
 	}
-	assert(b->type == Leaf);
-	if(blksearch(b, k, r, nil, &same) == -1 || !same)
+	assert(b->type == Tleaf);
+	blksearch(b, k, r, &same);
+	if(!same){
+		putblk(b);
 		return Eexist;
+	}
+	*bp = b;
 	return nil;
+}
+
+char*
+btlookup(Key *k, Kvp *r, Blk **bp)
+{
+	char *ret;
+	Blk *b;
+
+	*bp = nil;
+	if((b = getroot(nil)) == nil)
+		return Efs;
+	ret = btlookupat(b, k, r, bp);
+	putblk(b);
+
+	return ret;
+}
+
+char*
+btscan(Scan *s, Key *pfx, vlong rootb, vlong rooth, int height)
+{
+	int i, same;
+	Scanp *p;
+	Msg m;
+	Kvp v;
+	Blk *b;
+
+	s->done = 0;
+	s->offset = 0;
+	s->height = height;
+	cpkey(&s->pfx, pfx, s->pfxbuf, sizeof(s->pfxbuf));
+
+	s->kv.v = s->kvbuf+pfx->nk;
+	s->kv.nv = 0;
+	cpkey(&s->kv, pfx, s->kvbuf, sizeof(s->kvbuf));
+
+	if(rootb != -1){
+		s->rootb = rootb;
+		s->rooth = rooth;
+		s->height = height;
+	}else{
+		lock(&fs->rootlk);
+		s->rootb = fs->rootb;
+		s->rooth = fs->rooth;
+		s->height = fs->height;
+dprint("height %d\n", s->height);
+		unlock(&fs->rootlk);
+	}
+	if((s->path = calloc(s->height, sizeof(Scanp))) == nil){
+		free(s);
+		return nil;
+	}
+
+	p = s->path;
+	if((b = getblk(s->rootb, s->rooth)) == nil)
+		return "error reading block";
+	p[0].b = b;
+	for(i = 0; i < s->height; i++){
+		p[i].vi = blksearch(b, &s->kv, &v, &same);
+		if(p[i].vi == -1 || (!same && b->type == Tleaf))
+			getval(b, ++p[i].vi, &v);
+		if(b->type == Tpivot){
+			p[i].bi = bufsearch(b, &s->kv, &m, &same);
+			if(p[i].bi == -1 || !same)
+				p[i].bi++;
+			if((b = getblk(v.bp, v.bh)) == nil)
+				return "error readivg block";
+			p[i+1].b = b;
+		}else{
+			assert(i == s->height-1);
+		}
+	}
+dprint("inited\n");
+for(i = 0; i < s->height; i++){
+dprint("\t%p", p[i].b);
+dprint(" (%d %d)\n", p[i].vi, p[i].bi);
+}
+	return nil;
+}
+
+char *
+btnext(Scan *s, Kvp *r, int *done)
+{
+	Scanp *p;
+	int i, j, h, start;
+	Msg m, n, t;
+	Kvp kv;
+
+	p = s->path;
+	h = s->height;
+	*done = 0;
+	start = h;
+	for(i = h-1; i > 0; i--){
+dprint("advancing (i=%d)\n", i);
+for(j = 0; j < h; j++){
+dprint("\t%p", p[j].b);
+dprint(" (%d %d)\n", p[j].vi, p[j].bi);
+}
+		if(p[i].vi < p[i].b->nval || p[i].bi < p[i].b->nbuf)
+			break;
+		if(i == 0){
+			*done = 1;
+			return nil;
+		}
+		start = i;
+		p[i-1].vi++;
+		p[i].vi = 0;
+		p[i].bi = 0;
+	}
+	for(i = start; i < h; i++){
+		getval(p[i-1].b, p[i-1].vi, &kv);
+		if((p[i].b = getblk(kv.bp, kv.bh)) == nil)
+			return "error reading block";
+	}
+	getval(p[h-1].b, p[h-1].vi, &m);
+	for(i = h-2; i >= 0; i--){
+		if(p[i].bi == p[i].b->nbuf)
+			continue;
+		getmsg(p[i].b, p[i].bi, &n);
+		if(keycmp(&m, &n) >= 0)
+			m = n;
+	}
+	if(m.nk < s->pfx.nk || memcmp(m.k, s->pfx.k, s->pfx.nk) != 0){
+		*done = 1;
+		return nil;
+	}
+	cpkvp(r, &m, s->kvbuf, sizeof(s->kvbuf));
+	getval(p[h-1].b, p[h-1].vi, &t);
+	if(keycmp(&m, &t) == 0)
+		p[h-1].vi++;
+	for(i = h-2; i >= 0; i--){
+		for(j = p[i].bi; j < p[i].b->nbuf; j++){
+			getmsg(p[i].b, j, &t);
+			if(keycmp(&m, &t) != 0)
+				break;
+			p[i].bi++;
+		}
+	}
+	return nil;
+}
+
+void
+btdone(Scan *s)
+{
+	int i;
+
+	for(i = 0; i < s->height; i++)
+		if(s->path[i].b != nil)
+			putblk(s->path[i].b);
+	free(s->path);
+}
+
+int
+snapshot(void)
+{
+	Blk *s;
+	int r;
+
+	s = fs->super;
+	qlock(&fs->snaplk);
+	lock(&fs->rootlk);
+	fillsuper(s);
+	finalize(s);
+	unlock(&fs->rootlk);
+print("snap superblock @%llx\n", s->off);
+showfree("snap");
+	r = pwrite(fs->fd, s->buf, Blksz, s->off);
+	qunlock(&fs->snaplk);
+	return r;
+}
+
+int
+getrefpg(vlong off, Blk **p)
+{
+	char kbuf[9], *e;
+	vlong bp, bh;
+	Blk *b;
+	Kvp kv;
+
+	*p = nil;
+	kbuf[0] = Kref;
+	PBIT64(kbuf+1, off & ~(Blksz-1));
+	kv.k = kbuf;
+	kv.nk = sizeof(kbuf);
+	e = btlookup(&kv, &kv, &b);
+	if(e == Eexist)
+		return 0;
+	if(e != nil || kv.nv != 16)
+		return -1;
+	bp = GBIT64(kv.v+0);
+	bh = GBIT64(kv.v+8);
+	putblk(b);
+	if((*p = getblk(bp, bh)) == nil)
+		return -1;
+	return 0;
+}
+
+int
+setrefpg(vlong pg, vlong bp, vlong bh)
+{
+	char kbuf[9], vbuf[16];
+	Msg m;
+
+	kbuf[0] = Kref;
+	PBIT64(kbuf+1, pg & ~(Blksz-1));
+	PBIT64(vbuf+0, bp);
+	PBIT64(vbuf+8, bh);
+
+	m.op = Oinsert;
+	m.k = kbuf;
+	m.nk = sizeof(kbuf);
+	m.v = vbuf;
+	m.nv = sizeof(vbuf);
+	return btupsert(&m, 1);
 }

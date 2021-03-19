@@ -1,10 +1,18 @@
 #include <u.h>
 #include <libc.h>
 #include <bio.h>
+#include <avl.h>
+#include <fcall.h>
+#include <ctype.h>
+
 #include "dat.h"
 #include "fns.h"
 
 Gefs *fs;
+
+int	ream;
+int	debug;
+char	*srvname = "gefs";
 
 static int
 Bconv(Fmt *fmt)
@@ -14,22 +22,40 @@ Bconv(Fmt *fmt)
 	b = va_arg(fmt->args, Blk*);
 	if(b == nil)
 		return fmtprint(fmt, "Blk(nil)");
-	return fmtprint(fmt, "Blk(%c)", (b->type == Pivot) ? 'P' : 'L');
+	return fmtprint(fmt, "Blk(%c)", (b->type == Tpivot) ? 'P' : 'L');
+}
+
+void
+launch(void (*f)(void *), void *arg, char *text)
+{
+	int pid;
+
+
+	pid = rfork(RFPROC|RFMEM|RFNOWAIT);
+	if (pid < 0)
+		sysfatal("can't fork: %r");
+	if (pid == 0) {
+		procsetname("%s", text);
+		(*f)(arg);
+		exits("child returned");
+	}
 }
 
 static int
 Mconv(Fmt *fmt)
 {
 	char *opname[] = {
-	[Ocreate]	"Ocreate",
+	[Oinsert]	"Oinsert",
 	[Odelete]	"Odelete",
-	[Owrite]	"Owrite",
 	[Owstat]	"Owstat",
 	};
 	Msg *m;
 
 	m = va_arg(fmt->args, Msg*);
-	return fmtprint(fmt, "Msg(%s, %.*s,%.*s)", opname[m->op], m->nk, m->k, m->nv, m->v);
+	return fmtprint(fmt, "Msg(%s, [%d]%.*X,[%d]%.*X)",
+		opname[m->op&0xf],
+		m->nk, m->nk, m->k,
+		m->nv, m->nv, m->v);
 }
 
 static int
@@ -39,10 +65,25 @@ Pconv(Fmt *fmt)
 
 	kv = va_arg(fmt->args, Kvp*);
 	if(kv->type == Vinl)
-		return fmtprint(fmt, "Kvp(%.*s,%.*s)", kv->nk, kv->k, kv->nv, kv->v);
+		return fmtprint(fmt, "Kvp([%d]%.*X,[%d]%.*X)",
+			kv->nk, kv->nk, kv->k,
+			kv->nv, kv->nv, kv->v);
 	else
-		return fmtprint(fmt, "Kvp(%.*s,(%llux,%llux,%ud))",
-			kv->nk, kv->k, kv->bp, kv->bh, kv->fill);
+		return fmtprint(fmt, "Kvp([%d]%.*X,(%llux,%llux,%ud))",
+			kv->nk, kv->nk, kv->k,
+			kv->bp, kv->bh, kv->fill);
+}
+
+static int
+Rconv(Fmt *fmt)
+{
+	Arange *r;
+
+	r = va_arg(fmt->args, Arange*);
+	if(r == nil)
+		return fmtprint(fmt, "<Arange:nil>");
+	else
+		return fmtprint(fmt, "Arange(%lld+%lld)", r->off, r->len);
 }
 
 static int
@@ -51,114 +92,132 @@ Kconv(Fmt *fmt)
 	Key *k;
 
 	k = va_arg(fmt->args, Key*);
-	return fmtprint(fmt, "Key(%.*s)", k->nk, k->k);
+	return fmtprint(fmt, "Key([%d]%.*X)", k->nk, k->nk, k->k);
 }
 
-static void
-init(void)
+static int
+Xconv(Fmt *fmt)
 {
+	char *s, *e;
+	int n, i;
+
+	n = 0;
+	i = fmt->prec;
+	s = va_arg(fmt->args, char*);
+	e = s + fmt->prec;
+	for(; s != e; s++){
+		if(i % 4 == 0 && i != 0)
+			n += fmtprint(fmt, ":");
+		i--;
+		if(isalnum(*s))
+			n += fmtrune(fmt, *s);
+		else
+			n += fmtprint(fmt, "%02x", *s&0xff);
+	}
+	return n;
+}
+
+void
+initfs(vlong cachesz)
+{
+	if((fs = mallocz(sizeof(Gefs), 1)) == nil)
+		sysfatal("malloc: %r");
+
+	fs->cmax = cachesz/Blksz;
+	if(fs->cmax >= (2*GiB)/sizeof(Bucket))
+		sysfatal("cache too big");
+	if((fs->cache = mallocz(fs->cmax*sizeof(Bucket), 1)) == nil)
+		sysfatal("malloc: %r");
+}
+
+int
+postfd(char *name, char *suff)
+{
+	char buf[80];
+	int fd[2];
+	int cfd;
+
+	if(pipe(fd) < 0)
+		sysfatal("can't make a pipe");
+	snprint(buf, sizeof buf, "/srv/%s%s", name, suff);
+	if((cfd = create(buf, OWRITE|ORCLOSE|OCEXEC, 0600)) == -1)
+		sysfatal("create %s: %r", buf);
+	if(fprint(cfd, "%d", fd[0]) == -1)
+		sysfatal("write %s: %r", buf);
+	close(fd[0]);
+	return fd[1];
+}
+
+void
+usage(void)
+{
+	fprint(2, "usage: %s [-r] dev\n", argv0);
+	exits("usage");
+}
+
+void
+main(int argc, char **argv)
+{
+	int srvfd, ctlfd;
+	vlong cachesz;
+
+	cachesz = 16*MiB;
+	ARGBEGIN{
+	case 'r':
+		ream = 1;
+		break;
+	case 'c':
+		cachesz = strtoll(EARGF(usage()), nil, 0)*MiB;
+		break;
+	case 'd':
+		debug++;
+		break;
+	case 's':
+		srvname = EARGF(usage());
+		break;
+	default:
+		usage();
+		break;
+	}ARGEND;
+	if(argc == 0)
+		usage();
+
+	/*
+	 * sanity checks -- I've tuned these to stupid
+	 * values in the past.
+	 */
+//	assert(4*Kpmax < Pivspc);
+//	assert(2*Msgmax < Bufspc);
+
+	initfs(cachesz);
 	initshow();
 	quotefmtinstall();
 	fmtinstall('B', Bconv);
 	fmtinstall('M', Mconv);
 	fmtinstall('P', Pconv);
 	fmtinstall('K', Kconv);
-	fs = emalloc(sizeof(Gefs));
-	fs->root = newblk(Leaf);
-	fs->height = 1;
-}
-
-int
-test(char *path)
-{
-	Biobuf *bfd;
-	char *e, *ln, *f[3];
-	int nf;
-	Msg m;
-	Kvp r;
-	Key k;
-
-	if((bfd = Bopen(path, OREAD)) == nil)
-		sysfatal("open %s: %r", path);
-	while((ln = Brdstr(bfd, '\n', 1)) != nil){
-		memset(f, 0, sizeof(f));
-		nf = tokenize(ln, f, nelem(f));
-		if(nf < 1 || strlen(f[0]) != 1)
-			sysfatal("malformed test file");
-		switch(*f[0]){
-		case '#':
-			break;
-		case 'I':
-			if(nf != 3)
-				sysfatal("malformed insert");
-			m.type = Vinl;
-			m.k = f[1];
-			m.v = f[2];
-			m.op = Ocreate;
-			m.nk = strlen(f[1]);
-			m.nv = strlen(f[2]);
-			print("insert (%s, %s)\n", m.k, m.v);
-			if(fsupsert(&m) == -1){
-				print("failed insert (%s, %s): %r\n", f[1], f[2]);
-				return -1;
-			}
-			break;
-		case 'D':
-			if(nf != 2)
-				sysfatal("malformed delete");
-			m.type = Vinl;
-			m.op = Odelete;
-			m.k = f[1];
-			m.v = nil;
-			m.nk = strlen(f[1]);
-			m.nv = 0;
-			print("delete %s\n", f[1]);
-			if(fsupsert(&m) == -1){
-				print("failed delete (%s): %r\n", f[1]);
-				return -1;
-			}
-			break;
-		case 'G':
-			k.k = f[1];
-			k.nk = strlen(f[1]);
-			e = fswalk1(&k, &r);
-			if(e != nil){
-				print("failed lookup on (%s): %s\n", f[1], e);
-				return -1;
-			}
-			break;
-		case 'S':
-			showfs("fs");
-			print("\n\n");
-			break;
-		case 'C':
-			checkfs();
-			break;
-		case 'V':
-			debug++;
-			break;
-		case 'X':
-			exits(f[1]);
-			break;
-		}
-//		if(!checkfs())
-//			abort();
-		free(ln);
+	fmtinstall('R', Rconv);
+	fmtinstall('X', Xconv);
+	fmtinstall('F', fcallfmt);
+	if(ream){
+		reamfs(argv[0]);
+		exits(nil);
+	}else{
+		fs->rdchan = mkchan(128);
+		fs->wrchan = mkchan(128);
+		srvfd = postfd(srvname, "");
+		ctlfd = postfd(srvname, ".ctl");
+		loadfs(argv[0]);
+		launch(runctl, (void*)ctlfd, "ctl");
+		launch(runwrite, nil, "writeio");
+		launch(runread, nil, "readio");
+//		launch(runfs, (void*)srvfd, "fs");
+		runfs((void*)srvfd);
+//		launch(syncproc, nil, "sync");
+//		launch(flushproc, &fs->flushev, "flush");
+//		for(i = 1; i < argc; i++)
+//			if(test(argv[i]) == -1)
+//				sysfatal("test %s: %r\n", argv[i]);
+		exits(nil);
 	}
-	return 0;
-}
-
-void
-main(int argc, char **argv)
-{
-	int i;
-
-	ARGBEGIN{
-	}ARGEND;
-
-	init();
-	for(i = 0; i < argc; i++)
-		if(test(argv[0]) == -1)
-			sysfatal("test %s: %r\n", argv[i]);
-	exits(nil);
 }

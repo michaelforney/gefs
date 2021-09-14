@@ -1136,17 +1136,12 @@ collect(Blk *b, Key *k, Kvp *r, int *done)
 	Msg m;
 
 	*done = 0;
-dprint("collecting %K\n", k);
-//showblk(b, "collecting from", 0);
 	idx = bufsearch(b, k, &m, &same);
-dprint("idx=%d, same=%d\n", idx, same);
 	if(!same)
 		return nil;
 	err = Eexist;
 	for(i = idx; i < b->nbuf; i++){
 		getmsg(b, i, &m);
-dprint("msg=%M\n", &m);
-dprint("cmp=%d\n", keycmp(&m, k));
 		if(keycmp(&m, k) != 0)
 			break;
 		switch(m.op){
@@ -1349,18 +1344,27 @@ btdone(Scan *s)
 int
 snapshot(void)
 {
+	Arena *a;
 	Blk *s;
-	int r;
+	int i, r;
 
+	r = 0;
 	s = fs->super;
+
 	qlock(&fs->snaplk);
 	lock(&fs->rootlk);
 	fillsuper(s);
 	finalize(s);
 	unlock(&fs->rootlk);
-print("snap superblock @%llx\n", s->off);
-showfree("snap");
-	r = pwrite(fs->fd, s->buf, Blksz, s->off);
+
+	for(i = 0; i < fs->narena; i++){
+		a = &fs->arenas[i];
+		finalize(a->logtl);
+		if(syncblk(a->logtl) == -1)
+			r = -1;
+	}
+	if(r != -1)
+		r = syncblk(s);
 	qunlock(&fs->snaplk);
 	return r;
 }

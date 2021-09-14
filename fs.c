@@ -256,7 +256,7 @@ respond(Fmsg *m, Fcall *r)
 	int w, n;
 
 	r->tag = m->tag;
-	dprint("→ %F\n", r);
+//	dprint("→ %F\n", r);
 	if((n = convS2M(r, buf, sizeof(buf))) == 0)
 		abort();
 	qlock(m->wrlk);
@@ -471,7 +471,7 @@ fswalk(Fmsg *m)
 		k.k = kbuf;
 		k.nk = p - kbuf;
 //showfs("walking");
-dprint("looking up %K\n", &k);
+//dprint("looking up %K\n", &k);
 		if((estr = fslookup(o, &k, &kv, &b, 0)) != nil)
 			break;
 		if(kv2dir(&kv, &d) == -1){
@@ -1015,7 +1015,7 @@ runfs(void *pfd)
 		}
 */
 		m->wrlk = wrlk;
-		dprint("← %F\n", &m->Fcall);
+//		dprint("← %F\n", &m->Fcall);
 		switch(m->type){
 		/* sync setup */
 		case Tversion:	fsversion(m, &msgmax);	break;

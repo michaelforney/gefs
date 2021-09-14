@@ -9,6 +9,22 @@
 char	spc[128];
 
 static int
+isfree(vlong bp)
+{
+	Arange *r, q;
+	Arena *a;
+
+	q.off = bp;
+	q.len = Blksz;
+
+	a = getarena(bp);
+	r = (Arange*)avllookup(a->free, &q, -1);
+	if(r == nil)
+		return 0;
+	return bp < (r->off + r->len);
+}
+
+static int
 badblk(Blk *b, int h, Kvp *lo, Kvp *hi)
 {
 	Kvp x, y;
@@ -41,6 +57,10 @@ badblk(Blk *b, int h, Kvp *lo, Kvp *hi)
 			fail++;
 		}
 		if(b->type == Tpivot){
+			if(isfree(x.bp)){
+				fprint(2, "freed block in use: %llx\n", x.bp);
+				fail++;
+			}
 			if((c = getblk(x.bp, x.bh)) == nil){
 				fprint(2, "corrupt block: %r\n");
 				fail++;
@@ -71,6 +91,31 @@ badblk(Blk *b, int h, Kvp *lo, Kvp *hi)
 	return fail;
 }
 
+static int
+badfree(void)
+{
+	Arange *r, *n;
+	int i, fail;
+
+	fail = 0;
+	for(i = 0; i < fs->narena; i++){
+		r = (Arange*)avlmin(fs->arenas[i].free);
+		for(n = (Arange*)avlnext(r); n != nil; n = (Arange*)avlnext(n)){
+			if(r->off >= n->off){
+				fprint(2, "misordered length %llx >= %llx\n", r->off, n->off);
+				fail++;
+			}
+			if(r->off+r->len >= n->off){
+				fprint(2, "overlaping range %llx+%llx >= %llx\n", r->off, r->len, n->off);
+				abort();
+				fail++;
+			}
+			r = n;
+		}
+	}
+	return fail;
+}
+
 /* TODO: this will grow into fsck. */
 int
 checkfs(void)
@@ -79,6 +124,8 @@ checkfs(void)
 	Blk *b;
 
 	ok = 1;
+	if(badfree())
+		ok = 0;
 	if((b = getroot(&height)) != nil){
 		if(badblk(b, height-1, nil, 0))
 			ok = 0;
@@ -177,7 +224,7 @@ showfree(char *m)
 		return;
 	print("=== %s\n", m);
 	for(i = 0; i < fs->narena; i++){
-		print("allocs[%d]:\n", i);
+		print("arena %d:\n", i);
 		for(r = (Arange*)avlmin(fs->arenas[i].free); r != nil; r = (Arange*)avlnext(r))
 			print("\t%llx+%llx\n", r->off, r->len);
 	}

@@ -38,16 +38,19 @@ enum {
 	 * there is no way to get a valid split of a
 	 * maximally filled tree.
 	 */
+	Loghdsz	= 8,			/* log hash */
 	Keymax	= 32,			/* key data limit */
 	Inlmax	= 128,			/* inline data limit */
 	Ptrsz	= 18,			/* off, hash, fill */
 	Kvmax	= Keymax + Inlmax,	/* Key and value */
 	Kpmax	= Keymax + Ptrsz,	/* Key and pointer */
+	
 
 	Hdrsz	= 10,
 	Blkspc	= Blksz - Hdrsz,
 	Bufspc  = Blkspc / 2,
 	Pivspc	= Blkspc - Bufspc,
+	Logspc	= Blkspc - Loghdsz,
 	Leafspc = Blkspc,
 	Msgmax  = 1 + (Kvmax > Kpmax ? Kvmax : Kpmax)
 };
@@ -124,9 +127,7 @@ enum {
  * The log blocks have this layout, and are one of
  * two types of blocks that get overwritten in place:
  *
- *	hash[8]		The hash of the rest of the block
- *	link[8]		The next block, or -1 if nil.
- *	entsz[8]	number of bytes of log entries.
+ *	hash[8]		The hash of the previous log block
  *
  *	The remainder of the block is filled with log
  *	entries. Each log entry has at least 8 bytes
@@ -154,7 +155,7 @@ enum {
  *
  *	nval[2]
  *	valsz[2]
- *	_pad[4]
+ *	_pad[4]sure, 
  *
  * Within these nodes, pointers have the following
  * layout:
@@ -196,12 +197,19 @@ enum {
  * Operations for the allocation log.
  */
 enum {
-	LgFree,		/* free a range: 16 byte */
-	LgAlloc,	/* alloc a range: 16 byte */
+	/* 1-wide entries */
 	LgAlloc1,	/* alloc a block */
-	LgRef1,		/* ref a block */
-	LgUnref1,	/* free a block */
+	LgFree1,	/* alloc a block */
+	LgRef,		/* ref a block */
+	LgUnref,	/* free a block */
 	LgFlush,	/* flush log, bump gen */
+	LgChain,	/* point to next log block */
+	LgEnd,		/* last entry in log */	
+
+	/* 2-wide entries */
+	Lg2w	= 1<<5,
+	LgAlloc = LgAlloc1|Lg2w,	/* alloc a range */
+	LgFree	= LgFree1|Lg2w,		/* free a range */
 };
 
 struct Arange {

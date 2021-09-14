@@ -59,13 +59,15 @@ reamarena(Arena *a, vlong start, vlong asz)
 	b->data = b->buf + Hdrsz;
 	b->flag |= Bdirty;
 
-	p = b->data;
-	PBIT64(p+24, off|LgFree);		/* off */
-	PBIT64(p+32, asz);			/* len */
-	PBIT64(p+40, b->off|LgAlloc);		/* off */
-	PBIT64(p+48, Blksz);			/* len */
+	p = b->data+Loghdsz;
+	PBIT64(p+ 0, off|LgFree);		/* off */
+	PBIT64(p+ 8, asz);			/* len */
+	PBIT64(p+16, b->off|LgAlloc);		/* off */
+	PBIT64(p+24, Blksz);			/* len */
+	PBIT64(p+32, (uvlong)LgEnd);		/* done */
 	finalize(b);
-	synclog(b, -1, 32);
+	if(syncblk(b) == -1)
+		sysfatal("ream: init log");
 
 	bh = blkhash(b);
 	bo = b->off;
@@ -78,7 +80,7 @@ reamarena(Arena *a, vlong start, vlong asz)
 	PBIT64(p+0, bo);
 	PBIT64(p+8, bh);
 	finalize(b);
-	if(pwrite(fs->fd, b->buf, Blksz, b->off) == -1)
+	if(syncblk(b) == -1)
 		sysfatal("ream: write arena: %r");
 }
 

@@ -2,11 +2,20 @@
 #include <libc.h>
 #include <fcall.h>
 #include <avl.h>
+#include <pool.h>
 
 #include "dat.h"
 #include "fns.h"
 
+typedef struct Range Range;
+struct Range {
+	vlong off;
+	vlong len;
+};
+
 static vlong	blkalloc_lk(Arena*);
+static int	blkdealloc(vlong);
+static void	cachedel(vlong);
 static Blk	*cacheblk(Blk*);
 static Blk	*lookupblk(vlong);
 
@@ -78,7 +87,7 @@ pickarena(vlong hint)
 	return &fs->arenas[n];
 }
 
-static Arena*
+Arena*
 getarena(vlong b)
 {
 	int i;
@@ -95,49 +104,33 @@ getarena(vlong b)
 static int
 freerange(Avltree *t, vlong off, vlong len)
 {
-	Arange *r, *s, q;
+	Arange *r, *s;
 
 	assert(len % Blksz == 0);
+	if((r = calloc(1, sizeof(Arange))) == nil)
+		return -1;
+	r->off = off;
+	r->len = len;
+	avlinsert(t, r);
 
-	q.off = off;
-	q.len = len;
-	r = (Arange*)avllookup(t, &q.Avl, -1);
-	if(r == nil){
-		if((r = calloc(1, sizeof(Arange))) == nil)
-			return -1;
-		r->off = off;
-		r->len = len;
-		avlinsert(t, r);
-	}else if(off+len == r->off){
-		r->len += len;
-		r->off -= len;
-	}else if(off == r->off + r->len){
-		r->len += len;
-	}else{
-		r = (Arange*)avlnext(r);
-		if(r != nil && off+len == r->off){
-			r->off -= len;
-			r->len += len;
-		} else {
-			if((r = calloc(1, sizeof(Arange))) == nil)
-				return -1;
-			r->off = off;
-			r->len = len;
-			avlinsert(t, r);
-		}
-	}
+Again:
 
-	/* merge with previous */
 	s = (Arange*)avlprev(r);
-	if(s != nil && s->off + s->len == r->off){
-		s->off += r->len;
+	if(s != nil && s->off+s->len == r->off){
 		avldelete(t, r);
+		s->len = s->len + r->len;
+		free(r);
+		r = s;
+		goto Again;
 	}
-	/* merge with next */
 	s = (Arange*)avlnext(r);
-	if(s != nil && r->off + r->len == s->off){
-		r->off += r->len;
-		avldelete(t, s);
+	if(s != nil && r->off+r->len == s->off){
+		avldelete(t, r);
+		s->off = r->off;
+		s->len = s->len + r->len;
+		free(r);
+		r = s;
+		goto Again;
 	}
 	return 0;
 }
@@ -146,30 +139,32 @@ int
 grabrange(Avltree *t, vlong off, vlong len)
 {
 	Arange *r, *s, q;
+	vlong l;
 
 	assert(len % Blksz == 0);
 	q.off = off;
 	q.len = len;
 	r = (Arange*)avllookup(t, &q.Avl, -1);
-	if(r == nil || off + len > r->off + r->len){
-		fprint(2, "no blocks: %llx+%llx in:\n", off, len);
-		for(r = (Arange*)avlmin(t); r != nil; r = (Arange*)avlnext(r))
-			fprint(2, "\t%llx+%llx\n", r->off, r->len);
+	if(r == nil || off + len > r->off + r->len)
 		abort();
-		return -1;
-	}
-	if(off == r->off)
+
+	print("\tmerge (%llx,%llx) (%llx,%llx)\n", off, len, r->off, r->len);
+	if(off == r->off){
 		r->off += len;
-	else if(off == r->off + r->len)
 		r->len -= len;
-	else if(off + len > r->off && off > r->off + r->len){
+	}else if(off + len == r->off + r->len){
+		r->len -= len;
+	}else if(off > r->off && off+len < r->off + r->len){
 		if((s = malloc(sizeof(Arange))) == nil)
 			return -1;
-		s->off = off;
-		s->len = r->len - (off - r->off) - len;;
+		l = r->len;
+		s->off = off + len;
 		r->len = off - r->off;
+		s->len = l - r->len - len;
 		avlinsert(t, s);
-	}
+	}else
+		abort();
+
 	if(r->len == 0){
 		avldelete(t, r);
 		free(r);
@@ -177,29 +172,16 @@ grabrange(Avltree *t, vlong off, vlong len)
 	return 0;
 }
 
-int
-synclog(Blk *b, vlong link, vlong sz)
-{
-
-	if(sz == -1)
-		sz = b->logsz;
-	PBIT64(b->data+8, link);
-	PBIT64(b->data+16, sz);
-	finalize(b);
-fprint(2, "synclog: @%llx\n", b->off);
-showfree("synclog");
-	return pwrite(fs->fd, b->buf, Blksz, b->off);
-}
-
 Blk*
-logappend(Arena *a, Blk *lb, vlong off, vlong len, int op, vlong graft)
+logappend(Arena *a, Blk *lb, vlong off, vlong len, int op)
 {
 	Blk *pb;
-	vlong o, n;
+	vlong o;
 	char *p;
 
 	assert(off % Blksz == 0);
-	if(lb == nil || lb->logsz+16+24 > Blkspc){
+	assert(op == LgAlloc || op == LgFree);
+	if(lb == nil || lb->logsz > Logspc - 8){
 		pb = lb;
 		if((o = blkalloc_lk(a)) == -1)
 			return nil;
@@ -209,26 +191,39 @@ logappend(Arena *a, Blk *lb, vlong off, vlong len, int op, vlong graft)
 		lb->flag |= Bdirty;
 		lb->type = Tlog;
 		lb->off = o;
-		lb->logsz = 0;
-		if(synclog(lb, graft, 0) == -1)
+		lb->logsz = Loghdsz;
+		p = lb->data + lb->logsz;
+		PBIT64(p + 0, (uvlong)LgEnd);
+		finalize(lb);
+		if(syncblk(lb) == -1){
+			free(lb);
 			return nil;
+		}
 
 		a->logtl = lb;
-		if(pb != nil)
-			if(synclog(pb, lb->off, -1) == -1)
+		if(pb != nil){
+			p = pb->data + pb->logsz;
+			PBIT64(p + 0, lb->off|LgChain);
+			finalize(pb);
+			if(syncblk(pb) == -1)
 				return nil;
+		}
 	}
-	n = 8;
-	p = lb->data + 24 + lb->logsz;
-	if(len == Blksz && op == LgAlloc)
-		op = LgAlloc1;
-	off |= op;
-	PBIT64(p, off);
-	if(op == LgAlloc || op == LgFree){
+
+	p = lb->data + lb->logsz;
+	if(len == Blksz){
+		off |= (op & ~Lg2w);
+		PBIT64(p, off);
+		lb->logsz += 8;
+	}else{
+		off |= op;
+		PBIT64(p+0, off);
 		PBIT64(p+8, len);
-		n += 8;
+		lb->logsz += 16;
 	}
-	lb->logsz += n;
+	/* this gets overwritten by the next append */
+	p = lb->data + lb->logsz;
+	PBIT64(p, (uvlong)LgEnd);
 	return lb;
 }
 
@@ -243,12 +238,12 @@ logalloc(Arena *a, vlong off, int op)
 {
 	Blk *b;
 
-	if((b = logappend(a, a->logtl, off, Blksz, op, -1)) == nil)
+	if((b = logappend(a, a->logtl, off, Blksz, op)) == nil)
 		return -1;
-	if(a->logtl == nil){
+	if(a->log == -1)
 		a->log = b->off;
+	if(b != a->logtl)
 		a->logtl = b;
-	}
 	return 0;
 }
 
@@ -261,91 +256,101 @@ loadlog(Arena *a)
 	char *p, *d;
 	int op, i, n;
 
+
 	bp = a->log;
-	while(bp != -1){
-		dprint("log block: %llx\n", bp);
-		if((b = readblk(bp, 0)) == nil)
-			return -1;
-		p = b->data;
-		bh = GBIT64(p + 0);
-		bp = GBIT64(p + 8);
-		b->logsz = GBIT64(p + 16);
-		/* the hash covers the log and offset */
-		if(bh != siphash(p+8, Blkspc-8)){
-			werrstr("corrupt log");
-			return -1;
-		}
-		for(i = 0; i < b->logsz; i += n){
-			d = p + i + 24;
-			ent = GBIT64(d);
-			op = ent & 0xff;
-			off = ent & ~0xff;
-			switch(op){
-			case LgFlush:
-				dprint("log@%d: flush: %llx\n", i, off>>8);
-				n = 8;
-				lock(&fs->genlk);
-				fs->gen = off >> 8;
-				unlock(&fs->genlk);
-				break;
-			case LgAlloc1:
-				n = 8;
-				dprint("log@%d alloc1: %llx\n", i, off);
-				if(grabrange(a->free, off & ~0xff, Blksz) == -1)
-					return -1;
-				break;
-			case LgAlloc:
-				n = 16;
-				len = GBIT64(d+8);
-				dprint("log@%d alloc: %llx+%llx\n", i, off, len);
-				if(grabrange(a->free, off & ~0xff, len) == -1)
-					return -1;
-				break;
-			case LgFree:
-				n = 16;
-				len = GBIT64(d+8);
-				dprint("log@%d free: %llx+%llx\n", i, off, len);
-				if(freerange(a->free, off & ~0xff, len) == -1)
-					return -1;
-				break;
-			case LgRef1:
-			case LgUnref1:
-				n = 8;
-				fprint(2, "unimplemented ref op at log@%d: log op %d\n", i, op);
-				break;
-			default:
-				n = 0;
-				dprint("log@%d: log op %d\n", i, op);
-				abort();
-				break;
-			}
-		}
+
+Nextblk:
+	dprint("block: %llx\n", bp);
+	if((b = readblk(bp, 0)) == nil)
+		return -1;
+	p = b->data;
+	bh = GBIT64(p + 0);
+	/* the hash covers the log and offset */
+	if(bh != siphash(p+8, Blkspc-8)){
+		werrstr("corrupt log");
+		return -1;
 	}
-	return 0;
+	for(i = Loghdsz; i < Logspc; i += n){
+		d = b->data + i;
+		ent = GBIT64(d);
+		op = ent & 0xff;
+		off = ent & ~0xff;
+		n = (op & Lg2w) ? 16 : 8;
+		switch(op){
+		case LgEnd:
+			dprint("log@%d: end\n", i);
+			/*
+			 * since we want the next insertion to overwrite
+			 * this, don't include the size in this entry.
+			 */
+			b->logsz = i;
+			return 0;
+		case LgChain:
+			bp = off & ~0xff;
+			dprint("log@%d: chain %llx\n", i, bp);
+			b->logsz = i+n;
+			goto Nextblk;
+			break;
+
+		case LgFlush:
+			dprint("log@%d: flush: %llx\n", i, off>>8);
+			lock(&fs->genlk);
+			fs->gen = off >> 8;
+			unlock(&fs->genlk);
+			break;
+		case LgAlloc:
+		case LgAlloc1:
+			len = (op & Lg2w) ? GBIT64(d+8) : Blksz;
+			dprint("log@%d alloc: %llx+%llx\n", i, off, len);
+			if(grabrange(a->free, off & ~0xff, len) == -1)
+				return -1;
+			break;
+		case LgFree:
+		case LgFree1:
+			len = (op & Lg2w) ? GBIT64(d+8) : Blksz;
+			dprint("log@%d free: %llx+%llx\n", i, off, len);
+			if(freerange(a->free, off & ~0xff, len) == -1)
+				return -1;
+			break;
+		case LgRef:
+		case LgUnref:
+			fprint(2, "unimplemented ref op at log@%d: log op %d\n", i, op);
+			break;
+		default:
+			n = 0;
+			dprint("log@%d: log op %d\n", i, op);
+			abort();
+			break;
+		}
+showfree("after");
+	}
+	return -1;
 }
 
 int
 compresslog(Arena *a)
 {
 	Arange *r;
-	vlong *log, *p, bp, hd, hh, graft;
+	Range *log, *nlog;
+	vlong v, bp, nb, graft, oldhd;
 	int i, n, sz;
-	Blk *pb, *ab, *b;
+	Blk *hd, *ab, *b;
+	char *p;
 
 showfree("precompress");
 fprint(2, "compress start\n");
+
 	/*
-	 * Sync the current log to disk. While
+	 * Sync the current log to disk, and
+	 * set up a new block log tail.  While
 	 * compressing the log, nothing else is
 	 * using this arena, so any allocs come
-	 * from the log compression.
+	 * from the log compression, and go into
+	 * this new log segment.
 	 *
 	 * A bit of copy paste from newblk,
-	 * because otherwise we have bootstrap
-	 * issues.
-	 *
-	 * Set up the head of the new log as
-	 * an empty block.
+	 * because otherwise we have a deadlock
+	 * allocating the block.
 	 */
 	if((bp = blkalloc_lk(a)) == -1)
 		return -1;
@@ -356,21 +361,25 @@ fprint(2, "compress start\n");
 	b->off = bp;
 	b->ref = 1;
 	b->data = b->buf + Hdrsz;
-checkfs();
-	if(synclog(b, -1, 0) == -1)
-		return -1;
-checkfs();
+	b->logsz = Loghdsz;
 
-	/*
-	 * When reaming or loading, we may not
-	 * have set up the log.
-	 */
-checkfs();
-	if(a->logtl != nil)
-		synclog(a->logtl, b->off, -1);
-checkfs();
+	PBIT64(b->data+b->logsz, (uvlong)LgEnd);
+	finalize(b);
+	if(syncblk(b) == -1){
+		free(b);
+		return -1;
+	}
+
 	graft = b->off;
+	if(a->logtl != nil){
+		finalize(a->logtl);
+		if(syncblk(a->logtl) == -1){
+			free(b);
+			return -1;
+		}
+	}
 	a->logtl = b;
+print("\tnew log block: %llx\n", b->off);
 
 	/*
 	 * Prepare what we're writing back.
@@ -380,66 +389,73 @@ checkfs();
 	 */
 	n = 0;
 	sz = 512;
-checkfs();
-	if((log = malloc(2*sz*sizeof(vlong))) == nil)
+	if((log = malloc(sz*sizeof(Range))) == nil)
 		return -1;
-checkfs();
 	for(r = (Arange*)avlmin(a->free); r != nil; r = (Arange*)avlnext(r)){
 		if(n == sz){
 			sz *= 2;
-			if((p = realloc(log, 2*sz*sizeof(vlong))) == nil){
+			if((nlog = realloc(log, sz*sizeof(Range))) == nil){
 				free(log);
 				return -1;
 			}
-			log = p;
+			log = nlog;
 		}
-		log[2*n+0] = r->off;
-		log[2*n+1] = r->len;
+		log[n].off = r->off;
+		log[n].len = r->len;
 		n++;
 	}
 	if((b = newblk(Tlog)) == nil){
 		free(log);
 		return -1;
 	}
-checkfs();
-	pb = b;
-	hd = b->off;
-	hh = -1;
-	PBIT64(b->data +  8, graft);	/* link */
-	PBIT64(b->data + 16, 0ULL);	/* count */
-checkfs();
-
-	for(i = 0; i < n; i++){
-		if((b = logappend(a, b, log[2*i], log[2*i+1], LgFree, graft)) == nil)
+	hd = b;
+	b->logsz = Loghdsz;
+	for(i = 0; i < n; i++)
+		if((b = logappend(a, b, log[i].off, log[i].len, LgFree)) == nil)
 			return -1;
-checkfs();
-		if(b != pb){
-checkfs();
-			synclog(pb, b->off, -1);
-checkfs();
-			if(pb->off == hd)
-				hh = blkhash(pb);
-			b = pb;
-		}
-	}
+	p = b->data + b->logsz;
+	PBIT64(p, LgChain|graft);
 	free(log);
-checkfs();
-	if(synclog(b, graft, -1) == -1)
+	finalize(b);
+	if(syncblk(b) == -1)
+		return -1;
+
+	oldhd = a->log;
+	a->log = hd->off;
+	a->logh = blkhash(hd);
+	ab = a->b;
+	PBIT64(ab->data + 0, a->log);
+	PBIT64(ab->data + 8, a->logh);
+	if(syncblk(ab) == -1)
 		return -1;
 checkfs();
-	if(pb->off == hd)
-		hh = blkhash(pb);
-checkfs();
-
-	a->log = hd;
-	a->logh = hh;
-	ab = a->b;
-	PBIT64(ab->data + 0, hd);
-	PBIT64(ab->data + 8, hh);
-checkfs();
-	pwrite(fs->fd, ab->buf, Blksz, ab->off);
-checkfs();
-fprint(2, "compress done\n");
+showfree("postcompress");
+	if(oldhd != -1){
+		for(bp = oldhd; bp != -1; bp = nb){
+			nb = -1;
+			if((b = readblk(bp, 0)) == nil)
+				return -1;
+			for(i = Loghdsz; i < Logspc; i += n){
+				p = b->data + i;
+				v = GBIT64(p);
+				n = (v & Lg2w) ? 16 : 8;
+				if((v&0xff) == LgChain){
+					nb = v & ~0xff;
+					break;
+				}else if((v&0xff) == LgEnd){
+					nb = -1;
+					break;
+				}
+			}
+			fprint(2, "\tpostscan: freeing %llx\n", bp);
+			if(blkdealloc(bp) == -1)
+				return -1;
+		}
+	}
+	finalize(a->logtl);
+	if(syncblk(a->logtl) == -1)
+		return -1;
+showfree("postreclaim");
 	return 0;
 }
 /*
@@ -475,11 +491,12 @@ blkalloc_lk(Arena *a)
 		avldelete(t, r);
 		free(r);
 	}
+fprint(2, "\talloc %llx\n", b);
 	return b;
 }
 
-int
-blkrelease(vlong b)
+static int
+blkdealloc(vlong b)
 {
 	Arena *a;
 	int r;
@@ -487,6 +504,7 @@ blkrelease(vlong b)
 	r = -1;
 	a = getarena(b);
 	lock(a);
+	cachedel(b);
 	if(freerange(a->free, b, Blksz) == -1)
 		goto out;
 	if(logalloc(a, b, LgFree) == -1)
@@ -638,26 +656,28 @@ Cached:
 }
 
 static void
-cachedel(Blk *del)
+cachedel(vlong del)
 {
 	Bucket *bkt;
 	Blk *b, **p;
 	u32int h;
 
 	/* FIXME: better hash. */
-	h = ihash(del->off);
+	h = ihash(del);
 
 	bkt = &fs->cache[h % fs->cmax];
 	lock(bkt);
 	p = &bkt->b;
 	for(b = bkt->b; b != nil; b = b->hnext){
-		if(b == del){
-			*p = del->hnext;
+		if(b->off == del){
+			*p = b->hnext;
 			break;
 		}
 		p = &b->hnext;
 	}
 	unlock(bkt);
+	if(b == nil)
+		return;
 
 	lock(&fs->lrulk);
 	if(b->cnext != nil)
@@ -671,10 +691,18 @@ cachedel(Blk *del)
 	unlock(&fs->lrulk);
 }
 
+int
+syncblk(Blk *b)
+{
+	dprint("\tsyncblk: %llx+%llx\n", b->off, Blksz);
+	return pwrite(fs->fd, b->buf, Blksz, b->off);
+}
+
+
 void
 enqueue(Blk *b)
 {
-	if(pwrite(fs->fd, b->buf, Blksz, b->off) == -1){
+	if(syncblk(b) == -1){
 		ainc(&fs->broken);
 		fprint(2, "write: %r");
 		return;
@@ -777,7 +805,7 @@ refblk(Blk *b)
 
 	a = getarena(b->off);
 	lock(a);
-	r = logalloc(a, b->off, LgRef1);
+	r = logalloc(a, b->off, LgRef);
 	unlock(a);
 	return r;
 }
@@ -790,7 +818,7 @@ unrefblk(Blk *b)
 
 	a = getarena(b->off);
 	lock(a);
-	r = logalloc(a, b->off, LgUnref1);
+	r = logalloc(a, b->off, LgUnref);
 	unlock(a);
 	return r;
 }
@@ -818,7 +846,7 @@ putblk(Blk *b)
 	if((b->flag & (Bdirty|Bqueued)) == Bdirty)
 		enqueue(b);
 	if(adec(&b->ref) == 0){
-		cachedel(b);
+		cachedel(b->off);
 		free(b);
 	}
 }
@@ -835,7 +863,8 @@ freeblk(Blk *b)
 	 * TODO: what to do if we fail to log a free here??
 	 * This is already an error path!
 	 */
-	logalloc(a, b->off, LgRef1);
+	logalloc(a, b->off, LgUnref);
+	blkdealloc(b->off);
 	unlock(a);
 	free(b);
 }
@@ -848,14 +877,18 @@ sync(void)
 
 	dprint("syncing\n");
 	r = 0;
-	for(i = 0; i < fs->narena; i++)
-		if(synclog(fs->arenas[i].logtl, -1, -1) == -1)
+	for(i = 0; i < fs->narena; i++){
+		b = fs->arenas[i].logtl;
+		finalize(b);
+		if(syncblk(b) == -1)
 			r = -1;
+	}
+	/* FIXME: hit it with a big hammer -- flush the whole cache */
 	for(b = fs->chead; b != nil; b = b->cnext){
 //		dprint("sync %p\n", b);
 		if(!(b->flag & Bdirty))
 			continue;
-		if(pwrite(fs->fd, b->buf, Blksz, b->off) == -1)
+		if(syncblk(b) == -1)
 			r = -1;
 	}
 	return r;

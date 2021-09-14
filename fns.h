@@ -15,7 +15,9 @@ Blk*	getroot(int*);
 Blk*	getblk(vlong, uvlong);
 Blk*	pinblk(Blk*);
 Blk*	readblk(vlong, int);
+Arena*	getarena(vlong);
 void	putblk(Blk*);
+int	syncblk(Blk*);
 void	enqueue(Blk*);
 void	freeblk(Blk*);
 ushort	blkfill(Blk*);
@@ -30,7 +32,6 @@ int	loadarena(Arena*, vlong);
 void	loadfs(char*);
 int	sync(void);
 int	loadlog(Arena *a);
-int	synclog(Blk*, vlong, vlong);
 int	endfs(void);
 int	compresslog(Arena *a);
 

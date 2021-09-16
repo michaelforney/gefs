@@ -60,11 +60,11 @@ reamarena(Arena *a, vlong start, vlong asz)
 	b->flag |= Bdirty;
 
 	p = b->data+Loghdsz;
-	PBIT64(p+ 0, off|LgFree);		/* off */
+	PBIT64(p+ 0, off|LogFree);		/* off */
 	PBIT64(p+ 8, asz);			/* len */
-	PBIT64(p+16, b->off|LgAlloc);		/* off */
+	PBIT64(p+16, b->off|LogAlloc);		/* off */
 	PBIT64(p+24, Blksz);			/* len */
-	PBIT64(p+32, (uvlong)LgEnd);		/* done */
+	PBIT64(p+32, (uvlong)LogEnd);		/* done */
 	finalize(b);
 	if(syncblk(b) == -1)
 		sysfatal("ream: init log");
@@ -147,9 +147,9 @@ print("superblock @%llx\n", s->off);
 	finalize(r);
 
 	fs->super = s;
-	fs->rootb = r->off;
-	fs->rooth = blkhash(r);
-	fs->height = 1;
+	fs->root.bp = r->off;
+	fs->root.bh = blkhash(r);
+	fs->root.ht = 1;
 	snapshot();
 
 	putblk(s);

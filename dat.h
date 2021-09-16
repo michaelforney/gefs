@@ -15,6 +15,7 @@ typedef struct Arena	Arena;
 typedef struct Arange	Arange;
 typedef struct Bucket	Bucket;
 typedef struct Chan	Chan;
+typedef struct Tree	Tree;
 
 enum {
 	KiB	= 1024ULL,
@@ -22,7 +23,7 @@ enum {
 	GiB	= 1024ULL*MiB,
 	TiB	= 1024ULL*GiB,
 
-	Lgblk	= 9,
+	Lgblk	= 13,
 	Blksz	= (1ULL<<Lgblk),
 
 	Nrefbuf	= 1024,			/* number of ref incs before syncing */
@@ -198,18 +199,17 @@ enum {
  */
 enum {
 	/* 1-wide entries */
-	LgAlloc1,	/* alloc a block */
-	LgFree1,	/* alloc a block */
-	LgRef,		/* ref a block */
-	LgUnref,	/* free a block */
-	LgFlush,	/* flush log, bump gen */
-	LgChain,	/* point to next log block */
-	LgEnd,		/* last entry in log */	
+	LogAlloc1,	/* alloc a block */
+	LogFree1,	/* alloc a block */
+	LogDead1,	/* free a block */
+	LogFlush,	/* flush log, bump gen */
+	LogChain,	/* point to next log block */
+	LogEnd,		/* last entry in log */	
 
 	/* 2-wide entries */
-	Lg2w	= 1<<5,
-	LgAlloc = LgAlloc1|Lg2w,	/* alloc a range */
-	LgFree	= LgFree1|Lg2w,		/* free a range */
+	Log2w	= 1<<5,
+	LogAlloc = LogAlloc1|Log2w,	/* alloc a range */
+	LogFree	= LogFree1|Log2w,	/* free a range */
 };
 
 struct Arange {
@@ -231,6 +231,13 @@ struct Fmsg {
 	uchar	buf[];
 };
 
+struct Tree {
+	Lock	lk;
+	vlong	bp;
+	vlong	bh;
+	int	ht;
+};
+
 /*
  * Overall state of the file sytem.
  * Shadows the superblock contents.
@@ -250,11 +257,8 @@ struct Gefs {
 	int	fd;
 	long	broken;
 
-	Lock	rootlk;
 	/* protected by rootlk */
-	vlong	rootb;
-	vlong	rooth;
-	int	height;
+	Tree	root;
 
 	Lock	genlk;
 	vlong	gen;
@@ -346,9 +350,7 @@ struct Fid {
 	 * instead of the most recent root, to prevent
 	 * paging in the wrong executable.
 	 */
-	vlong	rootb;
-	vlong	rooth;
-	int	height;
+	Tree	root;
 
 	u32int	fid;
 	vlong	qpath;
@@ -392,9 +394,7 @@ struct Scanp {
 
 struct Scan {
 	vlong	offset;	/* last read offset */
-	vlong	rootb;
-	vlong	rooth;
-	int	height;
+	Tree	root;
 
 	int	done;
 	Kvp	kv;

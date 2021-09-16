@@ -61,7 +61,7 @@ badblk(Blk *b, int h, Kvp *lo, Kvp *hi)
 				fprint(2, "freed block in use: %llx\n", x.bp);
 				fail++;
 			}
-			if((c = getblk(x.bp, x.bh)) == nil){
+			if((c = getblk(x.bp, x.bh, 0)) == nil){
 				fprint(2, "corrupt block: %r\n");
 				fail++;
 				continue;
@@ -126,7 +126,7 @@ checkfs(void)
 	ok = 1;
 	if(badfree())
 		ok = 0;
-	if((b = getroot(&height)) != nil){
+	if((b = getroot(&fs->root, &height)) != nil){
 		if(badblk(b, height-1, nil, 0))
 			ok = 0;
 		putblk(b);
@@ -158,7 +158,7 @@ rshowblk(int fd, Blk *b, int indent, int recurse)
 		getval(b, i, &kv);
 		fprint(fd, "%.*s|%P\n", 4*indent, spc, &kv);
 		if(b->type == Tpivot){
-			if((c = getblk(kv.bp, kv.bh)) == nil)
+			if((c = getblk(kv.bp, kv.bh, 0)) == nil)
 				sysfatal("failed load: %r");
 			if(recurse)
 				rshowblk(fd, c, indent + 1, 1);
@@ -191,8 +191,8 @@ fshowfs(int fd, char *m)
 	int h;
 
 	fprint(fd, "=== %s\n", m);
-	fprint(fd, "fs->height: %d\n", fs->height);
-	rshowblk(fd, getroot(&h), 0, 1);
+	fprint(fd, "\tht: %d\n", fs->root.ht);
+	rshowblk(fd, getroot(&fs->root, &h), 0, 1);
 }
 
 void
@@ -207,10 +207,13 @@ showpath(Path *p, int np)
 {
 	int i;
 
+	print("path:\n");
+#define A(b) (b ? b->off : -1)
 	for(i = 0; i < np; i++){
-		print("==> b=%p, n=%p, idx=%d\n", p[i].b, p[i].n, p[i].idx);
-		print("\tclear=(%d, %d):%d\n", p[i].lo, p[i].hi, p[i].sz);
-		print("\tl=%p, r=%p, n=%p, split=%d\n", p[i].l, p[i].r, p[i].n, p[i].split);
+		print("\t[%d] ==> b(%p)=%llx, n(%p)=%llx, nl(%p)=%llx, nr(%p)=%llx idx=%d\n",
+			i, p[i].b, A(p[i].b), p[i].n, A(p[i].n), p[i].nl, A(p[i].nl), p[i].nr, A(p[i].nr), p[i].idx);
+		print("\t\tclear=(%d, %d):%d\n", p[i].lo, p[i].hi, p[i].sz);
+		print("\t\tl=%p, r=%p, n=%p, split=%d\n", p[i].l, p[i].r, p[i].n, p[i].split);
 	}
 }
 

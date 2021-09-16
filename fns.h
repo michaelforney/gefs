@@ -11,8 +11,8 @@ extern int	debug;
 
 Blk*	newblk(int type);
 Blk*	shadow(Blk*, Path*, Path*);
-Blk*	getroot(int*);
-Blk*	getblk(vlong, uvlong);
+Blk*	getroot(Tree*, int*);
+Blk*	getblk(vlong, uvlong, int);
 Blk*	pinblk(Blk*);
 Blk*	readblk(vlong, int);
 Arena*	getarena(vlong);
@@ -35,10 +35,10 @@ int	loadlog(Arena *a);
 int	endfs(void);
 int	compresslog(Arena *a);
 
-int	btupsert(Msg*, int);
-char	*btlookup(Key*, Kvp*, Blk**);
+int	btupsert(Tree*, Msg*, int);
+char	*btlookup(Tree*, Key*, Kvp*, Blk**);
 char	*btlookupat(Blk*, Key*, Kvp*, Blk**);
-char	*btscan(Scan*, Key*, vlong, vlong, int);
+char	*btscan(Tree*, Scan*, Key*);
 char	*btnext(Scan*, Kvp*, int*);
 void	btdone(Scan*);
 

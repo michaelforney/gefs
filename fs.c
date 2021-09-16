@@ -42,10 +42,10 @@ fslookup(Fid *f, Key *k, Kvp *kv, Blk **bp, int lk)
 	char *e;
 	Blk *b;
 
-	if(f->rootb == -1)
-		b = getroot(nil);
+	if(f->root.bp == -1)
+		b = getroot(&fs->root, nil);
 	else
-		b = getblk(f->rootb, f->rooth);
+		b = getblk(f->root.bp, f->root.bh, 0);
 	if(b == nil)
 		return Efs;
 	if(lk)
@@ -256,7 +256,7 @@ respond(Fmsg *m, Fcall *r)
 	int w, n;
 
 	r->tag = m->tag;
-//	dprint("→ %F\n", r);
+	dprint("→ %F\n", r);
 	if((n = convS2M(r, buf, sizeof(buf))) == 0)
 		abort();
 	qlock(m->wrlk);
@@ -384,7 +384,7 @@ fsattach(Fmsg *m, int iounit)
 	dk.k = buf;
 	dk.nk = p - buf;
 showfs("attach");
-	if(btlookup(&dk, &kv, &b) != nil){
+	if(btlookup(&fs->root, &dk, &kv, &b) != nil){
 		rerror(m, Efs);
 		return;
 	}
@@ -413,8 +413,8 @@ showfs("attach");
 	f.fid = NOFID;
 	f.qpath = d.qid.path;
 	f.mode = -1;
-	f.rooth = -1;
-	f.rootb = -1;
+	f.root.bh = -1;
+	f.root.bp = -1;
 	f.iounit = iounit;
 	f.dent = e;
 showfids();
@@ -497,7 +497,7 @@ fswalk(Fmsg *m)
 	}
 	if(i > 0){
 		d.name = m->wname[i-1];
-		dent = getdent(f->rootb, up, &d);
+		dent = getdent(f->root.bp, up, &d);
 		if(dent == nil){
 			if(m->fid != m->newfid)
 				clunkfid(f);
@@ -525,7 +525,7 @@ fsstat(Fmsg *m)
 		rerror(m, "no such fid");
 		return;
 	}
-	if(btlookup(f->dent, &kv, &b) != nil){
+	if(btlookup(&fs->root, f->dent, &kv, &b) != nil){
 		rerror(m, Eexist);
 		return;
 	}
@@ -609,12 +609,12 @@ fscreate(Fmsg *m)
 		return;
 	}
 //showfs("precreate");
-	if(btupsert(&mb, 1) == -1){
+	if(btupsert(&fs->root, &mb, 1) == -1){
 		rerror(m, "%r");
 		return;
 	}
 //showfs("postcreate");
-	dent = getdent(f->rootb, f->qpath, &d);
+	dent = getdent(f->root.bp, f->qpath, &d);
 	if(dent == nil){
 		if(m->fid != m->newfid)
 			clunkfid(f);
@@ -639,6 +639,39 @@ fscreate(Fmsg *m)
 	r.iounit = f->iounit;
 	respond(m, &r);
 		
+}
+
+void
+fsremove(Fmsg *m)
+{
+	Fcall r;
+	Msg mb;
+	Fid *f;
+
+	if(okname(m->name) == -1){
+		rerror(m, Ename);
+		return;
+	}
+	if((f = getfid(m->fid)) == nil){
+		rerror(m, "no such fid");
+		return;
+	}
+
+	rlock(f->dent);
+	mb.op = Odelete;
+	mb.k = f->dent->k;
+	mb.nk = f->dent->nk;
+	mb.nv = 0;
+	if(btupsert(&fs->root, &mb, 1) == -1){
+		runlock(f->dent);
+		rerror(m, "remove: %r");
+		return;
+	}
+	runlock(f->dent);
+	clunkfid(f);
+
+	r.type = Rremove;
+	respond(m, &r);
 }
 
 int
@@ -691,12 +724,10 @@ fsopen(Fmsg *m)
 	}
 	f->mode = m->mode;
 	if((f->mode & 0x7) == OEXEC){
-		lock(&fs->rootlk);
-		f->rootb = fs->rootb;
-		f->rooth = fs->rooth;
-		f->height = fs->height;
-//		refblk(fs->rootb);
-		unlock(&fs->rootlk);
+		lock(&fs->root.lk);
+		f->root = fs->root;
+//		refblk(fs->root.bp);
+		unlock(&fs->root.lk);
 	}
 	unlock(f);
 	respond(m, &r);
@@ -707,6 +738,7 @@ fsreaddir(Fmsg *m, Fid *f, Fcall *r)
 {
 	char pfx[9], *p, *e;
 	int n, ns, done;
+	Tree *t;
 	Scan *s;
 	Kvp kv;
 
@@ -722,7 +754,8 @@ fsreaddir(Fmsg *m, Fid *f, Fcall *r)
 		print("scan starting\n");
 		if((s = mallocz(sizeof(Scan), 1)) == nil)
 			return "out of memory";
-		if((e = btscan(s, &kv, f->rootb, f->rooth, f->height)) != nil){
+		t = (f->root.bp != -1) ? &f->root : &fs->root;
+		if((e = btscan(t, s, &kv)) != nil){
 			free(r->data);
 			btdone(s);
 			return e;
@@ -790,7 +823,7 @@ readb(Fid *f, char *d, vlong o, vlong n, int sz)
 	bh = GBIT64(kv.v+8);
 	putblk(b);
 
-	if((b = getblk(bp, bh)) == nil)
+	if((b = getblk(bp, bh, GBraw)) == nil)
 		return -1;
 	fprint(2, "\treading from %llx (%llx) %s %s\n", bp, b->off, b->buf, b->data);
 	if(bo+n > Blksz)
@@ -906,7 +939,7 @@ writeb(Fid *f, Msg *m, char *s, vlong o, vlong n, int sz)
 		bh = GBIT64(kv.v+8);
 		putblk(t);
 
-		if((t = getblk(bp, bh)) == nil)
+		if((t = getblk(bp, bh, GBraw)) == nil)
 			return -1;
 		memcpy(b->buf, t->buf, Blksz);
 		putblk(t);
@@ -978,7 +1011,7 @@ fswrite(Fmsg *m)
 		PBIT64(kv[i].v, m->offset+m->count);
 		f->dent->length = m->offset+m->count;
 	}
-	btupsert(kv, i+1);
+	btupsert(&fs->root, kv, i+1);
 	wunlock(f->dent);
 
 	r.type = Rwrite;
@@ -1015,7 +1048,7 @@ runfs(void *pfd)
 		}
 */
 		m->wrlk = wrlk;
-//		dprint("← %F\n", &m->Fcall);
+		dprint("← %F\n", &m->Fcall);
 		switch(m->type){
 		/* sync setup */
 		case Tversion:	fsversion(m, &msgmax);	break;
@@ -1058,7 +1091,7 @@ runwrite(void *)
 		case Tcreate:	fscreate(m);	break;
 		case Twrite:	fswrite(m);	break;
 		case Twstat:	fswstat(m);	break;
-		case Tremove:	rerror(m, "unimplemented remove");	break;
+		case Tremove:	fsremove(m);	break;
 		}
 	}
 }

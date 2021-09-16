@@ -418,6 +418,7 @@ update(Path *p, Path *pp)
 	hi = (p != nil) ? p->hi : -1;
 	pidx = (p != nil) ? p->idx : -1;
 	midx = (p != nil && p->merge) ? p->midx : -1;
+if(p->merge) showblk(b, "preupdate", 0);
 	if((n = newblk(b->type)) == nil)
 		return -1;
 	for(i = 0; i < b->nval; i++){
@@ -426,10 +427,19 @@ update(Path *p, Path *pp)
 			continue;
 		}else if(i == midx){
 			getval(p->nl, 0, &m);
+			m.type = Vref;
+			m.bp = p->nl->off;
+			m.bh = blkhash(p->nl);
+			m.fill = blkfill(p->nl);
 			setval(n, j++, &m, 0);
 			if(p->nr){
 				getval(p->nr, 0, &m);
+				m.type = Vref;
+				m.bp = p->nr->off;
+				m.bh = blkhash(p->nr);
+				m.fill = blkfill(p->nr);
 				setval(n, j++, &m, 0);
+				i++;
 			}
 			continue;
 		}
@@ -630,6 +640,8 @@ merge(Path *p, int idx, Blk *a, Blk *b)
 			setmsg(d, o++, &m);
 		}
 	}
+	finalize(d);
+	enqueue(d);
 	p->merge = 1;
 	p->midx = idx;
 	p->nl = d;
@@ -690,6 +702,7 @@ rotate(Path *p, int midx, Blk *a, Blk *b, int halfpiv)
 	Blk *d, *l, *r;
 	Msg m;
 
+	print("a->type: %d\n", a->type);
 	l = newblk(a->type);
 	r = newblk(a->type);
 	if(l == nil || r == nil){
@@ -743,6 +756,10 @@ rotate(Path *p, int midx, Blk *a, Blk *b, int halfpiv)
 			setmsg(d, o++, &m);
 		}
 	}
+	finalize(l);
+	finalize(r);
+	enqueue(l);
+	enqueue(r);
 	p->merge = 1;
 	p->midx = midx;
 	p->nl = l;
@@ -794,7 +811,7 @@ trymerge(Path *p, Path *pp, int idx)
 		if((m = pp->n) == nil)
 			return 0;
 	}else{
-		if((m = getblk(km.bp, km.bh)) == nil)
+		if((m = getblk(km.bp, km.bh, 0)) == nil)
 			return -1;
 	}
 	/* Try merging left */
@@ -803,7 +820,7 @@ trymerge(Path *p, Path *pp, int idx)
 		getval(p->b, idx-1, &kl);
 		if(kl.fill + km.fill >= Blkspc)
 			goto next;
-		if((l = getblk(kl.bp, kl.bh)) == nil)
+		if((l = getblk(kl.bp, kl.bh, 0)) == nil)
 			goto out;
 		if(rotmerge(p, idx-1, l, m) == -1)
 			goto out;
@@ -814,7 +831,7 @@ next:
 		getval(p->b, idx+1, &kr);
 		if(kr.fill + km.fill >= Blkspc)
 			goto done;
-		if((r = getblk(kr.bp, kr.bh)) == nil)
+		if((r = getblk(kr.bp, kr.bh, 0)) == nil)
 			goto out;
 		if(rotmerge(p, idx, m, r) == -1)
 			goto out;
@@ -883,10 +900,8 @@ flush(Path *path, int npath)
 	}
 	for(; p > path; p--){
 		if(!filledpiv(p->b, 1)){
-#ifdef NOPE
 			if(trymerge(p, pp, p->idx) == -1)
 				goto error;
-#endif
 			/* If we merged the root node, break out. */
 			if(p[-1].b == nil && p[0].merge && p[0].nr == nil && p[0].b->nval == 2){
 				/* FIXME: shouldn't p[1].n already be right? */
@@ -917,7 +932,7 @@ flush(Path *path, int npath)
 				bufinsert(b, &m);
 			}
 			finalize(p->l);
-			Blk *x = getblk(p->l->off, -1);
+			Blk *x = getblk(p->l->off, -1, 0);
 			assert(p->l == x);
 			finalize(p->r);
 		}
@@ -993,7 +1008,7 @@ victim(Blk *b, Path *p)
 }
 
 int
-btupsert(Msg *msg, int nmsg)
+btupsert(Tree *t, Msg *msg, int nmsg)
 {
 	int i, npath, redo, dh, nm, height;
 	vlong rh;
@@ -1011,23 +1026,9 @@ btupsert(Msg *msg, int nmsg)
 	}
 
 again:
-	if((b = getroot(&height)) == nil){
+	if((b = getroot(t, &height)) == nil){
 		werrstr("get root: %r");
 		return -1;
-	}
-
-	/*
-	 * Fast path: the root of the tree has room,
-	 * and nobody else has observed the node, so
-	 * we can modify it with gleeful abandon.
-	 */
-	if(b->type == Tpivot && canwlock(b)) {
-		if((b->flag & Bdirty) && !filledbuf(b, nm)){
-			for(i = 0; i < nmsg; i++)
-				bufinsert(b, &msg[i]);
-			wunlock(b);
-			return 0;
-		}
 	}
 
 	/*
@@ -1050,7 +1051,7 @@ again:
 			break;
 		victim(b, &path[npath]);
 		getval(b, path[npath].idx, &sep);
-		b = getblk(sep.bp, sep.bh);
+		b = getblk(sep.bp, sep.bh, 0);
 		if(b == nil)
 			goto error;
 		npath++;
@@ -1091,11 +1092,11 @@ again:
 
 	assert(rb->off != 0);
 	rh = blkhash(rb);
-	lock(&fs->rootlk);
-	fs->height += dh;
-	fs->rootb = rb->off;
-	fs->rooth = rh;
-	unlock(&fs->rootlk);
+	lock(&t->lk);
+	t->ht += dh;
+	t->bp = rb->off;
+	t->bh = rh;
+	unlock(&t->lk);
 
 	freepath(path, npath);
 	free(path);
@@ -1115,17 +1116,17 @@ error:
 }
 
 Blk*
-getroot(int *h)
+getroot(Tree *t, int *h)
 {
 	vlong bp, bh;
 
-	lock(&fs->rootlk);
-	bp = fs->rootb;
-	bh = fs->rooth;
+	lock(&t->lk);
+	bp = t->bp;
+	bh = t->bh;
 	if(h != nil)
-		*h = fs->height;
-	unlock(&fs->rootlk);
-	return getblk(bp, bh);
+		*h = t->ht;
+	unlock(&t->lk);
+	return getblk(bp, bh, 0);
 }
 
 static char*
@@ -1179,7 +1180,7 @@ btlookupat(Blk *b0, Key *k, Kvp *r, Blk **bp)
 		if(idx == -1)
 			return Eexist;
 		putblk(b);
-		if((b = getblk(r->bp, r->bh)) == nil)
+		if((b = getblk(r->bp, r->bh, 0)) == nil)
 			return Efs;
 	}
 	assert(b->type == Tleaf);
@@ -1193,13 +1194,13 @@ btlookupat(Blk *b0, Key *k, Kvp *r, Blk **bp)
 }
 
 char*
-btlookup(Key *k, Kvp *r, Blk **bp)
+btlookup(Tree *t, Key *k, Kvp *r, Blk **bp)
 {
 	char *ret;
 	Blk *b;
 
 	*bp = nil;
-	if((b = getroot(nil)) == nil)
+	if((b = getroot(t, nil)) == nil)
 		return Efs;
 	ret = btlookupat(b, k, r, bp);
 	putblk(b);
@@ -1208,7 +1209,7 @@ btlookup(Key *k, Kvp *r, Blk **bp)
 }
 
 char*
-btscan(Scan *s, Key *pfx, vlong rootb, vlong rooth, int height)
+btscan(Tree *t, Scan *s, Key *pfx)
 {
 	int i, same;
 	Scanp *p;
@@ -1218,35 +1219,26 @@ btscan(Scan *s, Key *pfx, vlong rootb, vlong rooth, int height)
 
 	s->done = 0;
 	s->offset = 0;
-	s->height = height;
 	cpkey(&s->pfx, pfx, s->pfxbuf, sizeof(s->pfxbuf));
 
 	s->kv.v = s->kvbuf+pfx->nk;
 	s->kv.nv = 0;
 	cpkey(&s->kv, pfx, s->kvbuf, sizeof(s->kvbuf));
 
-	if(rootb != -1){
-		s->rootb = rootb;
-		s->rooth = rooth;
-		s->height = height;
-	}else{
-		lock(&fs->rootlk);
-		s->rootb = fs->rootb;
-		s->rooth = fs->rooth;
-		s->height = fs->height;
-dprint("height %d\n", s->height);
-		unlock(&fs->rootlk);
-	}
-	if((s->path = calloc(s->height, sizeof(Scanp))) == nil){
+	lock(&t->lk);
+	s->root = *t;
+//dprint("height %d\n", s->root.ht);
+	unlock(&t->lk);
+	if((s->path = calloc(s->root.ht, sizeof(Scanp))) == nil){
 		free(s);
 		return nil;
 	}
 
 	p = s->path;
-	if((b = getblk(s->rootb, s->rooth)) == nil)
+	if((b = getblk(s->root.bp, s->root.bh, 0)) == nil)
 		return "error reading block";
 	p[0].b = b;
-	for(i = 0; i < s->height; i++){
+	for(i = 0; i < s->root.ht; i++){
 		p[i].vi = blksearch(b, &s->kv, &v, &same);
 		if(p[i].vi == -1 || (!same && b->type == Tleaf))
 			getval(b, ++p[i].vi, &v);
@@ -1254,18 +1246,18 @@ dprint("height %d\n", s->height);
 			p[i].bi = bufsearch(b, &s->kv, &m, &same);
 			if(p[i].bi == -1 || !same)
 				p[i].bi++;
-			if((b = getblk(v.bp, v.bh)) == nil)
+			if((b = getblk(v.bp, v.bh, 0)) == nil)
 				return "error readivg block";
 			p[i+1].b = b;
 		}else{
-			assert(i == s->height-1);
+			assert(i == s->root.ht-1);
 		}
 	}
-dprint("inited\n");
-for(i = 0; i < s->height; i++){
-dprint("\t%p", p[i].b);
-dprint(" (%d %d)\n", p[i].vi, p[i].bi);
-}
+//dprint("inited\n");
+//for(i = 0; i < s->root.ht; i++){
+//dprint("\t%p", p[i].b);
+//dprint(" (%d %d)\n", p[i].vi, p[i].bi);
+//}
 	return nil;
 }
 
@@ -1278,15 +1270,15 @@ btnext(Scan *s, Kvp *r, int *done)
 	Kvp kv;
 
 	p = s->path;
-	h = s->height;
+	h = s->root.ht;
 	*done = 0;
 	start = h;
 	for(i = h-1; i > 0; i--){
-dprint("advancing (i=%d)\n", i);
-for(j = 0; j < h; j++){
-dprint("\t%p", p[j].b);
-dprint(" (%d %d)\n", p[j].vi, p[j].bi);
-}
+//dprint("advancing (i=%d)\n", i);
+//for(j = 0; j < h; j++){
+//dprint("\t%p", p[j].b);
+//dprint(" (%d %d)\n", p[j].vi, p[j].bi);
+//}
 		if(p[i].vi < p[i].b->nval || p[i].bi < p[i].b->nbuf)
 			break;
 		if(i == 0){
@@ -1300,7 +1292,7 @@ dprint(" (%d %d)\n", p[j].vi, p[j].bi);
 	}
 	for(i = start; i < h; i++){
 		getval(p[i-1].b, p[i-1].vi, &kv);
-		if((p[i].b = getblk(kv.bp, kv.bh)) == nil)
+		if((p[i].b = getblk(kv.bp, kv.bh, 0)) == nil)
 			return "error reading block";
 	}
 	getval(p[h-1].b, p[h-1].vi, &m);
@@ -1335,7 +1327,7 @@ btdone(Scan *s)
 {
 	int i;
 
-	for(i = 0; i < s->height; i++)
+	for(i = 0; i < s->root.ht; i++)
 		if(s->path[i].b != nil)
 			putblk(s->path[i].b);
 	free(s->path);
@@ -1352,10 +1344,10 @@ snapshot(void)
 	s = fs->super;
 
 	qlock(&fs->snaplk);
-	lock(&fs->rootlk);
+	lock(&fs->root.lk);
 	fillsuper(s);
 	finalize(s);
-	unlock(&fs->rootlk);
+	unlock(&fs->root.lk);
 
 	for(i = 0; i < fs->narena; i++){
 		a = &fs->arenas[i];
@@ -1367,49 +1359,4 @@ snapshot(void)
 		r = syncblk(s);
 	qunlock(&fs->snaplk);
 	return r;
-}
-
-int
-getrefpg(vlong off, Blk **p)
-{
-	char kbuf[9], *e;
-	vlong bp, bh;
-	Blk *b;
-	Kvp kv;
-
-	*p = nil;
-	kbuf[0] = Kref;
-	PBIT64(kbuf+1, off & ~(Blksz-1));
-	kv.k = kbuf;
-	kv.nk = sizeof(kbuf);
-	e = btlookup(&kv, &kv, &b);
-	if(e == Eexist)
-		return 0;
-	if(e != nil || kv.nv != 16)
-		return -1;
-	bp = GBIT64(kv.v+0);
-	bh = GBIT64(kv.v+8);
-	putblk(b);
-	if((*p = getblk(bp, bh)) == nil)
-		return -1;
-	return 0;
-}
-
-int
-setrefpg(vlong pg, vlong bp, vlong bh)
-{
-	char kbuf[9], vbuf[16];
-	Msg m;
-
-	kbuf[0] = Kref;
-	PBIT64(kbuf+1, pg & ~(Blksz-1));
-	PBIT64(vbuf+0, bp);
-	PBIT64(vbuf+8, bh);
-
-	m.op = Oinsert;
-	m.k = kbuf;
-	m.nk = sizeof(kbuf);
-	m.v = vbuf;
-	m.nv = sizeof(vbuf);
-	return btupsert(&m, 1);
 }

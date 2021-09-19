@@ -184,6 +184,7 @@ enum {
 };
 
 enum {
+	Onop,
 	Oinsert,
 	Odelete,
 	Owstat,
@@ -397,6 +398,7 @@ struct Scan {
 	Tree	root;
 
 	int	done;
+	int	overflow;
 	Kvp	kv;
 	Key	pfx;
 	char	kvbuf[Kvmax];

@@ -692,7 +692,9 @@ int
 syncblk(Blk *b)
 {
 	assert(b->flag & Bfinal);
-	print("\tsyncblk: %llx+%llx\n", b->off, Blksz);
+	wlock(b);
+	b->flag &= ~(Bqueued|Bdirty);
+	wunlock(b);
 	return pwrite(fs->fd, b->buf, Blksz, b->off);
 }
 
@@ -701,16 +703,12 @@ void
 enqueue(Blk *b)
 {
 	print("sync %llx\n", b->off);
-	assert(b->flag & Bfinal);
+	assert(b->flag&Bdirty);
+	finalize(b);
 	if(syncblk(b) == -1){
 		ainc(&fs->broken);
 		fprint(2, "write: %r");
-		return;
 	}
-	wlock(b);
-	b->flag &= ~(Bqueued|Bdirty);
-	wunlock(b);
-
 }
 
 void
@@ -720,6 +718,9 @@ fillsuper(Blk *b)
 
 	assert(b->type == Tsuper);
 	p = b->data;
+	wlock(b);
+	b->flag |= Bdirty;
+	wunlock(b);
 	memcpy(p +  0, "gefs0001", 8);
 	PBIT32(p +  8, 0); /* dirty */
 	PBIT32(p + 12, Blksz);
@@ -741,7 +742,8 @@ finalize(Blk *b)
 
 //	assert((b->flag & Bfinal) == 0);
 	b->flag |= Bfinal;
-	PBIT16(b->buf, b->type);
+	if(b->type != Traw)
+		PBIT16(b->buf, b->type);
 	switch(b->type){
 	default:
 	case Tnone:
@@ -817,8 +819,7 @@ putblk(Blk *b)
 {
 	if(b == nil)
 		return;
-	if((b->flag & (Bdirty|Bqueued)) == Bdirty)
-		enqueue(b);
+	assert((b->flag & Bqueued) || !(b->flag & Bdirty));
 	if(adec(&b->ref) == 0){
 		cachedel(b->off);
 		free(b);

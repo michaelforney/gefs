@@ -38,7 +38,7 @@ int	compresslog(Arena *a);
 int	btupsert(Tree*, Msg*, int);
 char	*btlookup(Tree*, Key*, Kvp*, Blk**);
 char	*btlookupat(Blk*, Key*, Kvp*, Blk**);
-char	*btscan(Tree*, Scan*, Key*);
+char	*btscan(Tree*, Scan*, char*, int);
 char	*btnext(Scan*, Kvp*, int*);
 void	btdone(Scan*);
 

@@ -130,6 +130,7 @@ reamfs(char *dev)
 	s->data = s->buf + Hdrsz;
 	fillsuper(s);
 	finalize(s);
+	syncblk(s);
 
 print("superblock @%llx\n", s->off);
 	for(i = 0; i < fs->narena; i++)
@@ -145,6 +146,7 @@ print("superblock @%llx\n", s->off);
 		sysfatal("ream: allocate root: %r");
 	initroot(r);
 	finalize(r);
+	syncblk(r);
 
 	fs->super = s;
 	fs->root.bp = r->off;

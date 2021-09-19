@@ -662,6 +662,7 @@ fsremove(Fmsg *m)
 	mb.k = f->dent->k;
 	mb.nk = f->dent->nk;
 	mb.nv = 0;
+//showfs("preremove");
 	if(btupsert(&fs->root, &mb, 1) == -1){
 		runlock(f->dent);
 		rerror(m, "remove: %r");
@@ -740,22 +741,19 @@ fsreaddir(Fmsg *m, Fid *f, Fcall *r)
 	int n, ns, done;
 	Tree *t;
 	Scan *s;
-	Kvp kv;
 
 	s = f->scan;
 	if(s != nil && s->offset != 0 && s->offset != m->offset)
 		return Edscan;
 	if(s == nil || m->offset == 0){
-		pfx[0] = Kent;
-		PBIT64(pfx+1, f->qpath);
-		kv.k = pfx;
-		kv.nk = sizeof(pfx);
-
 		print("scan starting\n");
 		if((s = mallocz(sizeof(Scan), 1)) == nil)
 			return "out of memory";
+
+		pfx[0] = Kent;
+		PBIT64(pfx+1, f->qpath);
 		t = (f->root.bp != -1) ? &f->root : &fs->root;
-		if((e = btscan(t, s, &kv)) != nil){
+		if((e = btscan(t, s, pfx, sizeof(pfx))) != nil){
 			free(r->data);
 			btdone(s);
 			return e;
@@ -774,12 +772,20 @@ fsreaddir(Fmsg *m, Fid *f, Fcall *r)
 	}
 	p = r->data;
 	n = m->count;
+	if(s->overflow){
+		if((ns = kv2statbuf(&s->kv, p, n)) == -1)
+			return Edscan;
+		s->overflow = 0;
+		p += ns;
+		n -= ns;
+	}
 	while(1){
-		if((e = btnext(s, &kv, &done)) != nil)
+		if((e = btnext(s, &s->kv, &done)) != nil)
 			return e;
 		if(done)
 			break;
-		if((ns = kv2statbuf(&kv, p, n)) == -1){
+		if((ns = kv2statbuf(&s->kv, p, n)) == -1){
+			s->overflow = 1;
 			fprint(2, "** could not fill buf: %r\n");
 			break;
 		}
@@ -825,12 +831,12 @@ readb(Fid *f, char *d, vlong o, vlong n, int sz)
 
 	if((b = getblk(bp, bh, GBraw)) == nil)
 		return -1;
-	fprint(2, "\treading from %llx (%llx) %s %s\n", bp, b->off, b->buf, b->data);
+	fprint(2, "\treading(%lld+%d) from %llx (%llx) %s %s\n", o, n, bp, b->off, b->buf, b->data);
 	if(bo+n > Blksz)
 		n = Blksz-bo;
 	if(b != nil){
 		fprint(2, "\tcopying %lld to resp %p\n", n, d);
-		memcpy(d, b->buf, n);
+		memcpy(d, b->buf+bo, n);
 		putblk(b);
 	}else
 		memset(d, 0, n);
@@ -864,6 +870,7 @@ fsreadfile(Fmsg *m, Fid *f, Fcall *r)
 //showfs("pre-readb");
 	while(c != 0){
 		n = readb(f, p, o, c, e->length);
+print("after readb: p[%d]=%.*s\n", n, n, p);
 		if(n == -1){
 			runlock(e);
 			return Efs;
@@ -924,30 +931,36 @@ writeb(Fid *f, Msg *m, char *s, vlong o, vlong n, int sz)
 	fo = o & (Blksz-1);
 
 	m->k[0] = Kdat;
-//	dprint("offset: %llx\n", fb);
 	PBIT64(m->k+1, f->qpath);
 	PBIT64(m->k+9, fb);
 
+
+print("%lld < %d && (%lld != 0 || %lld != %lld\n", fb, sz, fo, n, Blksz);
 	b = newblk(Traw);
 	if(b == nil)
 		return -1;
-	if(o < sz){
+	if(fb < sz && (fo != 0 || n != Blksz)){
 		fprint(2, "\tappending to block %llx\n", b->off);
-		if(fslookup(f, m, &kv, &t, 0) != nil)
-			goto new;
+		if(fslookup(f, m, &kv, &t, 0) != nil){
+			putblk(b);
+			return -1;
+		}
 		bp = GBIT64(kv.v+0);
 		bh = GBIT64(kv.v+8);
 		putblk(t);
 
-		if((t = getblk(bp, bh, GBraw)) == nil)
+		if((t = getblk(bp, bh, GBraw)) == nil){
+			putblk(b);
 			return -1;
+		}
 		memcpy(b->buf, t->buf, Blksz);
 		putblk(t);
 	}
-new:
 	if(fo+n > Blksz)
 		n = Blksz-fo;
-	memcpy(b->buf, s, n);
+	memcpy(b->buf+fo, s, n);
+print("blk contents{{%.*s}}\n", (int)(fo+n), b->data);
+	enqueue(b);
 	putblk(b);
 	fprint(2, "\twrote to new blk %llx at offset %lld\n", b->off, o);
 	bh = blkhash(b);
@@ -967,7 +980,6 @@ fswrite(Fmsg *m)
 	Fid *f;
 	int i;
 
-	
 	if((f = getfid(m->fid)) == nil){
 		rerror(m, Efid);
 		return;
@@ -988,6 +1000,7 @@ fswrite(Fmsg *m)
 		kv[i].v = offbuf[i]+17;
 		kv[i].nv = 16;
 		n = writeb(f, &kv[i], p, o, c, f->dent->length);
+		btupsert(&fs->root, &kv[i], 1);
 		if(n == -1){
 			// badwrite(f, i);
 			// FIXME: free pages
@@ -1005,13 +1018,13 @@ fswrite(Fmsg *m)
 	kv[i].v = sbuf;
 	kv[i].nv = 0;
 	if(m->offset+m->count > f->dent->length){
-		fprint(2, "bumping size...\n");
 		kv[i].op |= Owsize;
 		kv[i].nv += 8;
 		PBIT64(kv[i].v, m->offset+m->count);
 		f->dent->length = m->offset+m->count;
 	}
-	btupsert(&fs->root, kv, i+1);
+	btupsert(&fs->root, &kv[i], 1);
+//	btupsert(&fs->root, kv, i+1);
 	wunlock(f->dent);
 
 	r.type = Rwrite;
@@ -1114,23 +1127,24 @@ runread(void *)
 void
 runctl(void *pfd)
 {
-	char buf[128];
-	int fd, n;
+	char buf[256], *arg[4];
+	int fd, n, narg;
 
 	fd = (uintptr)pfd;
 	while(1){
 		if((n = read(fd, buf, sizeof(buf)-1)) == -1)
 			break;
-		buf[n--] = 0;
-		while(buf[n] == ' ' || buf[n] == '\t' || buf[n] == '\n')
-			buf[n--] = 0;
-		fprint(2, "ctl message: %s\n", buf);
-		fprint(fd, "ctl message: %s\n", buf);
-		if(strcmp(buf, "show") == 0)
+		buf[n] = 0;
+		narg = tokenize(buf, arg, nelem(arg));
+		if(narg == 0 || strlen(arg[0]) == 0)
+			continue;
+		if(strcmp(arg[0], "show") == 0)
 			fshowfs(fd, "show");
-		else if(strcmp(buf, "check") == 0)
+		else if(strcmp(arg[0], "check") == 0)
 			checkfs();
+		else if(strcmp(arg[0], "dbg") && narg == 2)
+			debug = atoi(arg[1]);
 		else
-			fprint(fd, "unknown command %s", buf);
+			fprint(fd, "unknown command %s\n", arg[0]);
 	}
 }

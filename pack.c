@@ -214,6 +214,7 @@ dprint("unpacking... [%d %d]\n", k[0], k[1]);
 	v = unpackstr(&err, v, ev, &d->gid);
 	v = unpackstr(&err, v, ev, &d->muid);
 	if(err){
+		abort();
 		werrstr("kv too small");
 		return -1;
 	}
@@ -238,6 +239,7 @@ kv2statbuf(Kvp *kv, char *buf, int nbuf)
 
 	if(kv2dir(kv, &d) == -1)
 		return -1;
+print("\tpackname: %s\n", d.name);
 	dprint("have %d bytes to pack into\n", nbuf);
 	if((n = convD2M(&d, (uchar*)buf, nbuf)) <= BIT16SZ){
 		fprint(2, "here...failed convert??, needed %d\n", GBIT16(buf));

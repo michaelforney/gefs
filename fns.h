@@ -60,7 +60,7 @@ int	checkfs(void);
 
 #define dprint(...) \
 	do{ \
-		if(1) fprint(2, __VA_ARGS__); \
+		if(debug) fprint(2, __VA_ARGS__); \
 	}while(0)
 
 char	*pack8(int*, char*, char*, uchar);

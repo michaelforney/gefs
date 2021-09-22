@@ -3,6 +3,7 @@
 #include <fcall.h>
 #include <avl.h>
 #include <bio.h>
+#include <pool.h>
 
 #include "dat.h"
 #include "fns.h"
@@ -131,12 +132,15 @@ showfids(void)
 	if(!debug)
 		return;
 	fprint(2, "fids:---\n");
+	lock(&fs->fidtablk);
 	for(i = 0; i < Nfidtab; i++)
 		for(f = fs->fidtab[i]; f != nil; f = f->next){
 			rlock(f->dent);
 			fprint(2, "\tfid[%d]: %d [refs=%ld, k=%K]\n", i, f->fid, f->dent->ref, &f->dent->Key);
 			runlock(f->dent);
-		}		
+		}
+	unlock(&fs->fidtablk);
+
 }
 
 Fid*
@@ -422,8 +426,6 @@ showfids();
 		rerror(m, Enomem);
 		return;
 	}
-checkfs();
-showfids();
 	r.qid = d.qid;
 	respond(m, &r);
 	return;
@@ -632,6 +634,10 @@ fscreate(Fmsg *m)
 	f->mode = m->mode;
 	f->qpath = d.qid.path;
 	f->dent = dent;
+	wlock(f->dent);
+//	freeb(dent, 0, dent->length);
+	dent->length = 0;
+	wunlock(f->dent);
 	unlock(f);
 
 	r.type = Rcreate;
@@ -648,10 +654,6 @@ fsremove(Fmsg *m)
 	Msg mb;
 	Fid *f;
 
-	if(okname(m->name) == -1){
-		rerror(m, Ename);
-		return;
-	}
 	if((f = getfid(m->fid)) == nil){
 		rerror(m, "no such fid");
 		return;
@@ -730,6 +732,12 @@ fsopen(Fmsg *m)
 //		refblk(fs->root.bp);
 		unlock(&fs->root.lk);
 	}
+	if(f->mode & OTRUNC){
+		wlock(f->dent);
+//		freeb(f->dent, 0, dent->length);
+		f->dent->length = 0;
+		wunlock(f->dent);
+	}
 	unlock(f);
 	respond(m, &r);
 }
@@ -773,7 +781,7 @@ fsreaddir(Fmsg *m, Fid *f, Fcall *r)
 	p = r->data;
 	n = m->count;
 	if(s->overflow){
-		if((ns = kv2statbuf(&s->kv, p, n)) == -1)
+		if((ns = convD2M(&s->dir, (uchar*)p, n)) <= BIT16SZ)
 			return Edscan;
 		s->overflow = 0;
 		p += ns;
@@ -784,9 +792,8 @@ fsreaddir(Fmsg *m, Fid *f, Fcall *r)
 			return e;
 		if(done)
 			break;
-		if((ns = kv2statbuf(&s->kv, p, n)) == -1){
+		if((ns = convD2M(&s->dir, (uchar*)p, n)) <= BIT16SZ){
 			s->overflow = 1;
-			fprint(2, "** could not fill buf: %r\n");
 			break;
 		}
 		fprint(2, "*** nscan: %d\n", ns);
@@ -801,7 +808,7 @@ int
 readb(Fid *f, char *d, vlong o, vlong n, int sz)
 {
 	char *e, buf[17];
-	vlong bp, bh, bo;
+	vlong fb, fo, bp, bh;
 	Blk *b;
 	Key k;
 	Kvp kv;
@@ -809,14 +816,14 @@ readb(Fid *f, char *d, vlong o, vlong n, int sz)
 	if(o >= sz)
 		return 0;
 
-	bp = o & ~(Blksz-1);
-	bo = o & (Blksz-1);
+	fb = o & ~(Blksz-1);
+	fo = o & (Blksz-1);
 
 	k.k = buf;
 	k.nk = sizeof(buf);
 	k.k[0] = Kdat;
 	PBIT64(k.k+1, f->qpath);
-	PBIT64(k.k+9, bp);
+	PBIT64(k.k+9, fb);
 
 	e = fslookup(f, &k, &kv, &b, 0);
 	if(e != nil && e != Eexist){
@@ -831,12 +838,11 @@ readb(Fid *f, char *d, vlong o, vlong n, int sz)
 
 	if((b = getblk(bp, bh, GBraw)) == nil)
 		return -1;
-	fprint(2, "\treading(%lld+%d) from %llx (%llx) %s %s\n", o, n, bp, b->off, b->buf, b->data);
-	if(bo+n > Blksz)
-		n = Blksz-bo;
+	if(fo+n > Blksz)
+		n = Blksz-fo;
 	if(b != nil){
 		fprint(2, "\tcopying %lld to resp %p\n", n, d);
-		memcpy(d, b->buf+bo, n);
+		memcpy(d, b->buf+fo, n);
 		putblk(b);
 	}else
 		memset(d, 0, n);
@@ -867,11 +873,10 @@ fsreadfile(Fmsg *m, Fid *f, Fcall *r)
 	o = m->offset;
 	if(m->offset + m->count > e->length)
 		c = e->length - m->offset;
-//showfs("pre-readb");
 	while(c != 0){
 		n = readb(f, p, o, c, e->length);
-print("after readb: p[%d]=%.*s\n", n, n, p);
 		if(n == -1){
+			fprint(2, "read: %r\n");
 			runlock(e);
 			return Efs;
 		}
@@ -921,7 +926,7 @@ fsread(Fmsg *m)
 }
 
 int
-writeb(Fid *f, Msg *m, char *s, vlong o, vlong n, int sz)
+writeb(Fid *f, Msg *m, char *s, vlong o, vlong n, vlong sz)
 {
 	vlong fb, fo, bp, bh;
 	Blk *b, *t;
@@ -935,7 +940,6 @@ writeb(Fid *f, Msg *m, char *s, vlong o, vlong n, int sz)
 	PBIT64(m->k+9, fb);
 
 
-print("%lld < %d && (%lld != 0 || %lld != %lld\n", fb, sz, fo, n, Blksz);
 	b = newblk(Traw);
 	if(b == nil)
 		return -1;
@@ -959,21 +963,21 @@ print("%lld < %d && (%lld != 0 || %lld != %lld\n", fb, sz, fo, n, Blksz);
 	if(fo+n > Blksz)
 		n = Blksz-fo;
 	memcpy(b->buf+fo, s, n);
-print("blk contents{{%.*s}}\n", (int)(fo+n), b->data);
 	enqueue(b);
-	putblk(b);
-	fprint(2, "\twrote to new blk %llx at offset %lld\n", b->off, o);
+
 	bh = blkhash(b);
 	PBIT64(m->v+0, b->off);
 	PBIT64(m->v+8, bh);
-	fprint(2, "\tkv: %M", m);
+	putblk(b);
+	checkfs();
+	poolcheck(mainmem);
 	return n;
 }
 
 void
 fswrite(Fmsg *m)
 {
-	char sbuf[8], offbuf[4][13+16], *p;
+	char sbuf[8], offbuf[4][Ptrsz+Offsz], *p;
 	vlong n, o, c;
 	Msg kv[4];
 	Fcall r;
@@ -990,17 +994,17 @@ fswrite(Fmsg *m)
 		return;
 	}
 
+	wlock(f->dent);
 	p = m->data;
 	o = m->offset;
 	c = m->count;
 	for(i = 0; i < nelem(kv)-1 && c != 0; i++){
 		kv[i].op = Oinsert;
 		kv[i].k = offbuf[i];
-		kv[i].nk = 17;
-		kv[i].v = offbuf[i]+17;
+		kv[i].nk = Offsz;
+		kv[i].v = offbuf[i]+Offsz;
 		kv[i].nv = 16;
 		n = writeb(f, &kv[i], p, o, c, f->dent->length);
-		btupsert(&fs->root, &kv[i], 1);
 		if(n == -1){
 			// badwrite(f, i);
 			// FIXME: free pages
@@ -1011,7 +1015,6 @@ fswrite(Fmsg *m)
 		c -= n;
 	}
 
-	wlock(f->dent);
 	kv[i].op = Owstat;
 	kv[i].k = f->dent->k;
 	kv[i].nk = f->dent->nk;
@@ -1023,8 +1026,7 @@ fswrite(Fmsg *m)
 		PBIT64(kv[i].v, m->offset+m->count);
 		f->dent->length = m->offset+m->count;
 	}
-	btupsert(&fs->root, &kv[i], 1);
-//	btupsert(&fs->root, kv, i+1);
+	btupsert(&fs->root, kv, i+1);
 	wunlock(f->dent);
 
 	r.type = Rwrite;

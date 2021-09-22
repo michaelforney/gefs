@@ -206,7 +206,7 @@ main(int argc, char **argv)
 		fs->rdchan = mkchan(128);
 		fs->wrchan = mkchan(128);
 		srvfd = postfd(srvname, "");
-		ctlfd = postfd(srvname, ".ctl");
+		ctlfd = postfd(srvname, ".cmd");
 		loadfs(argv[0]);
 		launch(runctl, (void*)ctlfd, "ctl");
 		launch(runwrite, nil, "writeio");

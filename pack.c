@@ -198,8 +198,11 @@ kv2dir(Kvp *kv, Dir *d)
 	err = 0;
 	k = kv->k + 9;
 	ek = kv->k + kv->nk;
-dprint("unpacking... [%d %d]\n", k[0], k[1]);
 	k = unpackstr(&err, k, ek, &d->name);
+	if(err){
+		werrstr("key too small [%d]", kv->nk);
+		return -1;
+	}
 
 	v = kv->v;
 	ev = v + kv->nv;
@@ -214,8 +217,8 @@ dprint("unpacking... [%d %d]\n", k[0], k[1]);
 	v = unpackstr(&err, v, ev, &d->gid);
 	v = unpackstr(&err, v, ev, &d->muid);
 	if(err){
-		abort();
-		werrstr("kv too small");
+		print("fucked: %P\n", kv);
+		werrstr("val too small [%s]", d->name);
 		return -1;
 	}
 	if(k != ek){

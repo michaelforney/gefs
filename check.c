@@ -151,12 +151,12 @@ rshowblk(int fd, Blk *b, int indent, int recurse)
 	if(b->type == Tpivot){
 		for(i = 0; i < b->nbuf; i++){
 			getmsg(b, i, &m);
-			fprint(fd, "%.*s|%M\n", 4*indent, spc, &m);
+			fprint(fd, "%.*s[%03d]|%M\n", 4*indent, spc, i, &m);
 		}
 	}
 	for(i = 0; i < b->nval; i++){
 		getval(b, i, &kv);
-		fprint(fd, "%.*s|%P\n", 4*indent, spc, &kv);
+		fprint(fd, "%.*s[%03d]|%P\n", 4*indent, spc, i, &kv);
 		if(b->type == Tpivot){
 			if((c = getblk(kv.bp, kv.bh, 0)) == nil)
 				sysfatal("failed load: %r");

@@ -148,7 +148,6 @@ grabrange(Avltree *t, vlong off, vlong len)
 	if(r == nil || off + len > r->off + r->len)
 		abort();
 
-	print("\tmerge (%llx,%llx) (%llx,%llx)\n", off, len, r->off, r->len);
 	if(off == r->off){
 		r->off += len;
 		r->len -= len;
@@ -260,7 +259,6 @@ loadlog(Arena *a)
 	bp = a->log;
 
 Nextblk:
-	dprint("block: %llx\n", bp);
 	if((b = readblk(bp, 0)) == nil)
 		return -1;
 	p = b->data;
@@ -333,9 +331,6 @@ compresslog(Arena *a)
 	Blk *hd, *ab, *b;
 	char *p;
 
-showfree("precompress");
-fprint(2, "compress start\n");
-
 	/*
 	 * Sync the current log to disk, and
 	 * set up a new block log tail.  While
@@ -375,7 +370,6 @@ fprint(2, "compress start\n");
 		}
 	}
 	a->logtl = b;
-print("\tnew log block: %llx\n", b->off);
 
 	/*
 	 * Prepare what we're writing back.
@@ -444,7 +438,6 @@ showfree("postcompress");
 					break;
 				}
 			}
-			fprint(2, "\tpostscan: freeing %llx\n", bp);
 			if(blkdealloc(bp) == -1)
 				return -1;
 		}
@@ -488,7 +481,6 @@ blkalloc_lk(Arena *a)
 		avldelete(t, r);
 		free(r);
 	}
-fprint(2, "\talloc %llx\n", b);
 	return b;
 }
 
@@ -560,8 +552,9 @@ newblk(int t)
 
 	if((bp = blkalloc(-1)) == -1)
 		return nil;
-	if((b = mallocz(sizeof(Blk), 1)) == nil)
-		return nil;
+	if((b = lookupblk(bp)) == nil)
+		if((b = mallocz(sizeof(Blk), 1)) == nil)
+			return nil;
 	b->type = t;
 	b->flag = Bdirty;
 	b->off = bp;
@@ -600,7 +593,6 @@ cacheblk(Blk *b)
 	/* FIXME: better hash. */
 	assert(b->off != 0);
 	h = ihash(b->off);
-//	dprint("cache %lld (h=%xm, bkt=%d) => %p\n", b->off, h%fs->cmax, h, b);
 	ainc(&b->ref);
 	bkt = &fs->cache[h % fs->cmax];
 	lock(bkt);
@@ -702,12 +694,12 @@ syncblk(Blk *b)
 void
 enqueue(Blk *b)
 {
-	print("sync %llx\n", b->off);
 	assert(b->flag&Bdirty);
 	finalize(b);
 	if(syncblk(b) == -1){
 		ainc(&fs->broken);
 		fprint(2, "write: %r");
+		abort();
 	}
 }
 
@@ -777,11 +769,12 @@ getblk(vlong bp, uvlong bh, int flg)
 	if((b = lookupblk(bp)) == nil){
 		if((b = readblk(bp, flg)) == nil)
 			return nil;
-		if(siphash(b->buf, Blksz) != bh){
-			werrstr("corrupt block %llx", bp);
+		if(blkhash(b) != bh){
+			werrstr("corrupt block %llx: %llx != %llx", bp, blkhash(b), bh);
 			return nil;
 		}
 	}
+	assert(b->off == bp);
 	return cacheblk(b);
 }
 
@@ -819,8 +812,8 @@ putblk(Blk *b)
 {
 	if(b == nil)
 		return;
-	assert((b->flag & Bqueued) || !(b->flag & Bdirty));
 	if(adec(&b->ref) == 0){
+		assert((b->flag & Bqueued) || !(b->flag & Bdirty));
 		cachedel(b->off);
 		free(b);
 	}
@@ -846,7 +839,6 @@ sync(void)
 	int i, r;
 	Blk *b;
 
-	dprint("syncing\n");
 	r = 0;
 	for(i = 0; i < fs->narena; i++){
 		b = fs->arenas[i].logtl;
@@ -856,7 +848,6 @@ sync(void)
 	}
 	/* FIXME: hit it with a big hammer -- flush the whole cache */
 	for(b = fs->chead; b != nil; b = b->cnext){
-//		dprint("sync %p\n", b);
 		if(!(b->flag & Bdirty))
 			continue;
 		if(syncblk(b) == -1)

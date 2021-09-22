@@ -40,9 +40,10 @@ enum {
 	 * maximally filled tree.
 	 */
 	Loghdsz	= 8,			/* log hash */
-	Keymax	= 32,			/* key data limit */
-	Inlmax	= 128,			/* inline data limit */
+	Keymax	= 128,			/* key data limit */
+	Inlmax	= 256,			/* inline data limit */
 	Ptrsz	= 18,			/* off, hash, fill */
+	Offsz	= 17,			/* type, qid, off */
 	Kvmax	= Keymax + Inlmax,	/* Key and value */
 	Kpmax	= Keymax + Ptrsz,	/* Key and pointer */
 	
@@ -396,9 +397,11 @@ struct Scanp {
 struct Scan {
 	vlong	offset;	/* last read offset */
 	Tree	root;
+	Dir	dir;
 
 	int	done;
 	int	overflow;
+	int	present;
 	Kvp	kv;
 	Key	pfx;
 	char	kvbuf[Kvmax];

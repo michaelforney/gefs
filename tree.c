@@ -334,10 +334,10 @@ blksearch(Blk *b, Key *k, Kvp *rp, int *same)
 }
 
 int
-filledbuf(Blk *b, int needed)
+filledbuf(Blk *b, int nmsg, int needed)
 {
 	assert(b->type == Tpivot);
-	return 2*(b->nbuf+1) + b->bufsz + needed > Bufspc;
+	return 2*(b->nbuf+nmsg) + b->bufsz + needed > Bufspc;
 }
 
 
@@ -596,7 +596,6 @@ apply(Blk *b, Msg *m)
 			PBIT32(kv.v+25, v);
 		}
 		if(m->op & Owsize){
-			fprint(2, "wstat: incrementing size");
 			v = GBIT64(p);
 			p += 8;
 			PBIT64(kv.v+33, v);
@@ -607,7 +606,7 @@ apply(Blk *b, Msg *m)
 			PBIT32(kv.v+33, v);
 		}
 		if(m->op & Owname){
-			fprint(2, "renames not yet supported");
+			fprint(2, "renames not yet supported\n");
 			abort();
 		}
 		if(p != m->v + m->nv)
@@ -862,7 +861,7 @@ insertmsg(Blk *rb, Msg *msg, int nmsg, int sz)
 	if(rb->type == Tleaf && !filledleaf(rb, sz))
 		for(i = 0; i < nmsg; i++)
 			apply(rb, &msg[i]);
-	else if(rb->type == Tpivot && !filledbuf(rb, sz))
+	else if(rb->type == Tpivot && !filledbuf(rb, nmsg, sz))
 		for(i = 0; i < nmsg; i++)
 			bufinsert(rb, &msg[i]);
 	else
@@ -945,11 +944,11 @@ flush(Path *path, int npath, Msg *msg, int nmsg, int *redo)
 				goto error;
 			for(i = p[-1].lo; i < p[-1].hi; i++){
 				getmsg(p[-1].b, i, &m);
-				if(filledbuf(p->n, msgsz(&m)))
+				if(filledbuf(p->n, 1, msgsz(&m)))
 					break;
 				bufinsert(p->n, &m);
 			}
-			if(p == oldroot && !filledbuf(p->n, path[0].sz)){
+			if(p == oldroot && !filledbuf(p->n, nmsg, path[0].sz)){
 				r = p->n;
 				*redo = insertmsg(r, msg, nmsg, path[0].sz);
 			}
@@ -963,7 +962,7 @@ flush(Path *path, int npath, Msg *msg, int nmsg, int *redo)
 				getmsg(p[-1].b, i, &m);
 				if(keycmp(&m, &mid) >= 0)
 					b = p->r;
-				if(filledbuf(b, msgsz(&m)))
+				if(filledbuf(b, 1, msgsz(&m)))
 					continue;
 				bufinsert(b, &m);
 			}
@@ -1018,7 +1017,6 @@ victim(Blk *b, Path *p)
 	Msg m;
 
 	j = 0;
-	lo = 0;
 	maxsz = 0;
 	p->b = b;
 	/* 
@@ -1030,6 +1028,7 @@ victim(Blk *b, Path *p)
 		if(i < b->nval)
 			getval(b, i, &kv);
 		cursz = 0;
+		lo = j;
 		for(; j < b->nbuf; j++){
 			getmsg(b, j, &m);
 			if(i < b->nval && keycmp(&m, &kv) >= 0)
@@ -1043,7 +1042,6 @@ victim(Blk *b, Path *p)
 			p->hi = j;
 			p->sz = maxsz;
 			p->idx = i - 1;
-			lo = j;
 		}
 	}
 }
@@ -1088,7 +1086,7 @@ again:
 
 	path[0].sz = sz;
 	while(b->type == Tpivot){
-		if(!filledbuf(b, path[npath - 1].sz))
+		if(!filledbuf(b, nmsg, path[npath - 1].sz))
 			break;
 		victim(b, &path[npath]);
 		getval(b, path[npath].idx, &sep);
@@ -1258,7 +1256,6 @@ btscan(Tree *t, Scan *s, char *pfx, int npfx)
 
 	lock(&t->lk);
 	s->root = *t;
-//dprint("height %d\n", s->root.ht);
 	unlock(&t->lk);
 	if((s->path = calloc(s->root.ht, sizeof(Scanp))) == nil){
 		free(s);
@@ -1284,12 +1281,59 @@ btscan(Tree *t, Scan *s, char *pfx, int npfx)
 			assert(i == s->root.ht-1);
 		}
 	}
-//dprint("inited\n");
-//for(i = 0; i < s->root.ht; i++){
-//dprint("\t%p", p[i].b);
-//dprint(" (%d %d)\n", p[i].vi, p[i].bi);
-//}
 	return nil;
+}
+
+int
+accum(Scan *s, Msg *m)
+{
+	vlong v;
+	char *p;
+	Dir *d;
+
+	d = &s->dir;
+	switch(m->op&0xf){
+	case Onop:
+	case Oinsert:
+		s->present = 1;
+		kv2dir(m, d);
+		fprint(2, "name: %s\n", d->name);
+		break;
+	case Odelete:
+		s->present = 0;
+		break;
+	case Owstat:
+		p = m->v;
+		d->qid.vers++;
+		if(m->op & Owmtime){
+			v = GBIT64(p);
+			p += 8;
+			d->mtime = v;
+		}
+		if(m->op & Owsize){
+			v = GBIT64(p);
+			p += 8;
+			d->length = v;
+		}
+		if(m->op & Owmode){
+			v = GBIT32(p);
+			p += 4;
+			d->mode = v;
+		}
+		if(m->op & Owname){
+			fprint(2, "renames not yet supported\n");
+			abort();
+		}
+		if(p != m->v + m->nv){
+			fprint(2, "malformed wstat message");
+			abort();
+		}
+		break;
+	default:
+		abort();
+	}
+	return 0;
+
 }
 
 char *
@@ -1301,16 +1345,12 @@ btnext(Scan *s, Kvp *r, int *done)
 	Kvp kv;
 
 Again:
+	/* load up the correct blocks for the scan */
 	p = s->path;
 	h = s->root.ht;
 	*done = 0;
 	start = h;
 	for(i = h-1; i > 0; i--){
-//dprint("advancing (i=%d)\n", i);
-//for(j = 0; j < h; j++){
-//dprint("\t%p", p[j].b);
-//dprint(" (%d %d)\n", p[j].vi, p[j].bi);
-//}
 		if(p[i].vi < p[i].b->nval || p[i].bi < p[i].b->nbuf)
 			break;
 		if(i == 0){
@@ -1327,27 +1367,35 @@ Again:
 		if((p[i].b = getblk(kv.bp, kv.bh, 0)) == nil)
 			return "error reading block";
 	}
+
+	/* find the minimum key along the path up */
 	m.op = Onop;
 	getval(p[h-1].b, p[h-1].vi, &m);
 	for(i = h-2; i >= 0; i--){
 		if(p[i].bi == p[i].b->nbuf)
 			continue;
 		getmsg(p[i].b, p[i].bi, &n);
-		if(keycmp(&m, &n) >= 0)
+		if(keycmp(&n, &m) < 0)
 			m = n;
 	}
 	if(m.nk < s->pfx.nk || memcmp(m.k, s->pfx.k, s->pfx.nk) != 0){
 		*done = 1;
 		return nil;
 	}
+
+	/* scan all messages applying to the message */
 	getval(p[h-1].b, p[h-1].vi, &t);
-	if(keycmp(&m, &t) == 0)
+	if(keycmp(&m, &t) == 0){
+		t.op = Onop;
+		accum(s, &t);
 		p[h-1].vi++;
+	}
 	for(i = h-2; i >= 0; i--){
 		for(j = p[i].bi; j < p[i].b->nbuf; j++){
 			getmsg(p[i].b, j, &t);
 			if(keycmp(&m, &t) != 0)
 				break;
+			accum(s, &t);
 			p[i].bi++;
 			m = t;
 		}

@@ -1268,9 +1268,9 @@ btscan(Tree *t, Scan *s, char *pfx, int npfx)
 	p[0].b = b;
 	for(i = 0; i < s->root.ht; i++){
 		p[i].vi = blksearch(b, &s->kv, &v, &same);
-		if(p[i].vi == -1 || (!same && b->type == Tleaf))
+		if(p[i].vi == -1 || (p[i].vi+1 < b->nval && !same && b->type == Tleaf)){
 			getval(b, ++p[i].vi, &v);
-		if(b->type == Tpivot){
+		}else if(b->type == Tpivot){
 			p[i].bi = bufsearch(b, &s->kv, &m, &same);
 			if(p[i].bi == -1 || !same)
 				p[i].bi++;

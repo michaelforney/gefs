@@ -66,7 +66,6 @@ getdent(vlong root, vlong pqid, Dir *d)
 	int err;
 
 	h = (ihash(d->qid.path) ^ ihash(root)) % Ndtab;
-	dprint("hash: %d\n", h);
 	lock(&fs->dtablk);
 	for(e = fs->dtab[h]; e != nil; e = e->next){
 		if(e->qid.path == d->qid.path && e->rootb == root){
@@ -124,23 +123,20 @@ dprint("freeing dent, hash=%d, p=0x%p\n", h, de);
 }
 
 void
-showfids(void)
+showfids(int fd)
 {
 	int i;
 	Fid *f;
 
-	if(!debug)
-		return;
-	fprint(2, "fids:---\n");
 	lock(&fs->fidtablk);
+	fprint(fd, "fids:---\n");
 	for(i = 0; i < Nfidtab; i++)
 		for(f = fs->fidtab[i]; f != nil; f = f->next){
 			rlock(f->dent);
-			fprint(2, "\tfid[%d]: %d [refs=%ld, k=%K]\n", i, f->fid, f->dent->ref, &f->dent->Key);
+			fprint(fd, "\tfid[%d]: %d [refs=%ld, k=%K]\n", i, f->fid, f->dent->ref, &f->dent->Key);
 			runlock(f->dent);
 		}
 	unlock(&fs->fidtablk);
-
 }
 
 Fid*
@@ -360,7 +356,6 @@ fsauth(Fmsg *m)
 {
 	Fcall r;
 
-	showfids();
 	r.type = Rerror;
 	r.ename = "unimplemented auth";
 	respond(m, &r);
@@ -421,7 +416,6 @@ showfs("attach");
 	f.root.bp = -1;
 	f.iounit = iounit;
 	f.dent = e;
-showfids();
 	if(dupfid(m->fid, &f) == nil){
 		rerror(m, Enomem);
 		return;
@@ -522,7 +516,6 @@ fsstat(Fmsg *m)
 	Blk *b;
 	int n;
 
-	showfids();
 	if((f = getfid(m->fid)) == nil){
 		rerror(m, "no such fid");
 		return;
@@ -1140,9 +1133,14 @@ runctl(void *pfd)
 		narg = tokenize(buf, arg, nelem(arg));
 		if(narg == 0 || strlen(arg[0]) == 0)
 			continue;
-		if(strcmp(arg[0], "show") == 0)
-			fshowfs(fd, "show");
-		else if(strcmp(arg[0], "check") == 0)
+		if(strcmp(arg[0], "show") == 0){
+			if(narg == 0)
+				fshowfs(fd, "show");
+			if(narg == 2 && strcmp(arg[1], "fid") == 0)
+				showfids(fd);
+			else
+				fprint(fd, "show me yours first");
+		}else if(strcmp(arg[0], "check") == 0)
 			checkfs();
 		else if(strcmp(arg[0], "dbg") && narg == 2)
 			debug = atoi(arg[1]);

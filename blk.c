@@ -419,8 +419,6 @@ compresslog(Arena *a)
 	finalize(ab);
 	if(syncblk(ab) == -1)
 		return -1;
-checkfs();
-showfree("postcompress");
 	if(oldhd != -1){
 		for(bp = oldhd; bp != -1; bp = nb){
 			nb = -1;
@@ -445,7 +443,6 @@ showfree("postcompress");
 	finalize(a->logtl);
 	if(syncblk(a->logtl) == -1)
 		return -1;
-showfree("postreclaim");
 	return 0;
 }
 /*

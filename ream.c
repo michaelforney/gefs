@@ -132,7 +132,6 @@ reamfs(char *dev)
 	finalize(s);
 	syncblk(s);
 
-print("superblock @%llx\n", s->off);
 	for(i = 0; i < fs->narena; i++)
 		if((loadarena(&fs->arenas[i], i*asz)) == -1)
 			sysfatal("ream: loadarena: %r");
@@ -149,8 +148,8 @@ print("superblock @%llx\n", s->off);
 	syncblk(r);
 
 	fs->super = s;
-	fs->root.bp = r->off;
-	fs->root.bh = blkhash(r);
+	fs->root.bp.addr = r->off;
+	fs->root.bp.hash = blkhash(r);
 	fs->root.ht = 1;
 	snapshot();
 

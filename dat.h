@@ -16,6 +16,7 @@ typedef struct Arange	Arange;
 typedef struct Bucket	Bucket;
 typedef struct Chan	Chan;
 typedef struct Tree	Tree;
+typedef struct Bptr	Bptr;
 
 enum {
 	KiB	= 1024ULL,
@@ -233,10 +234,14 @@ struct Fmsg {
 	uchar	buf[];
 };
 
+struct Bptr {
+	vlong	addr;
+	vlong	hash;
+};
+
 struct Tree {
 	Lock	lk;
-	vlong	bp;
-	vlong	bh;
+	Bptr	bp;
 	int	ht;
 };
 
@@ -310,8 +315,7 @@ struct Val {
 	union {
 		/* block pointer */
 		struct {
-			uvlong	bp;
-			uvlong	bh;
+			Bptr	bp;
 			ushort	fill;
 		};
 		/* inline values */

@@ -2,7 +2,7 @@
 #pragma varargck type "P"	Kvp*
 #pragma varargck type "K"	Key*
 #pragma varargck type "V"	Val*
-#pragma varargck type "B"	Blk*
+#pragma varargck type "B"	Bptr
 #pragma varargck type "R"	Arange*
 #pragma varargck type "X"	char*
 
@@ -12,7 +12,7 @@ extern int	debug;
 Blk*	newblk(int type);
 Blk*	shadow(Blk*, Path*, Path*);
 Blk*	getroot(Tree*, int*);
-Blk*	getblk(vlong, uvlong, int);
+Blk*	getblk(Bptr, int);
 Blk*	pinblk(Blk*);
 Blk*	readblk(vlong, int);
 Arena*	getarena(vlong);

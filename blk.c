@@ -716,8 +716,8 @@ fillsuper(Blk *b)
 	PBIT32(p + 16, Bufspc);
 	PBIT32(p + 20, Hdrsz);
 	PBIT32(p + 24, fs->root.ht);
-	PBIT64(p + 32, fs->root.bp);
-	PBIT64(p + 40, fs->root.bh);
+	PBIT64(p + 32, fs->root.bp.addr);
+	PBIT64(p + 40, fs->root.bp.hash);
 	PBIT32(p + 48, fs->narena);
 	PBIT64(p + 56, fs->arenasz);
 	PBIT64(p + 64, fs->gen);
@@ -759,19 +759,19 @@ finalize(Blk *b)
 }
 
 Blk*
-getblk(vlong bp, uvlong bh, int flg)
+getblk(Bptr bp, int flg)
 {
 	Blk *b;
 
-	if((b = lookupblk(bp)) == nil){
-		if((b = readblk(bp, flg)) == nil)
+	if((b = lookupblk(bp.addr)) == nil){
+		if((b = readblk(bp.addr, flg)) == nil)
 			return nil;
-		if(blkhash(b) != bh){
-			werrstr("corrupt block %llx: %llx != %llx", bp, blkhash(b), bh);
+		if(blkhash(b) != bp.hash){
+			werrstr("corrupt block %B: %llx != %llx", bp, blkhash(b), bp.hash);
 			return nil;
 		}
 	}
-	assert(b->off == bp);
+	assert(b->off == bp.addr);
 	return cacheblk(b);
 }
 

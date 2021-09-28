@@ -26,7 +26,6 @@ cpkvp(Kvp *dst, Kvp *src, char *buf, int nbuf)
 		dst->nv = src->nv;
 	}else{
 		dst->bp = src->bp;
-		dst->bh = src->bh;
 		dst->fill = src->fill;
 	}
 	memcpy(dst->v, src->v, src->nv);
@@ -81,8 +80,8 @@ getval(Blk *b, int i, Kvp *kv)
 		kv->type = Vref;
 		kv->nk = GBIT16(b->data + o);
 		kv->k = b->data + o + 2;
-		kv->bp = GBIT64(kv->k + kv->nk + 0);
-		kv->bh = GBIT64(kv->k + kv->nk + 8);
+		kv->bp.addr = GBIT64(kv->k + kv->nk + 0);
+		kv->bp.hash = GBIT64(kv->k + kv->nk + 8);
 		kv->fill = GBIT16(kv->k + kv->nk + 16);
 	}else{
 		kv->type = Vinl;
@@ -143,8 +142,8 @@ setval(Blk *b, int i, Kvp *kv, int replace)
 		PBIT16(b->data + 2*i, o);
 		PBIT16(p +  0, kv->nk);
 		memcpy(p +  2, kv->k, kv->nk);
-		PBIT64(p + kv->nk +  2, kv->bp);
-		PBIT64(p + kv->nk + 10, kv->bh);
+		PBIT64(p + kv->nk +  2, kv->bp.addr);
+		PBIT64(p + kv->nk + 10, kv->bp.hash);
 		PBIT16(p + kv->nk + 18, kv->fill);
 	} else {
 		PBIT16(b->data + 2*i, o);
@@ -375,8 +374,8 @@ copyup(Blk *n, int i, Path *pp, int *nbytes)
 		if(pp->l->nval > 0){
 			getval(pp->l, 0, &kv);
 			kv.type = Vref;
-			kv.bp = pp->l->off;
-			kv.bh = blkhash(pp->l);
+			kv.bp.addr = pp->l->off;
+			kv.bp.hash = blkhash(pp->l);
 			kv.fill = blkfill(pp->l);
 			setval(n, i++, &kv, 0);
 			if(nbytes != nil)
@@ -385,8 +384,8 @@ copyup(Blk *n, int i, Path *pp, int *nbytes)
 		if(pp->r->nval > 0){
 			getval(pp->r, 0, &kv);
 			kv.type = Vref;
-			kv.bp = pp->r->off;
-			kv.bh = blkhash(pp->r);
+			kv.bp.addr = pp->r->off;
+			kv.bp.hash = blkhash(pp->r);
 			kv.fill = blkfill(pp->r);
 			setval(n, i++, &kv, 0);
 			if(nbytes != nil)
@@ -396,8 +395,8 @@ copyup(Blk *n, int i, Path *pp, int *nbytes)
 		if(pp->n->nval > 0){
 			getval(pp->n, 0, &kv);
 			kv.type = Vref;
-			kv.bp = pp->n->off;
-			kv.bh = blkhash(pp->n);
+			kv.bp.addr = pp->n->off;
+			kv.bp.hash = blkhash(pp->n);
 			kv.fill = blkfill(pp->n);
 			setval(n, i++, &kv, 1);
 			if(nbytes != nil)
@@ -438,15 +437,15 @@ if(p->merge) showblk(b, "preupdate", 0);
 		}else if(i == midx){
 			getval(p->nl, 0, &m);
 			m.type = Vref;
-			m.bp = p->nl->off;
-			m.bh = blkhash(p->nl);
+			m.bp.addr = p->nl->off;
+			m.bp.hash = blkhash(p->nl);
 			m.fill = blkfill(p->nl);
 			setval(n, j++, &m, 0);
 			if(p->nr){
 				getval(p->nr, 0, &m);
 				m.type = Vref;
-				m.bp = p->nr->off;
-				m.bh = blkhash(p->nr);
+				m.bp.addr = p->nr->off;
+				m.bp.hash = blkhash(p->nr);
 				m.fill = blkfill(p->nr);
 				setval(n, j++, &m, 0);
 				i++;
@@ -817,7 +816,7 @@ trybalance(Path *p, Path *pp, int idx)
 		if((m = pp->n) == nil)
 			return 0;
 	}else{
-		if((m = getblk(km.bp, km.bh, 0)) == nil)
+		if((m = getblk(km.bp, 0)) == nil)
 			return -1;
 	}
 	/* Try merging left */
@@ -826,7 +825,7 @@ trybalance(Path *p, Path *pp, int idx)
 		getval(p->b, idx-1, &kl);
 		if(kl.fill + km.fill >= Blkspc)
 			goto next;
-		if((l = getblk(kl.bp, kl.bh, 0)) == nil)
+		if((l = getblk(kl.bp, 0)) == nil)
 			goto out;
 		if(rotmerge(p, idx-1, l, m) == -1)
 			goto out;
@@ -837,7 +836,7 @@ next:
 		getval(p->b, idx+1, &kr);
 		if(kr.fill + km.fill >= Blkspc)
 			goto done;
-		if((r = getblk(kr.bp, kr.bh, 0)) == nil)
+		if((r = getblk(kr.bp, 0)) == nil)
 			goto out;
 		if(rotmerge(p, idx, m, r) == -1)
 			goto out;
@@ -1090,7 +1089,7 @@ again:
 			break;
 		victim(b, &path[npath]);
 		getval(b, path[npath].idx, &sep);
-		b = getblk(sep.bp, sep.bh, 0);
+		b = getblk(sep.bp, 0);
 		if(b == nil)
 			goto error;
 		npath++;
@@ -1122,8 +1121,8 @@ again:
 	rh = blkhash(rb);
 	lock(&t->lk);
 	t->ht += dh;
-	t->bp = rb->off;
-	t->bh = rh;
+	t->bp.addr = rb->off;
+	t->bp.hash = rh;
 	unlock(&t->lk);
 
 	freepath(path, npath);
@@ -1145,15 +1144,15 @@ error:
 Blk*
 getroot(Tree *t, int *h)
 {
-	vlong bp, bh;
+	Bptr bp;
 
 	lock(&t->lk);
 	bp = t->bp;
-	bh = t->bh;
 	if(h != nil)
 		*h = t->ht;
 	unlock(&t->lk);
-	return getblk(bp, bh, 0);
+
+	return getblk(t->bp, 0);
 }
 
 static char*
@@ -1207,7 +1206,7 @@ btlookupat(Blk *b0, Key *k, Kvp *r, Blk **bp)
 		if(idx == -1)
 			return Eexist;
 		putblk(b);
-		if((b = getblk(r->bp, r->bh, 0)) == nil)
+		if((b = getblk(r->bp, 0)) == nil)
 			return Efs;
 	}
 	assert(b->type == Tleaf);
@@ -1263,7 +1262,7 @@ btscan(Tree *t, Scan *s, char *pfx, int npfx)
 	}
 
 	p = s->path;
-	if((b = getblk(s->root.bp, s->root.bh, 0)) == nil)
+	if((b = getblk(s->root.bp, 0)) == nil)
 		return "error reading block";
 	p[0].b = b;
 	for(i = 0; i < s->root.ht; i++){
@@ -1274,7 +1273,7 @@ btscan(Tree *t, Scan *s, char *pfx, int npfx)
 			p[i].bi = bufsearch(b, &s->kv, &m, &same);
 			if(p[i].bi == -1 || !same)
 				p[i].bi++;
-			if((b = getblk(v.bp, v.bh, 0)) == nil)
+			if((b = getblk(v.bp, 0)) == nil)
 				return "error readivg block";
 			p[i+1].b = b;
 		}else{
@@ -1364,7 +1363,7 @@ Again:
 	}
 	for(i = start; i < h; i++){
 		getval(p[i-1].b, p[i-1].vi, &kv);
-		if((p[i].b = getblk(kv.bp, kv.bh, 0)) == nil)
+		if((p[i].b = getblk(kv.bp, 0)) == nil)
 			return "error reading block";
 	}
 

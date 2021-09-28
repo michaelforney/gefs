@@ -43,10 +43,10 @@ fslookup(Fid *f, Key *k, Kvp *kv, Blk **bp, int lk)
 	char *e;
 	Blk *b;
 
-	if(f->root.bp == -1)
+	if(f->root.bp.addr == -1)
 		b = getroot(&fs->root, nil);
 	else
-		b = getblk(f->root.bp, f->root.bh, 0);
+		b = getblk(f->root.bp, 0);
 	if(b == nil)
 		return Efs;
 	if(lk)
@@ -412,8 +412,8 @@ showfs("attach");
 	f.fid = NOFID;
 	f.qpath = d.qid.path;
 	f.mode = -1;
-	f.root.bh = -1;
-	f.root.bp = -1;
+	f.root.bp.addr = -1;
+	f.root.bp.hash = -1;
 	f.iounit = iounit;
 	f.dent = e;
 	if(dupfid(m->fid, &f) == nil){
@@ -493,7 +493,7 @@ fswalk(Fmsg *m)
 	}
 	if(i > 0){
 		d.name = m->wname[i-1];
-		dent = getdent(f->root.bp, up, &d);
+		dent = getdent(f->root.bp.addr, up, &d);
 		if(dent == nil){
 			if(m->fid != m->newfid)
 				clunkfid(f);
@@ -603,13 +603,11 @@ fscreate(Fmsg *m)
 		rerror(m, "%r");
 		return;
 	}
-//showfs("precreate");
 	if(btupsert(&fs->root, &mb, 1) == -1){
 		rerror(m, "%r");
 		return;
 	}
-//showfs("postcreate");
-	dent = getdent(f->root.bp, f->qpath, &d);
+	dent = getdent(f->root.bp.addr, f->qpath, &d);
 	if(dent == nil){
 		if(m->fid != m->newfid)
 			clunkfid(f);
@@ -753,7 +751,7 @@ fsreaddir(Fmsg *m, Fid *f, Fcall *r)
 
 		pfx[0] = Kent;
 		PBIT64(pfx+1, f->qpath);
-		t = (f->root.bp != -1) ? &f->root : &fs->root;
+		t = (f->root.bp.addr != -1) ? &f->root : &fs->root;
 		if((e = btscan(t, s, pfx, sizeof(pfx))) != nil){
 			free(r->data);
 			btdone(s);
@@ -801,7 +799,8 @@ int
 readb(Fid *f, char *d, vlong o, vlong n, int sz)
 {
 	char *e, buf[17];
-	vlong fb, fo, bp, bh;
+	vlong fb, fo;
+	Bptr bp;
 	Blk *b;
 	Key k;
 	Kvp kv;
@@ -825,11 +824,11 @@ readb(Fid *f, char *d, vlong o, vlong n, int sz)
 		return -1;
 	}
 	fprint(2, "\treadb: key=%K, val=%P\n", &k, &kv);
-	bp = GBIT64(kv.v+0);
-	bh = GBIT64(kv.v+8);
+	bp.addr = GBIT64(kv.v+0);
+	bp.hash = GBIT64(kv.v+8);
 	putblk(b);
 
-	if((b = getblk(bp, bh, GBraw)) == nil)
+	if((b = getblk(bp, GBraw)) == nil)
 		return -1;
 	if(fo+n > Blksz)
 		n = Blksz-fo;
@@ -921,7 +920,9 @@ fsread(Fmsg *m)
 int
 writeb(Fid *f, Msg *m, char *s, vlong o, vlong n, vlong sz)
 {
-	vlong fb, fo, bp, bh;
+	vlong fb, fo;
+	uvlong bh;
+	Bptr bp;
 	Blk *b, *t;
 	Kvp kv;
 
@@ -942,11 +943,11 @@ writeb(Fid *f, Msg *m, char *s, vlong o, vlong n, vlong sz)
 			putblk(b);
 			return -1;
 		}
-		bp = GBIT64(kv.v+0);
-		bh = GBIT64(kv.v+8);
+		bp.addr = GBIT64(kv.v+0);
+		bp.hash = GBIT64(kv.v+8);
 		putblk(t);
 
-		if((t = getblk(bp, bh, GBraw)) == nil){
+		if((t = getblk(bp, GBraw)) == nil){
 			putblk(b);
 			return -1;
 		}

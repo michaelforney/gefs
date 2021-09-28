@@ -17,12 +17,10 @@ char	*srvname = "gefs";
 static int
 Bconv(Fmt *fmt)
 {
-	Blk *b;
+	Bptr bp;
 
-	b = va_arg(fmt->args, Blk*);
-	if(b == nil)
-		return fmtprint(fmt, "Blk(nil)");
-	return fmtprint(fmt, "Blk(%c)", (b->type == Tpivot) ? 'P' : 'L');
+	bp = va_arg(fmt->args, Bptr);
+	return fmtprint(fmt, "(%llx,%llx)", bp.addr, bp.hash);
 }
 
 void
@@ -69,9 +67,8 @@ Pconv(Fmt *fmt)
 			kv->nk, kv->nk, kv->k,
 			kv->nv, kv->nv, kv->v);
 	else
-		return fmtprint(fmt, "Kvp([%d]%.*X,(%llux,%llux,%ud))",
-			kv->nk, kv->nk, kv->k,
-			kv->bp, kv->bh, kv->fill);
+		return fmtprint(fmt, "Kvp([%d]%.*X,(%B,%ud))",
+			kv->nk, kv->nk, kv->k, kv->bp, kv->fill);
 }
 
 static int

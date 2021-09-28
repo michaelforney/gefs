@@ -57,11 +57,11 @@ badblk(Blk *b, int h, Kvp *lo, Kvp *hi)
 			fail++;
 		}
 		if(b->type == Tpivot){
-			if(isfree(x.bp)){
-				fprint(2, "freed block in use: %llx\n", x.bp);
+			if(isfree(x.bp.addr)){
+				fprint(2, "freed block in use: %llx\n", x.bp.addr);
 				fail++;
 			}
-			if((c = getblk(x.bp, x.bh, 0)) == nil){
+			if((c = getblk(x.bp, 0)) == nil){
 				fprint(2, "corrupt block: %r\n");
 				fail++;
 				continue;
@@ -158,7 +158,7 @@ rshowblk(int fd, Blk *b, int indent, int recurse)
 		getval(b, i, &kv);
 		fprint(fd, "%.*s[%03d]|%P\n", 4*indent, spc, i, &kv);
 		if(b->type == Tpivot){
-			if((c = getblk(kv.bp, kv.bh, 0)) == nil)
+			if((c = getblk(kv.bp, 0)) == nil)
 				sysfatal("failed load: %r");
 			if(recurse)
 				rshowblk(fd, c, indent + 1, 1);

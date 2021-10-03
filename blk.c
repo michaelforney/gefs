@@ -41,7 +41,9 @@ readblk(vlong bp, int flg)
 	}
 	memset(&b->RWLock, 0, sizeof(RWLock));
 	b->type = (flg&GBraw) ? Traw : GBIT16(b->buf+0);
-	b->off = bp;
+	b->bp.addr = bp;
+	b->bp.hash = -1;
+	b->bp.gen = -1;
 	b->cnext = nil;
 	b->cprev = nil;
 	b->hnext = nil;
@@ -189,7 +191,7 @@ logappend(Arena *a, Blk *lb, vlong off, vlong len, int op)
 		lb->data = lb->buf + Hdrsz;
 		lb->flag |= Bdirty;
 		lb->type = Tlog;
-		lb->off = o;
+		lb->bp.addr = o;
 		lb->logsz = Loghdsz;
 		p = lb->data + lb->logsz;
 		PBIT64(p + 0, (uvlong)LogEnd);
@@ -202,7 +204,7 @@ logappend(Arena *a, Blk *lb, vlong off, vlong len, int op)
 		a->logtl = lb;
 		if(pb != nil){
 			p = pb->data + pb->logsz;
-			PBIT64(p + 0, lb->off|LogChain);
+			PBIT64(p + 0, lb->bp.addr|LogChain);
 			finalize(pb);
 			if(syncblk(pb) == -1)
 				return nil;
@@ -240,7 +242,7 @@ logop(Arena *a, vlong off, int op)
 	if((b = logappend(a, a->logtl, off, Blksz, op)) == nil)
 		return -1;
 	if(a->log == -1)
-		a->log = b->off;
+		a->log = b->bp.addr;
 	if(b != a->logtl)
 		a->logtl = b;
 	return 0;
@@ -292,9 +294,9 @@ Nextblk:
 
 		case LogFlush:
 			dprint("log@%d: flush: %llx\n", i, off>>8);
-			lock(&fs->genlk);
-			fs->gen = off >> 8;
-			unlock(&fs->genlk);
+			lock(&fs->root.lk);
+			fs->root.bp.gen = off >> 8;
+			unlock(&fs->root.lk);
 			break;
 		case LogAlloc:
 		case LogAlloc1:
@@ -349,7 +351,7 @@ compresslog(Arena *a)
 		return -1;
 	b->type = Tlog;
 	b->flag = Bdirty;
-	b->off = bp;
+	b->bp.addr = bp;
 	b->ref = 1;
 	b->data = b->buf + Hdrsz;
 	b->logsz = Loghdsz;
@@ -361,7 +363,7 @@ compresslog(Arena *a)
 		return -1;
 	}
 
-	graft = b->off;
+	graft = b->bp.addr;
 	if(a->logtl != nil){
 		finalize(a->logtl);
 		if(syncblk(a->logtl) == -1){
@@ -411,7 +413,7 @@ compresslog(Arena *a)
 		return -1;
 
 	oldhd = a->log;
-	a->log = hd->off;
+	a->log = hd->bp.addr;
 	a->logh = blkhash(hd);
 	ab = a->b;
 	PBIT64(ab->data + 0, a->log);
@@ -554,7 +556,9 @@ newblk(int t)
 			return nil;
 	b->type = t;
 	b->flag = Bdirty;
-	b->off = bp;
+	b->bp.addr = bp;
+	b->bp.hash = -1;
+	b->bp.gen = fs->nextgen;
 	b->ref = 1;
 	b->data = b->buf + Hdrsz;
 	return cacheblk(b);
@@ -572,7 +576,7 @@ lookupblk(vlong off)
 	bkt = &fs->cache[h % fs->cmax];
 	lock(bkt);
 	for(b = bkt->b; b != nil; b = b->hnext)
-		if(b->off == off)
+		if(b->bp.addr == off)
 			break;
 	if(b != nil)
 		pinblk(b);
@@ -588,15 +592,15 @@ cacheblk(Blk *b)
 	u32int h;
 
 	/* FIXME: better hash. */
-	assert(b->off != 0);
-	h = ihash(b->off);
+	assert(b->bp.addr != 0);
+	h = ihash(b->bp.addr);
 	ainc(&b->ref);
 	bkt = &fs->cache[h % fs->cmax];
 	lock(bkt);
 	for(e = bkt->b; e != nil; e = e->hnext){
 		if(b == e)
 			goto found;
-		assert(b->off != e->off);
+		assert(b->bp.addr != e->bp.addr);
 	}
 	bkt->b = b;
 found:
@@ -655,7 +659,7 @@ cachedel(vlong del)
 	lock(bkt);
 	p = &bkt->b;
 	for(b = bkt->b; b != nil; b = b->hnext){
-		if(b->off == del){
+		if(b->bp.addr == del){
 			*p = b->hnext;
 			break;
 		}
@@ -684,7 +688,7 @@ syncblk(Blk *b)
 	wlock(b);
 	b->flag &= ~(Bqueued|Bdirty);
 	wunlock(b);
-	return pwrite(fs->fd, b->buf, Blksz, b->off);
+	return pwrite(fs->fd, b->buf, Blksz, b->bp.addr);
 }
 
 
@@ -700,7 +704,7 @@ enqueue(Blk *b)
 	}
 }
 
-void
+char*
 fillsuper(Blk *b)
 {
 	char *p;
@@ -710,18 +714,19 @@ fillsuper(Blk *b)
 	wlock(b);
 	b->flag |= Bdirty;
 	wunlock(b);
-	memcpy(p +  0, "gefs0001", 8);
-	PBIT32(p +  8, 0); /* dirty */
-	PBIT32(p + 12, Blksz);
-	PBIT32(p + 16, Bufspc);
-	PBIT32(p + 20, Hdrsz);
-	PBIT32(p + 24, fs->root.ht);
-	PBIT64(p + 32, fs->root.bp.addr);
-	PBIT64(p + 40, fs->root.bp.hash);
-	PBIT32(p + 48, fs->narena);
-	PBIT64(p + 56, fs->arenasz);
-	PBIT64(p + 64, fs->gen);
-	PBIT64(p + 72, fs->nextqid);
+	memcpy(p, "gefs0001", 8); p += 8;
+	PBIT32(p, 0); p += 4; /* dirty */
+	PBIT32(p, Blksz); p += 4;
+	PBIT32(p, Bufspc); p += 4;
+	PBIT32(p, Hdrsz); p += 4;
+	PBIT32(p, fs->root.ht); p += 4;
+	PBIT64(p, fs->root.bp.addr); p += 8;
+	PBIT64(p, fs->root.bp.hash); p += 8;
+	PBIT64(p, fs->root.bp.gen); p += 8;
+	PBIT32(p, fs->narena); p += 4;
+	PBIT64(p, fs->arenasz); p += 8;
+	PBIT64(p, fs->nextqid); p += 8;
+	return p;
 }
 
 void
@@ -743,17 +748,21 @@ finalize(Blk *b)
 		PBIT16(b->buf+4, b->valsz);
 		PBIT16(b->buf+6, b->nbuf);
 		PBIT16(b->buf+8, b->bufsz);
+		b->bp.hash = blkhash(b);
 		break;
 	case Tleaf:
 		PBIT16(b->buf+2, b->nval);
 		PBIT16(b->buf+4, b->valsz);
+		b->bp.hash = blkhash(b);
 		break;
 	case Tlog:
 		h = siphash(b->data + 8, Blkspc-8);
 		PBIT64(b->data, h);
+	case Traw:
+		b->bp.hash = blkhash(b);
+		break;
 	case Tsuper:
 	case Tarena:
-	case Traw:
 		break;
 	}
 }
@@ -770,8 +779,10 @@ getblk(Bptr bp, int flg)
 			werrstr("corrupt block %B: %llx != %llx", bp, blkhash(b), bp.hash);
 			return nil;
 		}
+		b->bp.hash = bp.hash;
+		b->bp.gen = bp.gen;
 	}
-	assert(b->off == bp.addr);
+	assert(b->bp.addr == bp.addr);
 	return cacheblk(b);
 }
 
@@ -798,7 +809,7 @@ blkfill(Blk *b)
 	case Tleaf:
 		return 2*b->nval + b->valsz;
 	default:
-		fprint(2, "invalid block @%lld\n", b->off);
+		fprint(2, "invalid block @%lld\n", b->bp.addr);
 		abort();
 	}
 	return 0; // shut up kencc
@@ -811,7 +822,7 @@ putblk(Blk *b)
 		return;
 	if(adec(&b->ref) == 0){
 		assert((b->flag & Bqueued) || !(b->flag & Bdirty));
-		cachedel(b->off);
+		cachedel(b->bp.addr);
 		free(b);
 	}
 }
@@ -822,10 +833,10 @@ freeblk(Blk *b)
 	Arena *a;
 
 	assert(b->ref == 1 && b->flag & (Bdirty|Bqueued) == Bdirty);
-	a = getarena(b->off);
+	a = getarena(b->bp.addr);
 	lock(a);
-	logop(a, b->off, LogFree);
-	blkdealloc(b->off);
+	logop(a, b->bp.addr, LogFree);
+	blkdealloc(b->bp.addr);
 	unlock(a);
 	free(b);
 }

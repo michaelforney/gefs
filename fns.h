@@ -24,7 +24,7 @@ ushort	blkfill(Blk*);
 uvlong	blkhash(Blk*);
 u32int	ihash(vlong);
 void	finalize(Blk*);
-void	fillsuper(Blk*);
+char*	fillsuper(Blk*);
 int	snapshot(void);
 uvlong	siphash(void*, usize);
 void	reamfs(char*);
@@ -79,6 +79,9 @@ int	dir2kv(vlong, Dir*, Kvp*, char*, int);
 int	kv2statbuf(Kvp*, char*, int);
 int	kv2dir(Kvp*, Dir*);
 int	kv2qid(Kvp*, Qid*);
+
+char	*packbp(char*, Bptr*);
+Bptr	unpackbp(char*);
 
 /* scratch */
 void	setmsg(Blk *, int, Msg *);

@@ -42,27 +42,27 @@ initroot(Blk *r)
 static void
 reamarena(Arena *a, vlong start, vlong asz)
 {
-	vlong off, bo, bh;
+	vlong addr, bo, bh;
 	char *p;
 	Blk *b;
 
-	off = start;
+	addr = start;
 	if((b = mallocz(sizeof(Blk), 1)) == nil)
 		sysfatal("ream: %r");
-	off += Blksz;	/* arena header */
+	addr += Blksz;	/* arena header */
 
 	a->log = -1;
 	memset(b, 0, sizeof(Blk));
 	b->type = Tlog;
-	b->off = off;
+	b->bp.addr = addr;
 	b->logsz = 32;
 	b->data = b->buf + Hdrsz;
 	b->flag |= Bdirty;
 
 	p = b->data+Loghdsz;
-	PBIT64(p+ 0, off|LogFree);		/* off */
+	PBIT64(p+ 0, addr|LogFree);		/* addr */
 	PBIT64(p+ 8, asz);			/* len */
-	PBIT64(p+16, b->off|LogAlloc);		/* off */
+	PBIT64(p+16, b->bp.addr|LogAlloc);		/* addr */
 	PBIT64(p+24, Blksz);			/* len */
 	PBIT64(p+32, (uvlong)LogEnd);		/* done */
 	finalize(b);
@@ -70,13 +70,13 @@ reamarena(Arena *a, vlong start, vlong asz)
 		sysfatal("ream: init log");
 
 	bh = blkhash(b);
-	bo = b->off;
+	bo = b->bp.addr;
 
 	memset(b, 0, sizeof(Blk));
 	b->type = Tarena;
-	b->off = start;
+	b->bp.addr = start;
 	p = b->buf + Hdrsz;
-	print("b->off: %llx\n", b->off);
+	print("b->bp.addr: %llx\n", b->bp.addr);
 	PBIT64(p+0, bo);
 	PBIT64(p+8, bh);
 	finalize(b);
@@ -126,7 +126,7 @@ reamfs(char *dev)
 	}
 	
 	s->type = Tsuper;
-	s->off = sz;
+	s->bp.addr = sz;
 	s->data = s->buf + Hdrsz;
 	fillsuper(s);
 	finalize(s);
@@ -148,8 +148,7 @@ reamfs(char *dev)
 	syncblk(r);
 
 	fs->super = s;
-	fs->root.bp.addr = r->off;
-	fs->root.bp.hash = blkhash(r);
+	fs->root.bp = r->bp;
 	fs->root.ht = 1;
 	snapshot();
 

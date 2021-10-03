@@ -64,7 +64,7 @@ int
 valsz(Kvp *kv)
 {
 	if(kv->type == Vref)
-		return 2+kv->nk + Ptrsz;
+		return 2+kv->nk + Ptrsz + Fillsz;
 	else
 		return 2+kv->nk + 2+kv->nv;
 }
@@ -80,9 +80,8 @@ getval(Blk *b, int i, Kvp *kv)
 		kv->type = Vref;
 		kv->nk = GBIT16(b->data + o);
 		kv->k = b->data + o + 2;
-		kv->bp.addr = GBIT64(kv->k + kv->nk + 0);
-		kv->bp.hash = GBIT64(kv->k + kv->nk + 8);
-		kv->fill = GBIT16(kv->k + kv->nk + 16);
+		kv->bp = unpackbp(kv->k + kv->nk);
+		kv->fill = GBIT16(kv->k + kv->nk + Ptrsz);
 	}else{
 		kv->type = Vinl;
 		kv->nk = GBIT16(b->data + o);
@@ -102,7 +101,7 @@ setval(Blk *b, int i, Kvp *kv, int replace)
 	spc = (b->type == Tleaf) ? Leafspc : Pivspc;
 	p = b->data + 2*i;
 	nk = 2 + kv->nk;
-	nv = (kv->type == Vref) ? Ptrsz : 2 + kv->nv;
+	nv = (kv->type == Vref) ? Ptrsz+Fillsz : 2 + kv->nv;
 	if (i < 0)
 		i = 0;
 	if(!replace || b->nval == i){
@@ -142,9 +141,8 @@ setval(Blk *b, int i, Kvp *kv, int replace)
 		PBIT16(b->data + 2*i, o);
 		PBIT16(p +  0, kv->nk);
 		memcpy(p +  2, kv->k, kv->nk);
-		PBIT64(p + kv->nk +  2, kv->bp.addr);
-		PBIT64(p + kv->nk + 10, kv->bp.hash);
-		PBIT16(p + kv->nk + 18, kv->fill);
+		p = packbp(p + kv->nk + 2, &kv->bp);
+		PBIT16(p, kv->fill);
 	} else {
 		PBIT16(b->data + 2*i, o);
 		PBIT16(p +  0, kv->nk);
@@ -374,8 +372,7 @@ copyup(Blk *n, int i, Path *pp, int *nbytes)
 		if(pp->l->nval > 0){
 			getval(pp->l, 0, &kv);
 			kv.type = Vref;
-			kv.bp.addr = pp->l->off;
-			kv.bp.hash = blkhash(pp->l);
+			kv.bp = pp->l->bp;
 			kv.fill = blkfill(pp->l);
 			setval(n, i++, &kv, 0);
 			if(nbytes != nil)
@@ -384,8 +381,7 @@ copyup(Blk *n, int i, Path *pp, int *nbytes)
 		if(pp->r->nval > 0){
 			getval(pp->r, 0, &kv);
 			kv.type = Vref;
-			kv.bp.addr = pp->r->off;
-			kv.bp.hash = blkhash(pp->r);
+			kv.bp = pp->r->bp;
 			kv.fill = blkfill(pp->r);
 			setval(n, i++, &kv, 0);
 			if(nbytes != nil)
@@ -395,8 +391,7 @@ copyup(Blk *n, int i, Path *pp, int *nbytes)
 		if(pp->n->nval > 0){
 			getval(pp->n, 0, &kv);
 			kv.type = Vref;
-			kv.bp.addr = pp->n->off;
-			kv.bp.hash = blkhash(pp->n);
+			kv.bp = pp->n->bp;
 			kv.fill = blkfill(pp->n);
 			setval(n, i++, &kv, 1);
 			if(nbytes != nil)
@@ -437,15 +432,13 @@ if(p->merge) showblk(b, "preupdate", 0);
 		}else if(i == midx){
 			getval(p->nl, 0, &m);
 			m.type = Vref;
-			m.bp.addr = p->nl->off;
-			m.bp.hash = blkhash(p->nl);
+			m.bp = p->nl->bp;
 			m.fill = blkfill(p->nl);
 			setval(n, j++, &m, 0);
 			if(p->nr){
 				getval(p->nr, 0, &m);
 				m.type = Vref;
-				m.bp.addr = p->nr->off;
-				m.bp.hash = blkhash(p->nr);
+				m.bp = p->nr->bp;
 				m.fill = blkfill(p->nr);
 				setval(n, j++, &m, 0);
 				i++;
@@ -1049,7 +1042,6 @@ int
 btupsert(Tree *t, Msg *msg, int nmsg)
 {
 	int i, npath, redo, dh, sz, height;
-	vlong rh;
 	Path *path;
 	Blk *b, *rb;
 	Kvp sep;
@@ -1117,12 +1109,11 @@ again:
 		abort();
 
 
-	assert(rb->off != 0);
-	rh = blkhash(rb);
+	assert(rb->bp.addr != 0);
 	lock(&t->lk);
 	t->ht += dh;
-	t->bp.addr = rb->off;
-	t->bp.hash = rh;
+	t->bp = rb->bp;
+	fs->nextgen++;
 	unlock(&t->lk);
 
 	freepath(path, npath);
@@ -1269,17 +1260,17 @@ btscan(Tree *t, Scan *s, char *pfx, int npfx)
 		p[i].vi = blksearch(b, &s->kv, &v, &same);
 		if(p[i].vi == -1 || (p[i].vi+1 < b->nval && !same && b->type == Tleaf)){
 			getval(b, ++p[i].vi, &v);
-		}else if(b->type == Tpivot){
+		}
+		if(b->type == Tpivot){
 			p[i].bi = bufsearch(b, &s->kv, &m, &same);
 			if(p[i].bi == -1 || !same)
 				p[i].bi++;
 			if((b = getblk(v.bp, 0)) == nil)
-				return "error readivg block";
+				return "error reading block";
 			p[i+1].b = b;
-		}else{
-			assert(i == s->root.ht-1);
 		}
 	}
+	assert(i == s->root.ht);
 	return nil;
 }
 
@@ -1349,6 +1340,7 @@ Again:
 	h = s->root.ht;
 	*done = 0;
 	start = h;
+
 	for(i = h-1; i > 0; i--){
 		if(p[i].vi < p[i].b->nval || p[i].bi < p[i].b->nbuf)
 			break;

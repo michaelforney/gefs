@@ -824,8 +824,7 @@ readb(Fid *f, char *d, vlong o, vlong n, int sz)
 		return -1;
 	}
 	fprint(2, "\treadb: key=%K, val=%P\n", &k, &kv);
-	bp.addr = GBIT64(kv.v+0);
-	bp.hash = GBIT64(kv.v+8);
+	bp = unpackbp(kv.v);
 	putblk(b);
 
 	if((b = getblk(bp, GBraw)) == nil)
@@ -921,7 +920,6 @@ int
 writeb(Fid *f, Msg *m, char *s, vlong o, vlong n, vlong sz)
 {
 	vlong fb, fo;
-	uvlong bh;
 	Bptr bp;
 	Blk *b, *t;
 	Kvp kv;
@@ -938,13 +936,12 @@ writeb(Fid *f, Msg *m, char *s, vlong o, vlong n, vlong sz)
 	if(b == nil)
 		return -1;
 	if(fb < sz && (fo != 0 || n != Blksz)){
-		fprint(2, "\tappending to block %llx\n", b->off);
+		fprint(2, "\tappending to block %B\n", b->bp);
 		if(fslookup(f, m, &kv, &t, 0) != nil){
 			putblk(b);
 			return -1;
 		}
-		bp.addr = GBIT64(kv.v+0);
-		bp.hash = GBIT64(kv.v+8);
+		bp = unpackbp(kv.v);
 		putblk(t);
 
 		if((t = getblk(bp, GBraw)) == nil){
@@ -959,9 +956,9 @@ writeb(Fid *f, Msg *m, char *s, vlong o, vlong n, vlong sz)
 	memcpy(b->buf+fo, s, n);
 	enqueue(b);
 
-	bh = blkhash(b);
-	PBIT64(m->v+0, b->off);
-	PBIT64(m->v+8, bh);
+	bp.gen = fs->nextgen;
+	assert(b->flag & Bfinal);
+	packbp(m->v, &b->bp);
 	putblk(b);
 	checkfs();
 	poolcheck(mainmem);
@@ -971,7 +968,7 @@ writeb(Fid *f, Msg *m, char *s, vlong o, vlong n, vlong sz)
 void
 fswrite(Fmsg *m)
 {
-	char sbuf[8], offbuf[4][Ptrsz+Offsz], *p;
+	char sbuf[8], offbuf[4][Ptrsz+Offksz], *p;
 	vlong n, o, c;
 	Msg kv[4];
 	Fcall r;
@@ -995,8 +992,8 @@ fswrite(Fmsg *m)
 	for(i = 0; i < nelem(kv)-1 && c != 0; i++){
 		kv[i].op = Oinsert;
 		kv[i].k = offbuf[i];
-		kv[i].nk = Offsz;
-		kv[i].v = offbuf[i]+Offsz;
+		kv[i].nk = Offksz;
+		kv[i].v = offbuf[i]+Offksz;
 		kv[i].nv = 16;
 		n = writeb(f, &kv[i], p, o, c, f->dent->length);
 		if(n == -1){

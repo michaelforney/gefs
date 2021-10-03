@@ -208,7 +208,7 @@ showpath(Path *p, int np)
 	int i;
 
 	print("path:\n");
-#define A(b) (b ? b->off : -1)
+#define A(b) (b ? b->bp.addr : -1)
 	for(i = 0; i < np; i++){
 		print("\t[%d] ==> b(%p)=%llx, n(%p)=%llx, nl(%p)=%llx, nr(%p)=%llx idx=%d\n",
 			i, p[i].b, A(p[i].b), p[i].n, A(p[i].n), p[i].nl, A(p[i].nl), p[i].nr, A(p[i].nr), p[i].idx);

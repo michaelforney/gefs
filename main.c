@@ -20,7 +20,7 @@ Bconv(Fmt *fmt)
 	Bptr bp;
 
 	bp = va_arg(fmt->args, Bptr);
-	return fmtprint(fmt, "(%llx,%llx)", bp.addr, bp.hash);
+	return fmtprint(fmt, "(%llx,%llx,%llx)", bp.addr, bp.hash, bp.gen);
 }
 
 void

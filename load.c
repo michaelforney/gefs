@@ -39,6 +39,7 @@ loadfs(char *dev)
 	Blk *b;
 	Dir *d;
 	int i, dirty;
+	int blksz, bufspc, hdrsz;
 
 	if((fs->fd = open(dev, ORDWR)) == -1)
 		sysfatal("open %s: %r", dev);
@@ -52,37 +53,41 @@ print("superblock @%llx\n", sb);
 		sysfatal("read superblock: %r");
 	if(b->type != Tsuper)
 		sysfatal("corrupt superblock: bad type");
-	p = b->data;
-	if(memcmp(p, "gefs0001", 8) != 0)
+	if(memcmp(b->data, "gefs0001", 8) != 0)
 		sysfatal("corrupt superblock: bad magic");
-	dirty = GBIT32(p +  8);
-	if(GBIT32(p + 12) != Blksz)
-		sysfatal("fs uses different block size");
-	if(GBIT32(p + 16) != Bufspc)
-		sysfatal("fs uses different buffer size");
-	if(GBIT32(p + 20) != Hdrsz)
-		sysfatal("fs uses different buffer size");
-	fs->root.ht = GBIT32(p + 24);
-	fs->root.bp.addr = GBIT64(p + 32);
-	fs->root.bp.hash = GBIT64(p + 40);
-	fs->narena = GBIT32(p + 48);
-	fs->arenasz = GBIT64(p + 56);
-	fs->arenasz = GBIT64(p + 56);
-	fs->gen = GBIT64(p + 64);
-	fs->nextqid = GBIT64(p + 72);
+	p = b->data + 8;
+
+	dirty = GBIT32(p); p += 4; /* dirty */
+	blksz = GBIT32(p); p += 4;
+	bufspc = GBIT32(p); p += 4;
+	hdrsz = GBIT32(p); p += 4;
+	fs->root.ht = GBIT32(p); p += 4;
+	fs->root.bp.addr = GBIT64(p); p += 8;
+	fs->root.bp.hash = GBIT64(p); p += 8;
+	fs->root.bp.gen = GBIT64(p); p += 8;
+	fs->narena = GBIT32(p); p += 4;
+	fs->arenasz = GBIT64(p); p += 8;
+	fs->nextqid = GBIT64(p); p += 8;
 	fs->super = b;
+	fs->nextgen = fs->root.bp.gen+1;
+
 	fprint(2, "load: %8s\n", p);
 	fprint(2, "\theight:\t%d\n", fs->root.ht);
-	fprint(2, "\trootb:\t%B\n", fs->root.bp);
+	fprint(2, "\troot:\t%B\n", fs->root.bp);
 	fprint(2, "\tarenas:\t%d\n", fs->narena);
 	fprint(2, "\tarenasz:\t%lld\n", fs->arenasz);
-	fprint(2, "\trootgen:\t%lld\n", fs->gen);
 	fprint(2, "\tnextqid:\t%lld\n", fs->nextqid);
 	if((fs->arenas = calloc(fs->narena, sizeof(Arena))) == nil)
 		sysfatal("malloc: %r");
 	for(i = 0; i < fs->narena; i++)
 		if((loadarena(&fs->arenas[i], i*fs->arenasz)) == -1)
 			sysfatal("loadfs: %r");
+	if(bufspc != Bufspc)
+		sysfatal("fs uses different buffer size");
+	if(hdrsz != Hdrsz)
+		sysfatal("fs uses different buffer size");
+	if(blksz != Blksz)
+		sysfatal("fs uses different block size");
 	if(dirty){
 		fprint(2, "file system was not unmounted cleanly");
 		/* TODO: start gc pass */

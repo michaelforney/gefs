@@ -16,7 +16,6 @@ typedef struct Arange	Arange;
 typedef struct Bucket	Bucket;
 typedef struct Chan	Chan;
 typedef struct Tree	Tree;
-typedef struct Bptr	Bptr;
 
 enum {
 	KiB	= 1024ULL,
@@ -43,8 +42,9 @@ enum {
 	Loghdsz	= 8,			/* log hash */
 	Keymax	= 128,			/* key data limit */
 	Inlmax	= 256,			/* inline data limit */
-	Ptrsz	= 18,			/* off, hash, fill */
-	Offsz	= 17,			/* type, qid, off */
+	Ptrsz	= 24,			/* off, hash, gen */
+	Fillsz	= 2,			/* block fill count */
+	Offksz	= 17,			/* type, qid, off */
 	Kvmax	= Keymax + Inlmax,	/* Key and value */
 	Kpmax	= Keymax + Ptrsz,	/* Key and pointer */
 	
@@ -237,6 +237,7 @@ struct Fmsg {
 struct Bptr {
 	vlong	addr;
 	vlong	hash;
+	vlong	gen;
 };
 
 struct Tree {
@@ -264,13 +265,11 @@ struct Gefs {
 	int	fd;
 	long	broken;
 
-	/* protected by rootlk */
 	Tree	root;
 
-	Lock	genlk;
-	vlong	gen;
 	Lock	qidlk;
 	vlong	nextqid;
+	vlong	nextgen; /* unlocked: only touched by mutator thread */
 
 	Arena	*arenas;
 	int	narena;
@@ -433,8 +432,8 @@ struct Blk {
 	vlong	logsz;	/* for allocation log */
 	vlong	lognxt;	/* for allocation log */
 
-	vlong	off;	/* -1 for unallocated */
-	long	ref;	/* TODO: move out */
+	Bptr	bp;
+	long	ref;
 	char	*data;
 	char	buf[Blksz];
 };

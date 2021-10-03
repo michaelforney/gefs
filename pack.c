@@ -269,3 +269,23 @@ kv2qid(Kvp *kv, Qid *q)
 	}
 	return 0;
 }
+
+char*
+packbp(char *p, Bptr *bp)
+{
+	PBIT64(p + 0, bp->addr);
+	PBIT64(p + 8, bp->hash);
+	PBIT64(p + 16, bp->gen);
+	return p + 24;
+}
+
+Bptr
+unpackbp(char *p)
+{
+	Bptr bp;
+
+	bp.addr = GBIT64(p + 0);
+	bp.hash = GBIT64(p + 8);
+	bp.gen = GBIT64(p + 16);
+	return bp;
+}

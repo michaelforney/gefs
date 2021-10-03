@@ -1287,7 +1287,6 @@ accum(Scan *s, Msg *m)
 	case Oinsert:
 		s->present = 1;
 		kv2dir(m, d);
-		fprint(2, "name: %s\n", d->name);
 		break;
 	case Odelete:
 		s->present = 0;

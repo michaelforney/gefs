@@ -787,7 +787,6 @@ fsreaddir(Fmsg *m, Fid *f, Fcall *r)
 			s->overflow = 1;
 			break;
 		}
-		fprint(2, "*** nscan: %d\n", ns);
 		p += ns;
 		n -= ns;
 	}
@@ -1132,12 +1131,19 @@ runctl(void *pfd)
 		if(narg == 0 || strlen(arg[0]) == 0)
 			continue;
 		if(strcmp(arg[0], "show") == 0){
-			if(narg == 0)
+			switch(narg){
+			case 1:
 				fshowfs(fd, "show");
-			if(narg == 2 && strcmp(arg[1], "fid") == 0)
-				showfids(fd);
-			else
-				fprint(fd, "show me yours first");
+				break;
+			case 2:
+				if(strcmp(arg[1], "fid") == 0){
+					showfids(fd);
+					break;
+				}
+				/* wet floor */
+			default:
+				fprint(fd, "show me yours first\n");
+			}
 		}else if(strcmp(arg[0], "check") == 0)
 			checkfs();
 		else if(strcmp(arg[0], "dbg") && narg == 2)

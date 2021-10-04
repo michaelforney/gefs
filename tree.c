@@ -1262,7 +1262,7 @@ btscan(Tree *t, Scan *s, char *pfx, int npfx)
 
 	p = s->path;
 	if((b = getblk(s->root.bp, 0)) == nil)
-		return "error reading block";
+		return Eio;
 	p[0].b = b;
 	for(i = 0; i < s->root.ht; i++){
 		p[i].vi = blksearch(b, &s->kv, &v, &same);
@@ -1274,7 +1274,7 @@ btscan(Tree *t, Scan *s, char *pfx, int npfx)
 			if(p[i].bi == -1 || !same)
 				p[i].bi++;
 			if((b = getblk(v.bp, 0)) == nil)
-				return "error reading block";
+				return Eio;
 			p[i+1].b = b;
 		}
 	}

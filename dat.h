@@ -79,6 +79,7 @@ enum {
 };
 
 #define Efs	"i will not buy this fs, it is scratched"
+#define Eio	"i/o error"
 #define Efid	"bad fid"
 #define Edscan	"invalid dir scan offset"
 #define Eexist	"does not exist"
@@ -375,9 +376,9 @@ struct Path {
 	int	sz;	/* size of range */
 
 	/* Flowing up from flush */
+	Blk	*n;	/* shadowed node */
 	Blk	*l;	/* left of split */
 	Blk	*r;	/* right of split */
-	Blk	*n;	/* shadowed node */
 	/*
 	 * If we merged or rotated, at least
 	 * one of these nodes is not nil,

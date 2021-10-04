@@ -645,7 +645,6 @@ fscreate(Fmsg *m)
 	r.qid = d.qid;
 	r.iounit = f->iounit;
 	respond(m, &r);
-		
 }
 
 void
@@ -757,7 +756,7 @@ fsreaddir(Fmsg *m, Fid *f, Fcall *r)
 	if(s == nil || m->offset == 0){
 		print("scan starting\n");
 		if((s = mallocz(sizeof(Scan), 1)) == nil)
-			return "out of memory";
+			return Enomem;
 
 		pfx[0] = Kent;
 		PBIT64(pfx+1, f->qpath);
@@ -902,7 +901,6 @@ fsread(Fmsg *m)
 		rerror(m, Efid);
 		return;
 	}
-//showfs("fs contents before read");
 	fprint(2, "\n");
 	r.type = Rread;
 	r.count = 0;
@@ -958,6 +956,7 @@ writeb(Fid *f, Msg *m, char *s, vlong o, vlong n, vlong sz)
 			return -1;
 		}
 		memcpy(b->buf, t->buf, Blksz);
+		freeblk(t);
 		putblk(t);
 	}
 	if(fo+n > Blksz)

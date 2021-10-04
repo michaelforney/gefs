@@ -14,7 +14,7 @@ struct Range {
 };
 
 static vlong	blkalloc_lk(Arena*);
-static int	blkdealloc(vlong);
+static int	blkdealloc_lk(vlong);
 static void	cachedel(vlong);
 static Blk	*cacheblk(Blk*);
 static Blk	*lookupblk(vlong);
@@ -44,6 +44,7 @@ readblk(vlong bp, int flg)
 	b->bp.addr = bp;
 	b->bp.hash = -1;
 	b->bp.gen = -1;
+	b->ref = 0;	/* caller must increment */
 	b->cnext = nil;
 	b->cprev = nil;
 	b->hnext = nil;
@@ -263,6 +264,7 @@ loadlog(Arena *a)
 Nextblk:
 	if((b = readblk(bp, 0)) == nil)
 		return -1;
+	cacheblk(b);
 	p = b->data;
 	bh = GBIT64(p + 0);
 	/* the hash covers the log and offset */
@@ -438,8 +440,12 @@ compresslog(Arena *a)
 					break;
 				}
 			}
-			if(blkdealloc(bp) == -1)
+			lock(a);
+			if(blkdealloc_lk(bp) == -1){
+				unlock(a);
 				return -1;
+			}
+			unlock(a);
 		}
 	}
 	finalize(a->logtl);
@@ -484,14 +490,13 @@ blkalloc_lk(Arena *a)
 }
 
 static int
-blkdealloc(vlong b)
+blkdealloc_lk(vlong b)
 {
 	Arena *a;
 	int r;
 
 	r = -1;
 	a = getarena(b);
-	lock(a);
 	cachedel(b);
 	if(freerange(a->free, b, Blksz) == -1)
 		goto out;
@@ -499,7 +504,6 @@ blkdealloc(vlong b)
 		goto out;
 	r = 0;
 out:
-	unlock(a);
 	return r;
 }
 
@@ -559,7 +563,7 @@ newblk(int t)
 	b->bp.addr = bp;
 	b->bp.hash = -1;
 	b->bp.gen = fs->nextgen;
-	b->ref = 1;
+	b->ref = 0;	/* cacheblk incremnets */
 	b->data = b->buf + Hdrsz;
 	return cacheblk(b);
 }
@@ -578,8 +582,6 @@ lookupblk(vlong off)
 	for(b = bkt->b; b != nil; b = b->hnext)
 		if(b->bp.addr == off)
 			break;
-	if(b != nil)
-		pinblk(b);
 	unlock(bkt);
 	return b;
 }
@@ -592,19 +594,19 @@ cacheblk(Blk *b)
 	u32int h;
 
 	/* FIXME: better hash. */
+	refblk(b);
 	assert(b->bp.addr != 0);
+	assert(!(b->flag & Bzombie));
 	h = ihash(b->bp.addr);
-	ainc(&b->ref);
 	bkt = &fs->cache[h % fs->cmax];
 	lock(bkt);
 	for(e = bkt->b; e != nil; e = e->hnext){
 		if(b == e)
-			goto found;
+			goto Found;
 		assert(b->bp.addr != e->bp.addr);
 	}
 	bkt->b = b;
-found:
-	ainc(&b->ref);
+Found:
 	unlock(bkt);
 
 	lock(&fs->lrulk);
@@ -626,10 +628,10 @@ found:
 	b->cnext = fs->chead;
 	b->cprev = nil;
 	fs->chead = b;
-	if((b->flag&Bcache) == 0){
-		b->flag |= Bcache;
+	if((b->flag&Bcached) == 0){
+		b->flag |= Bcached;
 		fs->ccount++;
-		ainc(&b->ref);
+		refblk(b);
 	}
 	c=0;
 	USED(c);
@@ -794,7 +796,7 @@ dupblk(vlong bp, uvlong bh)
 }
 
 Blk*
-pinblk(Blk *b)
+refblk(Blk *b)
 {
 	ainc(&b->ref);
 	return b;
@@ -820,9 +822,13 @@ putblk(Blk *b)
 {
 	if(b == nil)
 		return;
+	assert(b->ref > 0);
+	if(b->flag & Bzombie)
+		fprint(2, "reaping zombie: %B @ %ld\n", b->bp, b->ref);
 	if(adec(&b->ref) == 0){
 		assert((b->flag & Bqueued) || !(b->flag & Bdirty));
 		cachedel(b->bp.addr);
+		assert(lookupblk(b->bp.addr) == nil);
 		free(b);
 	}
 }
@@ -832,13 +838,22 @@ freeblk(Blk *b)
 {
 	Arena *a;
 
-	assert(b->ref == 1 && b->flag & (Bdirty|Bqueued) == Bdirty);
+	/* we can have patterns like:
+	 *   b = getblk();
+         *   use(b);
+         *   freeblk(b);
+         *   unref(b);
+         */
+	if(b->ref != 1 && ((b->flag & Bcached) && b->ref != 2)){
+		fprint(2, "warning: dangling refs: %B @ %ld\n", b->bp, b->ref);
+		b->flag |= Bzombie;
+	}
+	assert((b->flag & Bqueued) == 0);
 	a = getarena(b->bp.addr);
 	lock(a);
 	logop(a, b->bp.addr, LogFree);
-	blkdealloc(b->bp.addr);
+	blkdealloc_lk(b->bp.addr);
 	unlock(a);
-	free(b);
 }
 
 int

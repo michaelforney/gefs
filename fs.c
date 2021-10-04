@@ -49,11 +49,13 @@ fslookup(Fid *f, Key *k, Kvp *kv, Blk **bp, int lk)
 		b = getblk(f->root.bp, 0);
 	if(b == nil)
 		return Efs;
+
 	if(lk)
 		rlock(f->dent);
 	e = btlookupat(b, k, kv, bp);
 	if(lk)
 		runlock(f->dent);
+	putblk(b);
 	return e;
 }
 
@@ -552,6 +554,14 @@ fsclunk(Fmsg *m)
 		rerror(m, "no such fid");
 		return;
 	}
+
+	lock(f);
+	if(f->scan != nil){
+		btdone(f->scan);
+		f->scan = nil;
+	}
+	unlock(f);
+
 	clunkfid(f);
 	r.type = Rclunk;
 	respond(m, &r);

@@ -461,6 +461,7 @@ if(p->merge) showblk(b, "preupdate", 0);
 		}
 		b->nbuf = j;
 	}
+	freeblk(b);
 	p->n = n;
 	return 0;
 }
@@ -552,6 +553,7 @@ split(Blk *b, Path *p, Path *pp, Kvp *mid)
 			setmsg(r, j, &m);
 		}
 	}
+	freeblk(b);
 	p->split = 1;
 	p->l = l;
 	p->r = r;
@@ -640,6 +642,8 @@ merge(Path *p, int idx, Blk *a, Blk *b)
 			setmsg(d, o++, &m);
 		}
 	}
+	freeblk(a);
+	freeblk(b);
 //showfs("postmerge");
 	enqueue(d);
 	p->merge = 1;
@@ -756,6 +760,8 @@ rotate(Path *p, int midx, Blk *a, Blk *b, int halfpiv)
 			setmsg(d, o++, &m);
 		}
 	}
+	freeblk(a);
+	freeblk(b);
 	enqueue(l);
 	enqueue(r);
 	p->merge = 1;
@@ -806,7 +812,7 @@ trybalance(Path *p, Path *pp, int idx)
 	if(p->idx == -1)
 		return 0;
 	if(pp != nil){
-		if((m = pp->n) == nil)
+		if((m = refblk(pp->n)) == nil)
 			return 0;
 	}else{
 		if((m = getblk(km.bp, 0)) == nil)
@@ -838,6 +844,7 @@ next:
 done:
 	ret = 0;
 out:
+	putblk(m);
 	putblk(l);
 	putblk(r);
 	if(pp == nil)
@@ -982,18 +989,12 @@ freepath(Path *path, int npath)
 	Path *p;
 
 	for(p = path; p != path + npath; p++){
-		if(p->b != nil)
-			putblk(p->b);
-		if(p->n != nil)
-			putblk(p->n);
-		if(p->l != nil)
-			putblk(p->l);
-		if(p->r != nil)
-			putblk(p->r);
-		if(p->nl != nil)
-			putblk(p->nl);
-		if(p->nr != nil)
-			putblk(p->nr);
+		putblk(p->b);
+		putblk(p->n);
+		putblk(p->l);
+		putblk(p->r);
+		putblk(p->nl);
+		putblk(p->nr);
 	}
 }
 
@@ -1143,7 +1144,7 @@ getroot(Tree *t, int *h)
 		*h = t->ht;
 	unlock(&t->lk);
 
-	return getblk(t->bp, 0);
+	return getblk(bp, 0);
 }
 
 static char*
@@ -1182,30 +1183,37 @@ collect(Blk *b, Key *k, Kvp *r, int *done)
 char*
 btlookupat(Blk *b0, Key *k, Kvp *r, Blk **bp)
 {
-	int idx, same, done;
+	int idx, same, done, r0;
 	char *ret;
-	Blk *b;
+	Blk *b, *c;
 
 	*bp = nil;
-	b = pinblk(b0);
+	r0 = b0->ref;
+	b = refblk(b0);
 	assert(k != r);
 	while(b->type == Tpivot){
 		ret = collect(b, k, r, &done);
 		if(done)
 			return ret;
 		idx = blksearch(b, k, r, nil);
-		if(idx == -1)
+		if(idx == -1){
+			assert(b0->ref == r0 + (b == b0) ? 1 : 0);
+			putblk(b);
 			return Eexist;
-		putblk(b);
-		if((b = getblk(r->bp, 0)) == nil)
+		}
+		if((c = getblk(r->bp, 0)) == nil)
 			return Efs;
+		putblk(b);
+		b = c;
 	}
 	assert(b->type == Tleaf);
 	blksearch(b, k, r, &same);
 	if(!same){
+		assert(b0->ref == r0 + (b == b0) ? 1 : 0);
 		putblk(b);
 		return Eexist;
 	}
+	assert(b0->ref == r0 + (b == b0) ? 1 : 0);
 	*bp = b;
 	return nil;
 }
@@ -1287,6 +1295,7 @@ accum(Scan *s, Msg *m)
 	case Oinsert:
 		s->present = 1;
 		kv2dir(m, d);
+		fprint(2, "name: %s\n", d->name);
 		break;
 	case Odelete:
 		s->present = 0;
@@ -1349,8 +1358,10 @@ Again:
 		}
 		start = i;
 		p[i-1].vi++;
+		putblk(p[i].b);
 		p[i].vi = 0;
 		p[i].bi = 0;
+		p[i].b = nil;
 	}
 	for(i = start; i < h; i++){
 		getval(p[i-1].b, p[i-1].vi, &kv);
@@ -1402,8 +1413,7 @@ btdone(Scan *s)
 	int i;
 
 	for(i = 0; i < s->root.ht; i++)
-		if(s->path[i].b != nil)
-			putblk(s->path[i].b);
+		putblk(s->path[i].b);
 	free(s->path);
 }
 

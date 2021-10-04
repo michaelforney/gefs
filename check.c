@@ -72,6 +72,7 @@ badblk(Blk *b, int h, Kvp *lo, Kvp *hi)
 			}
 			if(badblk(c, h - 1, &x, &y))
 				fail++;
+			putblk(c);
 		}
 		r = keycmp(&x, &y);
 		switch(r){
@@ -188,11 +189,14 @@ showblk(Blk *b, char *m, int recurse)
 void
 fshowfs(int fd, char *m)
 {
+	Blk *b;
 	int h;
 
 	fprint(fd, "=== %s\n", m);
 	fprint(fd, "\tht: %d\n", fs->root.ht);
-	rshowblk(fd, getroot(&fs->root, &h), 0, 1);
+	b = getroot(&fs->root, &h);
+	rshowblk(fd, b, 0, 1);
+	putblk(b);
 }
 
 void

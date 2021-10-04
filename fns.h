@@ -13,7 +13,7 @@ Blk*	newblk(int type);
 Blk*	shadow(Blk*, Path*, Path*);
 Blk*	getroot(Tree*, int*);
 Blk*	getblk(Bptr, int);
-Blk*	pinblk(Blk*);
+Blk*	refblk(Blk*);
 Blk*	readblk(vlong, int);
 Arena*	getarena(vlong);
 void	putblk(Blk*);

@@ -64,7 +64,6 @@ enum {
 	 * ptr:  off[8] hash[8] -- a key for an Dir block.
 	 * dir:  fixed statbuf header, user ids
 	 */
-	Kref,	/* off[8] => ptr[16]:		pointer to refcount page */
 	Kdat,	/* qid[8] off[8] => ptr[16]:	pointer to data page */
 	Kent,	/* pqid[8] name[n] => dir[n]:	serialized Dir */
 	Ksnap,	/* name[n] => dent[16] ptr[16]:	snapshot root */
@@ -75,7 +74,8 @@ enum {
 	Bdirty	= 1 << 0,
 	Bqueued	= 1 << 1,
 	Bfinal	= 1 << 2,
-	Bcache	= 1 << 3,
+	Bcached	= 1 << 3,
+	Bzombie	= 1 << 4,
 };
 
 #define Efs	"i will not buy this fs, it is scratched"

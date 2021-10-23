@@ -812,8 +812,9 @@ trybalance(Path *p, Path *pp, int idx)
 	if(p->idx == -1)
 		return 0;
 	if(pp != nil){
-		if((m = refblk(pp->n)) == nil)
+		if((m = pp->n) == nil)
 			return 0;
+		refblk(m);
 	}else{
 		if((m = getblk(km.bp, 0)) == nil)
 			return -1;

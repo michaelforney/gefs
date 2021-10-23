@@ -563,8 +563,15 @@ newblk(int t)
 	b->bp.addr = bp;
 	b->bp.hash = -1;
 	b->bp.gen = fs->nextgen;
-	b->ref = 0;	/* cacheblk incremnets */
 	b->data = b->buf + Hdrsz;
+
+	b->ref = 0;	/* cacheblk incremnets */
+	b->nval = 0;
+	b->valsz = 0;
+	b->nbuf = 0;
+	b->bufsz = 0;
+	b->logsz = 0;
+	b->lognxt = 0;
 	return cacheblk(b);
 }
 

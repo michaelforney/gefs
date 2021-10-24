@@ -42,6 +42,9 @@ char	*btscan(Tree*, Scan*, char*, int);
 char	*btnext(Scan*, Kvp*, int*);
 void	btdone(Scan*);
 
+void	setflag(Blk *b, int);
+int	chkflag(Blk *b, int);
+
 char*	estrdup(char*);
 
 int	keycmp(Key *, Key *);
@@ -53,8 +56,8 @@ void	getmsg(Blk *, int, Msg *);
 void	initshow(void);
 void	showblk(Blk*, char*, int);
 void	showpath(Path*, int);
-void	showfs(char*);
-void	fshowfs(int, char*);
+void	showfs(int, char*);
+void	showcache(int);
 void	showfree(char*);
 int	checkfs(void);
 

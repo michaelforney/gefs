@@ -187,7 +187,7 @@ showblk(Blk *b, char *m, int recurse)
 }
 
 void
-fshowfs(int fd, char *m)
+showfs(int fd, char *m)
 {
 	Blk *b;
 	int h;
@@ -200,10 +200,21 @@ fshowfs(int fd, char *m)
 }
 
 void
-showfs(char *m)
+showcache(int fd)
 {
-	if(debug)
-		fshowfs(2, m);
+	Bucket *bkt;
+	Blk *b;
+	int i;
+
+	for(i = 0; i < fs->cmax; i++){
+		bkt = &fs->cache[i];
+		lock(bkt);
+		if(bkt->b != nil)
+			fprint(fd, "bkt%d\n", i);
+		for(b = bkt->b; b != nil; b = b->hnext)
+			fprint(fd, "\t%p[ref=%ld, t=%d] => %B\n", b, b->ref, b->type, b->bp);
+		unlock(bkt);
+	}
 }
 
 void

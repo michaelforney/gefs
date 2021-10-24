@@ -384,7 +384,6 @@ fsattach(Fmsg *m, int iounit)
 	p = packstr(&err, p, ep, "");
 	dk.k = buf;
 	dk.nk = p - buf;
-showfs("attach");
 	if(btlookup(&fs->root, &dk, &kv, &b) != nil){
 		rerror(m, Efs);
 		return;
@@ -1142,11 +1141,15 @@ runctl(void *pfd)
 		if(strcmp(arg[0], "show") == 0){
 			switch(narg){
 			case 1:
-				fshowfs(fd, "show");
+				showfs(fd, "show");
 				break;
 			case 2:
 				if(strcmp(arg[1], "fid") == 0){
 					showfids(fd);
+					break;
+				}
+				if(strcmp(arg[1], "cache") == 0){
+					showcache(fd);
 					break;
 				}
 				/* wet floor */

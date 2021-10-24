@@ -78,7 +78,8 @@ enum {
 	Bzombie	= 1 << 4,
 };
 
-#define Efs	"i will not buy this fs, it is scratched"
+//#define Efs	"i will not buy this fs, it is scratched"
+#define Efs (abort(), "nope")
 #define Eio	"i/o error"
 #define Efid	"bad fid"
 #define Edscan	"invalid dir scan offset"
@@ -448,3 +449,4 @@ struct Chan {
 	void	**wp;
 	void*	args[];	/* list of saved pointers, [->size] */
 };
+

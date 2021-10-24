@@ -572,6 +572,10 @@ newblk(int t)
 	b->bufsz = 0;
 	b->logsz = 0;
 	b->lognxt = 0;
+	b->cnext = nil;
+	b->cprev = nil;
+	b->hnext = nil;
+
 	return cacheblk(b);
 }
 
@@ -636,7 +640,9 @@ Found:
 	b->cprev = nil;
 	fs->chead = b;
 	if((b->flag&Bcached) == 0){
+		wlock(b);
 		b->flag |= Bcached;
+		wunlock(b);
 		fs->ccount++;
 		refblk(b);
 	}
@@ -744,6 +750,7 @@ finalize(Blk *b)
 	vlong h;
 
 //	assert((b->flag & Bfinal) == 0);
+	wlock(b);
 	b->flag |= Bfinal;
 	if(b->type != Traw)
 		PBIT16(b->buf, b->type);
@@ -774,6 +781,7 @@ finalize(Blk *b)
 	case Tarena:
 		break;
 	}
+	wunlock(b);
 }
 
 Blk*
@@ -830,9 +838,12 @@ putblk(Blk *b)
 	if(b == nil)
 		return;
 	assert(b->ref > 0);
-	if(b->flag & Bzombie)
+	rlock(b);
+	if(b->flag & Bzombie && b->ref == 1)
 		fprint(2, "reaping zombie: %B @ %ld\n", b->bp, b->ref);
+	runlock(b);
 	if(adec(&b->ref) == 0){
+		assert(0);
 		assert((b->flag & Bqueued) || !(b->flag & Bdirty));
 		cachedel(b->bp.addr);
 		assert(lookupblk(b->bp.addr) == nil);
@@ -853,7 +864,9 @@ freeblk(Blk *b)
          */
 	if(b->ref != 1 && ((b->flag & Bcached) && b->ref != 2)){
 		fprint(2, "warning: dangling refs: %B @ %ld\n", b->bp, b->ref);
+		wlock(b);
 		b->flag |= Bzombie;
+		wunlock(b);
 	}
 	assert((b->flag & Bqueued) == 0);
 	a = getarena(b->bp.addr);

@@ -809,7 +809,7 @@ trybalance(Path *p, Path *pp, int idx)
 	l = nil;
 	r = nil;
 	ret = -1;
-	if(p->idx == -1)
+	if(1 || p->idx == -1)
 		return 0;
 	if(pp != nil){
 		if((m = pp->n) == nil)
@@ -1121,7 +1121,7 @@ again:
 	freepath(path, npath);
 	free(path);
 	if(!checkfs()){
-		showfs("broken");
+		showfs(1, "broken");
 		abort();
 	}
 	if(redo)
@@ -1164,7 +1164,7 @@ collect(Blk *b, Key *k, Kvp *r, int *done)
 		getmsg(b, i, &m);
 		if(keycmp(&m, k) != 0)
 			break;
-		switch(m.op){
+		switch(m.op&0xf){
 		case Oinsert:
 			*r = m.Kvp;
 			*done = 1;
@@ -1173,6 +1173,8 @@ collect(Blk *b, Key *k, Kvp *r, int *done)
 		case Odelete:
 			*done = 1;
 			err = Eexist;
+			break;
+		case Owstat:
 			break;
 		default:
 			return Efs;
@@ -1194,8 +1196,10 @@ btlookupat(Blk *b0, Key *k, Kvp *r, Blk **bp)
 	assert(k != r);
 	while(b->type == Tpivot){
 		ret = collect(b, k, r, &done);
-		if(done)
+		if(done){
+			*bp = b;
 			return ret;
+		}
 		idx = blksearch(b, k, r, nil);
 		if(idx == -1){
 			assert(b0->ref == r0 + (b == b0) ? 1 : 0);

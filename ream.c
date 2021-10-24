@@ -128,7 +128,7 @@ reamfs(char *dev)
 	s->type = Tsuper;
 	s->bp.addr = sz;
 	s->data = s->buf + Hdrsz;
-	s->ref = 1;
+	s->ref = 2;
 	fillsuper(s);
 	finalize(s);
 	syncblk(s);

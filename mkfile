@@ -3,6 +3,7 @@
 TARG=gefs
 OFILES=\
 	blk.$O\
+	cache.$O\
 	check.$O\
 	fs.$O\
 	hash.$O\

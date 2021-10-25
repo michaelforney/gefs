@@ -10,10 +10,10 @@ extern Gefs	*fs;
 extern int	debug;
 
 Blk*	newblk(int type);
-Blk*	shadow(Blk*, Path*, Path*);
 Blk*	getroot(Tree*, int*);
 Blk*	getblk(Bptr, int);
 Blk*	refblk(Blk*);
+Blk*	cacheblk(Blk*);
 Blk*	readblk(vlong, int);
 Arena*	getarena(vlong);
 void	putblk(Blk*);

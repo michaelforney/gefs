@@ -5,6 +5,7 @@ OFILES=\
 	blk.$O\
 	cache.$O\
 	check.$O\
+	cons.$O\
 	fs.$O\
 	hash.$O\
 	load.$O\

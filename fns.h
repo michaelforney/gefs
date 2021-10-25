@@ -57,6 +57,7 @@ void	initshow(void);
 void	showblk(Blk*, char*, int);
 void	showpath(Path*, int);
 void	showfs(int, char*);
+void	showfids(int);
 void	showcache(int);
 void	showfree(char*);
 int	checkfs(void);
@@ -98,7 +99,7 @@ void	chsend(Chan*, Fmsg*);
 void	runfs(void*);
 void	runwrite(void*);
 void	runread(void*);
-void	runctl(void*);
+void	runcons(void*);
 
 /* it's in libc... */
 extern int cas(long *, long, long);

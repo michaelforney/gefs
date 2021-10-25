@@ -205,7 +205,7 @@ main(int argc, char **argv)
 		srvfd = postfd(srvname, "");
 		ctlfd = postfd(srvname, ".cmd");
 		loadfs(argv[0]);
-		launch(runctl, (void*)ctlfd, "ctl");
+		launch(runcons, (void*)ctlfd, "ctl");
 		launch(runwrite, nil, "writeio");
 		launch(runread, nil, "readio");
 //		launch(runfs, (void*)srvfd, "fs");

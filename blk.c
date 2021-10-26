@@ -16,7 +16,6 @@ struct Range {
 static vlong	blkalloc_lk(Arena*);
 static int	blkdealloc_lk(vlong);
 static void	cachedel(vlong);
-static Blk	*lookupblk(vlong);
 
 Blk*
 readblk(vlong bp, int flg)
@@ -25,7 +24,7 @@ readblk(vlong bp, int flg)
 	vlong off, rem, n;
 
 	assert(bp != -1);
-	if((b = malloc(sizeof(Blk))) == nil)
+	if((b = mallocz(sizeof(Blk), 1)) == nil)
 		return nil;
 	off = bp;
 	rem = Blksz;
@@ -586,25 +585,8 @@ newblk(int t)
 	b->cprev = nil;
 	b->hnext = nil;
 
+	print("new block %B from %p, flag=%x\n", b->bp, getcallerpc(&t), b->flag);
 	return cacheblk(b);
-}
-
-static Blk*
-lookupblk(vlong off)
-{
-	Bucket *bkt;
-	u32int h;
-	Blk *b;
-
-	h = ihash(off);
-
-	bkt = &fs->cache[h % fs->cmax];
-	lock(bkt);
-	for(b = bkt->b; b != nil; b = b->hnext)
-		if(b->bp.addr == off)
-			break;
-	unlock(bkt);
-	return b;
 }
 
 
@@ -761,18 +743,11 @@ freeblk(Blk *b)
 {
 	Arena *a;
 
-	/* we can have patterns like:
-	 *   b = getblk();
-         *   use(b);
-         *   freeblk(b);
-         *   unref(b);
-         */
-	if(b->ref != 1 && ((b->flag & Bcached) && b->ref != 2)){
-		fprint(2, "warning: dangling refs: %B @ %ld\n", b->bp, b->ref);
-		wlock(b);
-		b->flag |= Bzombie;
-		wunlock(b);
-	}
+	wlock(b);
+	b->flag |= Bzombie;
+	wunlock(b);
+	fprint(2, "freeing block %B @ %ld, from 0x%p\n", b->bp, b->ref, getcallerpc(&b));
+
 	assert((b->flag & Bqueued) == 0);
 	a = getarena(b->bp.addr);
 	lock(a);

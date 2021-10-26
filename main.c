@@ -3,7 +3,6 @@
 #include <bio.h>
 #include <avl.h>
 #include <fcall.h>
-#include <ctype.h>
 
 #include "dat.h"
 #include "fns.h"
@@ -14,13 +13,17 @@ int	ream;
 int	debug;
 char	*srvname = "gefs";
 
-static int
-Bconv(Fmt *fmt)
+void
+initfs(vlong cachesz)
 {
-	Bptr bp;
+	if((fs = mallocz(sizeof(Gefs), 1)) == nil)
+		sysfatal("malloc: %r");
 
-	bp = va_arg(fmt->args, Bptr);
-	return fmtprint(fmt, "(%llx,%llx,%llx)", bp.addr, bp.hash, bp.gen);
+	fs->cmax = cachesz/Blksz;
+	if(fs->cmax >= (2*GiB)/sizeof(Bucket))
+		sysfatal("cache too big");
+	if((fs->cache = mallocz(fs->cmax*sizeof(Bucket), 1)) == nil)
+		sysfatal("malloc: %r");
 }
 
 void
@@ -37,94 +40,6 @@ launch(void (*f)(void *), void *arg, char *text)
 		(*f)(arg);
 		exits("child returned");
 	}
-}
-
-static int
-Mconv(Fmt *fmt)
-{
-	char *opname[] = {
-	[Oinsert]	"Oinsert",
-	[Odelete]	"Odelete",
-	[Owstat]	"Owstat",
-	};
-	Msg *m;
-
-	m = va_arg(fmt->args, Msg*);
-	return fmtprint(fmt, "Msg(%s, [%d]%.*X,[%d]%.*X)",
-		opname[m->op&0xf],
-		m->nk, m->nk, m->k,
-		m->nv, m->nv, m->v);
-}
-
-static int
-Pconv(Fmt *fmt)
-{
-	Kvp *kv;
-
-	kv = va_arg(fmt->args, Kvp*);
-	if(kv->type == Vinl)
-		return fmtprint(fmt, "Kvp([%d]%.*X,[%d]%.*X)",
-			kv->nk, kv->nk, kv->k,
-			kv->nv, kv->nv, kv->v);
-	else
-		return fmtprint(fmt, "Kvp([%d]%.*X,(%B,%ud))",
-			kv->nk, kv->nk, kv->k, kv->bp, kv->fill);
-}
-
-static int
-Rconv(Fmt *fmt)
-{
-	Arange *r;
-
-	r = va_arg(fmt->args, Arange*);
-	if(r == nil)
-		return fmtprint(fmt, "<Arange:nil>");
-	else
-		return fmtprint(fmt, "Arange(%lld+%lld)", r->off, r->len);
-}
-
-static int
-Kconv(Fmt *fmt)
-{
-	Key *k;
-
-	k = va_arg(fmt->args, Key*);
-	return fmtprint(fmt, "Key([%d]%.*X)", k->nk, k->nk, k->k);
-}
-
-static int
-Xconv(Fmt *fmt)
-{
-	char *s, *e;
-	int n, i;
-
-	n = 0;
-	i = fmt->prec;
-	s = va_arg(fmt->args, char*);
-	e = s + fmt->prec;
-	for(; s != e; s++){
-		if(i % 4 == 0 && i != 0)
-			n += fmtprint(fmt, ":");
-		i--;
-		if(isalnum(*s))
-			n += fmtrune(fmt, *s);
-		else
-			n += fmtprint(fmt, "%02x", *s&0xff);
-	}
-	return n;
-}
-
-void
-initfs(vlong cachesz)
-{
-	if((fs = mallocz(sizeof(Gefs), 1)) == nil)
-		sysfatal("malloc: %r");
-
-	fs->cmax = cachesz/Blksz;
-	if(fs->cmax >= (2*GiB)/sizeof(Bucket))
-		sysfatal("cache too big");
-	if((fs->cache = mallocz(fs->cmax*sizeof(Bucket), 1)) == nil)
-		sysfatal("malloc: %r");
 }
 
 int
@@ -189,12 +104,12 @@ main(int argc, char **argv)
 	initfs(cachesz);
 	initshow();
 	quotefmtinstall();
+	fmtinstall('H', encodefmt);
 	fmtinstall('B', Bconv);
 	fmtinstall('M', Mconv);
 	fmtinstall('P', Pconv);
 	fmtinstall('K', Kconv);
 	fmtinstall('R', Rconv);
-	fmtinstall('X', Xconv);
 	fmtinstall('F', fcallfmt);
 	if(ream){
 		reamfs(argv[0]);

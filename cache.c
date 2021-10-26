@@ -16,7 +16,10 @@ cacheblk(Blk *b)
 	/* FIXME: better hash. */
 	refblk(b);
 	assert(b->bp.addr != 0);
-	assert(!(b->flag & Bzombie));
+	if(b->flag & Bzombie){
+		print("caching zombie: %B, flg=%x\n", b->bp, b->flag);
+		abort();
+	}
 	h = ihash(b->bp.addr);
 	bkt = &fs->cache[h % fs->cmax];
 	lock(bkt);
@@ -70,7 +73,7 @@ Cached:
 }
 
 static void
-cachedel(vlong del)
+cachedel_(vlong del)
 {
 	Bucket *bkt;
 	Blk *b, **p;
@@ -104,3 +107,22 @@ cachedel(vlong del)
 		fs->chead = b;
 	unlock(&fs->lrulk);
 }
+
+Blk*
+lookupblk(vlong off)
+{
+	Bucket *bkt;
+	u32int h;
+	Blk *b;
+
+	h = ihash(off);
+
+	bkt = &fs->cache[h % fs->cmax];
+	lock(bkt);
+	for(b = bkt->b; b != nil; b = b->hnext)
+		if(b->bp.addr == off)
+			break;
+	unlock(bkt);
+	return b;
+}
+

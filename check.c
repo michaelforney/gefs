@@ -212,7 +212,8 @@ showcache(int fd)
 		if(bkt->b != nil)
 			fprint(fd, "bkt%d\n", i);
 		for(b = bkt->b; b != nil; b = b->hnext)
-			fprint(fd, "\t%p[ref=%ld, t=%d] => %B\n", b, b->ref, b->type, b->bp);
+			if(b->ref != 1)
+				fprint(fd, "\t%p[ref=%ld, t=%d] => %B\n", b, b->ref, b->type, b->bp);
 		unlock(bkt);
 	}
 }

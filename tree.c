@@ -579,8 +579,10 @@ apply(Blk *b, Msg *m)
 	case Owstat:
 		p = m->v;
 		idx = blksearch(b, m, &kv, &same);
-		if(idx == -1 || !same)
+		if(idx == -1 || !same){
+			fprint(2, "missing keyval %P [idx=%d, same=%d]\n", &kv, idx, same);
 			abort();
+		}
 		/* bump version */
 		v = GBIT32(kv.v+8);
 		PBIT32(kv.v+8, v+1);

@@ -6,6 +6,7 @@ OFILES=\
 	cache.$O\
 	check.$O\
 	cons.$O\
+	dump.$O\
 	fs.$O\
 	hash.$O\
 	load.$O\

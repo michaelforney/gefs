@@ -71,7 +71,7 @@ getdent(vlong root, vlong pqid, Dir *d)
 	lock(&fs->dtablk);
 	for(e = fs->dtab[h]; e != nil; e = e->next){
 		if(e->qid.path == d->qid.path && e->rootb == root){
-			dprint("found %p\n", e);
+			dprint("found %p [%K]\n", e, &e->Key);
 			ainc(&e->ref);
 			unlock(&fs->dtablk);
 			return e;
@@ -95,6 +95,7 @@ getdent(vlong root, vlong pqid, Dir *d)
 	e->nk = ek - e->buf;
 	e->next = fs->dtab[h];
 	fs->dtab[h] = e;
+	dprint("created %p [%K]\n", e, &e->Key);
 
 	unlock(&fs->dtablk);
 	return e;
@@ -108,7 +109,6 @@ clunkdent(Dent *de)
 
 	if(adec(&de->ref) == 0){
 		h = (ihash(de->qid.path) ^ ihash(de->rootb)) % Ndtab;
-dprint("freeing dent, hash=%d, p=0x%p\n", h, de);
 		lock(&fs->dtablk);
 		pe = &fs->dtab[h];
 		for(e = fs->dtab[h]; e != nil; e = e->next){
@@ -430,7 +430,7 @@ void
 fswalk(Fmsg *m)
 {
 	char *p, *e, *estr, kbuf[Maxent];
-	int i, err;
+	int i, nwalk, err;
 	vlong up, prev;
 	Fid *o, *f;
 	Dent *dent;
@@ -450,6 +450,7 @@ fswalk(Fmsg *m)
 	}
 	err = 0;
 	estr = nil;
+	nwalk = 0;
 	up = o->qpath;
 	prev = o->qpath;
 	r.type = Rwalk;
@@ -469,13 +470,15 @@ fswalk(Fmsg *m)
 		k.nk = p - kbuf;
 //showfs("walking");
 //dprint("looking up %K\n", &k);
-		if((estr = fslookup(o, &k, &kv, &b, 0)) != nil)
+		if((estr = fslookup(o, &k, &kv, &b, 0)) != nil){
 			break;
+		}
 		if(kv2dir(&kv, &d) == -1){
 			rerror(m, Efs);
 			putblk(b);
 			return;
 		}
+		nwalk = i;
 		prev = d.qid.path;
 		putblk(b);
 		r.wqid[r.nwqid] = d.qid;
@@ -486,14 +489,15 @@ fswalk(Fmsg *m)
 		return;
 	}
 	f = o;
-	if(m->fid != m->newfid){
+	if(m->fid != m->newfid && i == m->nwname){
 		if((f = dupfid(m->newfid, o)) == nil){
 			rerror(m, "%r");
 			return;
 		}
 	}
 	if(i > 0){
-		d.name = m->wname[i-1];
+		d.name = m->wname[nwalk];
+		d.qid = m->wqid[nwalk];
 		dent = getdent(f->root.bp.addr, up, &d);
 		if(dent == nil){
 			if(m->fid != m->newfid)
@@ -501,8 +505,10 @@ fswalk(Fmsg *m)
 			rerror(m, Enomem);
 			return;
 		}
-		f->qpath = r.wqid[r.nwqid-1].path;
-		f->dent = dent;
+		if(i == m->nwname){
+			f->qpath = r.wqid[i-1].path;
+			f->dent = dent;
+		}
 	}
 	respond(m, &r);
 }
@@ -510,7 +516,7 @@ fswalk(Fmsg *m)
 void
 fsstat(Fmsg *m)
 {
-	char buf[STATMAX];
+	char *err, buf[STATMAX];
 	Fcall r;
 	Fid *f;
 	Kvp kv;
@@ -521,8 +527,9 @@ fsstat(Fmsg *m)
 		rerror(m, "no such fid");
 		return;
 	}
-	if(btlookup(&fs->root, f->dent, &kv, &b) != nil){
-		rerror(m, Eexist);
+	print("stat %K\n", &f->dent->Key);
+	if((err = btlookup(&fs->root, f->dent, &kv, &b)) != nil){
+		rerror(m, err);
 		return;
 	}
 	if((n = kv2statbuf(&kv, buf, sizeof(buf))) == -1){
@@ -1006,7 +1013,9 @@ fswrite(Fmsg *m)
 		if(n == -1){
 			// badwrite(f, i);
 			// FIXME: free pages
+			wunlock(f->dent);
 			rerror(m, "%r");
+			return;
 		}
 		p += n;
 		o += n;
@@ -1024,7 +1033,10 @@ fswrite(Fmsg *m)
 		PBIT64(kv[i].v, m->offset+m->count);
 		f->dent->length = m->offset+m->count;
 	}
-	btupsert(&fs->root, kv, i+1);
+	if(btupsert(&fs->root, kv, i+1) == -1){
+		fprint(2, "upsert: %r\n");
+		abort();
+	}
 	wunlock(f->dent);
 
 	r.type = Rwrite;

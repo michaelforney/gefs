@@ -14,6 +14,7 @@ Blk*	getroot(Tree*, int*);
 Blk*	getblk(Bptr, int);
 Blk*	refblk(Blk*);
 Blk*	cacheblk(Blk*);
+Blk*	lookupblk(vlong);
 Blk*	readblk(vlong, int);
 Arena*	getarena(vlong);
 void	putblk(Blk*);
@@ -86,6 +87,13 @@ int	kv2qid(Kvp*, Qid*);
 
 char	*packbp(char*, Bptr*);
 Bptr	unpackbp(char*);
+
+/* fmt */
+int	Bconv(Fmt*);
+int	Mconv(Fmt*);
+int	Pconv(Fmt*);
+int	Rconv(Fmt*);
+int	Kconv(Fmt*);
 
 /* scratch */
 void	setmsg(Blk *, int, Msg *);

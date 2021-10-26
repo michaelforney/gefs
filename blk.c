@@ -553,9 +553,22 @@ newblk(int t)
 
 	if((bp = blkalloc(-1)) == -1)
 		return nil;
-	if((b = lookupblk(bp)) == nil)
+	if((b = lookupblk(bp)) == nil){
 		if((b = mallocz(sizeof(Blk), 1)) == nil)
 			return nil;
+		/*
+		 * If the block is cached,
+		 * then the cache holds a ref
+		 * to the block, so we only
+		 * want to reset the refs
+		 * on an allocation.
+		 *
+		 * cacheblk incrmeents the
+		 * refcount, so we want to
+		 * start off at zero here.
+		 */
+		b->ref = 0;
+	}
 	b->type = t;
 	b->flag = Bdirty;
 	b->bp.addr = bp;
@@ -563,7 +576,6 @@ newblk(int t)
 	b->bp.gen = fs->nextgen;
 	b->data = b->buf + Hdrsz;
 
-	b->ref = 0;	/* cacheblk incremnets */
 	b->nval = 0;
 	b->valsz = 0;
 	b->nbuf = 0;
@@ -605,7 +617,6 @@ syncblk(Blk *b)
 	wunlock(b);
 	return pwrite(fs->fd, b->buf, Blksz, b->bp.addr);
 }
-
 
 void
 enqueue(Blk *b)
@@ -737,12 +748,8 @@ putblk(Blk *b)
 {
 	if(b == nil)
 		return;
-	assert(b->ref > 0);
-	rlock(b);
-	if(b->flag & Bzombie && b->ref == 1)
-		fprint(2, "reaping zombie: %B @ %ld\n", b->bp, b->ref);
-	runlock(b);
 	if(adec(&b->ref) == 0){
+		fprint(2, "wat: free %B @ %ld\n", b->bp, b->ref);
 		assert(0);
 		assert((b->flag & Bqueued) || !(b->flag & Bdirty));
 		free(b);

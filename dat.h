@@ -189,9 +189,10 @@ enum {
 
 enum {
 	Onop,
-	Oinsert,
-	Odelete,
-	Owstat,
+	Oinsert,	/* new kvp */
+	Odelete,	/* delete kvp */
+	Odeletex,	/* delete kvp if exists */
+	Owstat,		/* kvp dirent */
 	/* wstat flags */
 	Owsize	= 1<<4,
 	Owname	= 1<<5,
@@ -368,6 +369,13 @@ struct Fid {
 	Dent	*dent;	/* (pqid, name) ref, modified on rename */
 };
 
+enum {
+	POmod,
+	POrot,
+	POsplit,
+	POmerge,
+};
+
 struct Path {
 	/* Flowing down for flush */
 	Blk	*b;	/* insertion */
@@ -377,20 +385,11 @@ struct Path {
 	int	sz;	/* size of range */
 
 	/* Flowing up from flush */
-	Blk	*n;	/* shadowed node */
-	Blk	*l;	/* left of split */
-	Blk	*r;	/* right of split */
-	/*
-	 * If we merged or rotated, at least
-	 * one of these nodes is not nil,
-	 * and midx points at the left of
-	 * the two nodes.
-	 */
-	Blk	*nl;	/* merged/rotated left */
-	Blk	*nr;	/* merged/rotated right */
-	int	midx;	/* merged index */
-	char	split;	/* did we split? */
-	char	merge;	/* did we merge? */
+	int	op;	/* change done along path */
+	Blk	*m;	/* node merged against, for post-update free */
+	Blk	*nl;	/* new left */
+	Blk	*nr;	/* new right, if we split or rotated */
+	int	midx;	/* modification index */
 };
 
 struct Scanp {

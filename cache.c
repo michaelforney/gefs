@@ -18,7 +18,8 @@ cacheblk(Blk *b)
 	assert(b->bp.addr != 0);
 	if(b->flag & Bzombie){
 		print("caching zombie: %B, flg=%x\n", b->bp, b->flag);
-		abort();
+		sleep(30*1000);
+//		abort();
 	}
 	h = ihash(b->bp.addr);
 	bkt = &fs->cache[h % fs->cmax];

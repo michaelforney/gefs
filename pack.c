@@ -217,7 +217,7 @@ kv2dir(Kvp *kv, Dir *d)
 	v = unpackstr(&err, v, ev, &d->gid);
 	v = unpackstr(&err, v, ev, &d->muid);
 	if(err){
-		print("fucked: %P\n", kv);
+//		print("fucked: %P\n", kv);
 		werrstr("val too small [%s]", d->name);
 		return -1;
 	}

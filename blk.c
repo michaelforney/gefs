@@ -318,7 +318,6 @@ Nextblk:
 			abort();
 			break;
 		}
-showfree("after");
 	}
 	return -1;
 }
@@ -751,7 +750,6 @@ freeblk(Blk *b)
 	assert((b->flag & Bqueued) == 0);
 	a = getarena(b->bp.addr);
 	lock(a);
-	logop(a, b->bp.addr, LogFree);
 	blkdealloc_lk(b->bp.addr);
 	unlock(a);
 }

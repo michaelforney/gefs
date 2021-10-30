@@ -33,6 +33,11 @@ badblk(Blk *b, int h, Kvp *lo, Kvp *hi)
 	int fail;
 
 	fail = 0;
+	if(h < 0){
+		fprint(2, "node too deep (loop?\n");
+		fail++;
+		return fail;
+	} 
 	if(b->type == Tleaf){
 		if(h != 0){
 			fprint(2, "unbalanced leaf\n");
@@ -194,6 +199,7 @@ showfs(int fd, char *m)
 
 	fprint(fd, "=== %s\n", m);
 	fprint(fd, "\tht: %d\n", fs->root.ht);
+	fprint(fd, "\trt: %B\n", fs->root.bp);
 	b = getroot(&fs->root, &h);
 	rshowblk(fd, b, 0, 1);
 	putblk(b);
@@ -222,14 +228,26 @@ void
 showpath(Path *p, int np)
 {
 	int i;
+	char *op[] = {
+	[POmod] = "POmod",
+	[POrot] = "POrot",
+	[POsplit] = "POsplit",
+	[POmerge] = "POmerge",
+	};
 
 	print("path:\n");
 #define A(b) (b ? b->bp.addr : -1)
 	for(i = 0; i < np; i++){
-		print("\t[%d] ==> b(%p)=%llx, n(%p)=%llx, nl(%p)=%llx, nr(%p)=%llx idx=%d\n",
-			i, p[i].b, A(p[i].b), p[i].n, A(p[i].n), p[i].nl, A(p[i].nl), p[i].nr, A(p[i].nr), p[i].idx);
+		print("\t[%d] ==>\n"
+			"\t\t%s: b(%p)=%llx\n"
+			"\t\tnl(%p)=%llx, nr(%p)=%llx\n"
+			"\t\tidx=%d, midx=%d\n",
+			i, op[p[i].op],
+			p[i].b, A(p[i].b),
+			p[i].nl, A(p[i].nl),
+			p[i].nr, A(p[i].nr),
+			p[i].idx, p[i].midx);
 		print("\t\tclear=(%d, %d):%d\n", p[i].lo, p[i].hi, p[i].sz);
-		print("\t\tl=%p, r=%p, n=%p, split=%d\n", p[i].l, p[i].r, p[i].n, p[i].split);
 	}
 }
 

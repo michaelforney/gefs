@@ -28,6 +28,7 @@ static int
 badblk(Blk *b, int h, Kvp *lo, Kvp *hi)
 {
 	Kvp x, y;
+	Msg mx, my;
 	int i, r;
 	Blk *c;
 	int fail;
@@ -53,8 +54,11 @@ badblk(Blk *b, int h, Kvp *lo, Kvp *hi)
 		fail++;
 	}
 	getval(b, 0, &x);
-	if(lo && keycmp(lo, &x) != 0)
+	if(lo && keycmp(lo, &x) > 0){
 		fprint(2, "out of range keys %P != %P\n", lo, &x);
+		showblk(b, "wut", 1);
+		fail++;
+	}
 	for(i = 1; i < b->nval; i++){
 		getval(b, i, &y);
 		if(hi && keycmp(&y, hi) >= 0){
@@ -93,6 +97,54 @@ badblk(Blk *b, int h, Kvp *lo, Kvp *hi)
 			break;
 		}
 		x = y;
+	}
+	if(b->type == Tpivot){
+		getval(b, b->nval-1, &y);
+		if((c = getblk(x.bp, 0)) == nil){
+			fprint(2, "corrupt block: %r\n");
+			fail++;
+		}
+		if(c != nil && badblk(c, h - 1, &y, nil))
+			fail++;
+	}
+	if(b->type == Tpivot){
+		if(b->nbuf > 0){
+			getmsg(b, 0, &mx);
+			if(hi && keycmp(&mx, hi) >= 0){
+				fprint(2, "out of range messages %P != %M\n", hi, &mx);
+				fail++;
+			}
+		}
+		for(i = 1; i < b->nbuf; i++){
+			getmsg(b, i, &my);
+			switch(my.op){
+			case Oinsert:	/* new kvp */
+			case Odelete:	/* delete kvp */
+			case Oqdelete:	/* delete kvp if exists */
+				break;
+			case Owstat:		/* kvp dirent */
+				if((my.statop & ~(Owsize|Owname|Owmode|Owmtime)) != 0){
+					fprint(2, "invalid stat op %d\n", my.statop);
+					fail++;
+				}
+				break;
+			default:
+				fprint(2, "invalid message op %d\n", my.op);
+				fail++;
+				break;
+			}
+			if(hi && keycmp(&y, hi) > 0){
+				fprint(2, "out of range keys %P >= %P\n", &y, hi);
+				fail++;
+			}
+			if(keycmp(&mx, &my) == 1){
+				fprint(2, "misordered keys %P, %P\n", &x, &y);
+				fail++;
+				break;
+			}
+			mx = my;
+		}
+
 	}
 	return fail;
 }
@@ -239,15 +291,18 @@ showpath(Path *p, int np)
 #define A(b) (b ? b->bp.addr : -1)
 	for(i = 0; i < np; i++){
 		print("\t[%d] ==>\n"
-			"\t\t%s: b(%p)=%llx\n"
+			"\t\t%s: b(%p)=%llx [%s]\n"
 			"\t\tnl(%p)=%llx, nr(%p)=%llx\n"
-			"\t\tidx=%d, midx=%d\n",
+			"\t\tidx=%d, midx=%d\n"
+			"\t\tpullsz=%d, npull=%d, \n"
+			"\t\tclear=(%d. %d)\n",
 			i, op[p[i].op],
-			p[i].b, A(p[i].b),
+			p[i].b, A(p[i].b), (p[i].b == nil) ? "nil" : (p[i].b->type == Tleaf ? "leaf" : "pivot"),
 			p[i].nl, A(p[i].nl),
 			p[i].nr, A(p[i].nr),
-			p[i].idx, p[i].midx);
-		print("\t\tclear=(%d, %d):%d\n", p[i].lo, p[i].hi, p[i].sz);
+			p[i].idx, p[i].midx,
+			p[i].pullsz, p[i].npull,
+			p[i].lo, p[i].hi);
 	}
 }
 
@@ -257,8 +312,6 @@ showfree(char *m)
 	Arange *r;
 	int i;
 
-	if(!debug)
-		return;
 	print("=== %s\n", m);
 	for(i = 0; i < fs->narena; i++){
 		print("arena %d:\n", i);

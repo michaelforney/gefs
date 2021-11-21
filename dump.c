@@ -51,7 +51,7 @@ showval(Fmt *fmt, Kvp *v, int op)
 		n = fmtprint(fmt, "blk:%llx, hash:%llx", GBIT64(v->v), GBIT64(v->v+8));
 		break;
 	case Kent:	/* pqid[8] name[n] => dir[n]:	serialized Dir */
-		switch(op&0xf){
+		switch(op){
 		case Onop:
 		case Oinsert:
 			if(kv2dir(v, &d) == -1)
@@ -63,6 +63,7 @@ showval(Fmt *fmt, Kvp *v, int op)
 			break;
 		case Odelete:
 			n = fmtprint(fmt, "delete");
+			break;
 		case Owstat:
 			p = v->v;
 			if(op & Owmtime){
@@ -79,6 +80,7 @@ showval(Fmt *fmt, Kvp *v, int op)
 			}
 			if(p != v->v + v->nv)
 				abort();
+			break;
 		}
 		break;
 	case Ksnap:	/* name[n] => dent[16] ptr[16]:	snapshot root */
@@ -110,16 +112,19 @@ Mconv(Fmt *fmt)
 	char *opname[] = {
 	[Oinsert]	"Oinsert",
 	[Odelete]	"Odelete",
+	[Oqdelete]	"Oqdelete",
 	[Owstat]	"Owstat",
 	};
 	Msg *m;
 	int n;
 
 	m = va_arg(fmt->args, Msg*);
-	n = fmtprint(fmt, "Msg(%s, ", opname[m->op&0xf]);
+	if(m == nil)
+		return fmtprint(fmt, "Msg{nil}");
+	n = fmtprint(fmt, "Msg(%s, ", opname[m->op]);
 	n += showkey(fmt, m);
 	n += fmtprint(fmt, ") => (");
-	n += showval(fmt, m, m->op);
+	n += showval(fmt, m, m->statop);
 	n += fmtprint(fmt, ")");
 	return n;
 }
@@ -131,6 +136,8 @@ Pconv(Fmt *fmt)
 	int n;
 
 	kv = va_arg(fmt->args, Kvp*);
+	if(kv == nil)
+		return fmtprint(fmt, "Kvp{nil}");
 	n = fmtprint(fmt, "Kvp(");
 	n += showkey(fmt, kv);
 	n += fmtprint(fmt, ") => (");
@@ -149,6 +156,8 @@ Kconv(Fmt *fmt)
 	int n;
 
 	k = va_arg(fmt->args, Key*);
+	if(k == nil)
+		return fmtprint(fmt, "Key{nil}");
 	n = fmtprint(fmt, "Key(");
 	n += showkey(fmt, k);
 	n += fmtprint(fmt, ")");
@@ -165,4 +174,13 @@ Rconv(Fmt *fmt)
 		return fmtprint(fmt, "<Arange:nil>");
 	else
 		return fmtprint(fmt, "Arange(%lld+%lld)", r->off, r->len);
+}
+
+int
+Qconv(Fmt *fmt)
+{
+	Qid q;
+
+	q = va_arg(fmt->args, Qid);
+	return fmtprint(fmt, "(%llx %ld %d)", q.path, q.vers, q.type);
 }

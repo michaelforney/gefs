@@ -74,7 +74,7 @@ Cached:
 }
 
 static void
-cachedel_(vlong del)
+cachedel(vlong del)
 {
 	Bucket *bkt;
 	Blk *b, **p;

@@ -5,6 +5,7 @@
 #pragma varargck type "B"	Bptr
 #pragma varargck type "R"	Arange*
 #pragma varargck type "X"	char*
+#pragma varargck type "Q"	Qid
 
 extern Gefs	*fs;
 extern int	debug;
@@ -32,16 +33,18 @@ void	reamfs(char*);
 int	loadarena(Arena*, vlong);
 void	loadfs(char*);
 int	sync(void);
-int	loadlog(Arena *a);
+int	loadlog(Arena*);
 int	endfs(void);
-int	compresslog(Arena *a);
+int	compresslog(Arena*);
+void	setval(Blk*, int, Kvp*);
 
 int	btupsert(Tree*, Msg*, int);
-char	*btlookup(Tree*, Key*, Kvp*, Blk**);
-char	*btlookupat(Blk*, Key*, Kvp*, Blk**);
+char	*btlookup(Tree*, Key*, Kvp*, char*, int);
+char	*btlookupat(Blk*, Key*, Kvp*, char*, int);
 char	*btscan(Tree*, Scan*, char*, int);
 char	*btnext(Scan*, Kvp*, int*);
 void	btdone(Scan*);
+
 
 void	setflag(Blk *b, int);
 int	chkflag(Blk *b, int);
@@ -94,12 +97,12 @@ int	Mconv(Fmt*);
 int	Pconv(Fmt*);
 int	Rconv(Fmt*);
 int	Kconv(Fmt*);
+int	Qconv(Fmt*);
 
 /* scratch */
 void	setmsg(Blk *, int, Msg *);
 void	bufinsert(Blk *, Msg *);
 void	victim(Blk *b, Path *p);
-void	blkinsert(Blk *b, Kvp *kv);
 
 Chan	*mkchan(int);
 Fmsg	*chrecv(Chan*);

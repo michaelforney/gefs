@@ -40,7 +40,7 @@ runcons(void *pfd)
 			}
 		}else if(strcmp(arg[0], "check") == 0)
 			checkfs();
-		else if(strcmp(arg[0], "dbg") && narg == 2)
+		else if(strcmp(arg[0], "dbg") == 0 && narg == 2)
 			debug = atoi(arg[1]);
 		else
 			fprint(fd, "unknown command %s\n", arg[0]);

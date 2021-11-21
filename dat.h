@@ -191,7 +191,7 @@ enum {
 	Onop,
 	Oinsert,	/* new kvp */
 	Odelete,	/* delete kvp */
-	Odeletex,	/* delete kvp if exists */
+	Oqdelete,	/* delete kvp if exists */
 	Owstat,		/* kvp dirent */
 	/* wstat flags */
 	Owsize	= 1<<4,
@@ -335,6 +335,7 @@ struct Kvp {
 
 struct Msg {
 	char	op;
+	char	statop;
 	Kvp;
 };
 
@@ -378,7 +379,8 @@ enum {
 
 struct Path {
 	/* Flowing down for flush */
-	Blk	*b;	/* insertion */
+	Msg	*ins;	/* inserted values, bounded by lo..hi */
+	Blk	*b;	/* to shadow */
 	int	idx;	/* insert at */
 	int	lo;	/* key range */
 	int	hi;	/* key range */
@@ -390,6 +392,8 @@ struct Path {
 	Blk	*nl;	/* new left */
 	Blk	*nr;	/* new right, if we split or rotated */
 	int	midx;	/* modification index */
+	int	npull;	/* number of messages successfully pulled */
+	int	pullsz;	/* size of pulled messages */
 };
 
 struct Scanp {
@@ -401,7 +405,6 @@ struct Scanp {
 struct Scan {
 	vlong	offset;	/* last read offset */
 	Tree	root;
-	Dir	dir;
 
 	int	done;
 	int	overflow;

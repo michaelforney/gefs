@@ -242,7 +242,6 @@ kv2statbuf(Kvp *kv, char *buf, int nbuf)
 
 	if(kv2dir(kv, &d) == -1)
 		return -1;
-print("\tpackname: %s\n", d.name);
 	dprint("have %d bytes to pack into\n", nbuf);
 	if((n = convD2M(&d, (uchar*)buf, nbuf)) <= BIT16SZ){
 		fprint(2, "here...failed convert??, needed %d\n", GBIT16(buf));

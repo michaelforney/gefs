@@ -3,7 +3,6 @@
 #include <fcall.h>
 #include <avl.h>
 #include <bio.h>
-#include <pool.h>
 
 #include "dat.h"
 #include "fns.h"
@@ -38,7 +37,7 @@ nextqid(void)
 }
 
 static char*
-fslookup(Fid *f, Key *k, Kvp *kv, Blk **bp, int lk)
+fslookup(Fid *f, Key *k, Kvp *kv, char *buf, int nbuf, int lk)
 {
 	char *e;
 	Blk *b;
@@ -52,7 +51,7 @@ fslookup(Fid *f, Key *k, Kvp *kv, Blk **bp, int lk)
 
 	if(lk)
 		rlock(f->dent);
-	e = btlookupat(b, k, kv, bp);
+	e = btlookupat(b, k, kv, buf, nbuf);
 	if(lk)
 		runlock(f->dent);
 	putblk(b);
@@ -71,7 +70,6 @@ getdent(vlong root, vlong pqid, Dir *d)
 	lock(&fs->dtablk);
 	for(e = fs->dtab[h]; e != nil; e = e->next){
 		if(e->qid.path == d->qid.path && e->rootb == root){
-			dprint("found %p [%K]\n", e, &e->Key);
 			ainc(&e->ref);
 			unlock(&fs->dtablk);
 			return e;
@@ -95,7 +93,6 @@ getdent(vlong root, vlong pqid, Dir *d)
 	e->nk = ek - e->buf;
 	e->next = fs->dtab[h];
 	fs->dtab[h] = e;
-	dprint("created %p [%K]\n", e, &e->Key);
 
 	unlock(&fs->dtablk);
 	return e;
@@ -135,7 +132,8 @@ showfids(int fd)
 	for(i = 0; i < Nfidtab; i++)
 		for(f = fs->fidtab[i]; f != nil; f = f->next){
 			rlock(f->dent);
-			fprint(fd, "\tfid[%d]: %d [refs=%ld, k=%K]\n", i, f->fid, f->dent->ref, &f->dent->Key);
+			fprint(fd, "\tfid[%d]: %d [refs=%ld, k=%K, qid=%Q]\n",
+				i, f->fid, f->dent->ref, &f->dent->Key, f->dent->qid);
 			runlock(f->dent);
 		}
 	unlock(&fs->fidtablk);
@@ -366,13 +364,12 @@ fsauth(Fmsg *m)
 void
 fsattach(Fmsg *m, int iounit)
 {
-	char *p, *ep, buf[128];
+	char *p, *ep, buf[Kvmax], kvbuf[Kvmax];
 	int err;
 	Dent *e;
 	Fcall r;
 	Kvp kv;
 	Key dk;
-	Blk *b;
 	Fid f;
 	Dir d;
 
@@ -384,22 +381,19 @@ fsattach(Fmsg *m, int iounit)
 	p = packstr(&err, p, ep, "");
 	dk.k = buf;
 	dk.nk = p - buf;
-	if(btlookup(&fs->root, &dk, &kv, &b) != nil){
+	if(btlookup(&fs->root, &dk, &kv, kvbuf, sizeof(kvbuf)) != nil){
 		rerror(m, Efs);
 		return;
 	}
 	r.type = Rattach;
 	if(kv2dir(&kv, &d) == -1){
 		rerror(m, Efs);
-		putblk(b);
 		return;
 	}
 	if((e = getdent(-1, -1, &d)) == nil){
 		rerror(m, Efs);
-		putblk(b);
 		return;
 	}
-	putblk(b);
 
 	/*
 	 * A bit of a hack; we're duping a fid
@@ -429,13 +423,12 @@ fsattach(Fmsg *m, int iounit)
 void
 fswalk(Fmsg *m)
 {
-	char *p, *e, *estr, kbuf[Maxent];
-	int i, nwalk, err;
+	char *p, *e, *estr, kbuf[Maxent], kvbuf[Kvmax];
 	vlong up, prev;
+	int i, err;
 	Fid *o, *f;
 	Dent *dent;
 	Fcall r;
-	Blk *b;
 	Kvp kv;
 	Key k;
 	Dir d;
@@ -450,11 +443,9 @@ fswalk(Fmsg *m)
 	}
 	err = 0;
 	estr = nil;
-	nwalk = 0;
 	up = o->qpath;
 	prev = o->qpath;
 	r.type = Rwalk;
-	r.nwqid = 0;
 	for(i = 0; i < m->nwname; i++){
 		up = prev;
 		p = kbuf;
@@ -468,22 +459,17 @@ fswalk(Fmsg *m)
 		}
 		k.k = kbuf;
 		k.nk = p - kbuf;
-//showfs("walking");
-//dprint("looking up %K\n", &k);
-		if((estr = fslookup(o, &k, &kv, &b, 0)) != nil){
+		if((estr = fslookup(o, &k, &kv, kvbuf, sizeof(kvbuf), 0)) != nil){
 			break;
 		}
 		if(kv2dir(&kv, &d) == -1){
 			rerror(m, Efs);
-			putblk(b);
 			return;
 		}
-		nwalk = i;
 		prev = d.qid.path;
-		putblk(b);
-		r.wqid[r.nwqid] = d.qid;
-		r.nwqid++;
+		r.wqid[i] = d.qid;
 	}
+	r.nwqid = i;
 	if(i == 0 && m->nwname != 0){
 		rerror(m, estr);
 		return;
@@ -496,8 +482,6 @@ fswalk(Fmsg *m)
 		}
 	}
 	if(i > 0){
-		d.name = m->wname[nwalk];
-		d.qid = m->wqid[nwalk];
 		dent = getdent(f->root.bp.addr, up, &d);
 		if(dent == nil){
 			if(m->fid != m->newfid)
@@ -516,19 +500,17 @@ fswalk(Fmsg *m)
 void
 fsstat(Fmsg *m)
 {
-	char *err, buf[STATMAX];
+	char *err, buf[STATMAX], kvbuf[Kvmax];
 	Fcall r;
 	Fid *f;
 	Kvp kv;
-	Blk *b;
 	int n;
 
 	if((f = getfid(m->fid)) == nil){
 		rerror(m, "no such fid");
 		return;
 	}
-	print("stat %K\n", &f->dent->Key);
-	if((err = btlookup(&fs->root, f->dent, &kv, &b)) != nil){
+	if((err = btlookup(&fs->root, f->dent, &kv, kvbuf, sizeof(kvbuf))) != nil){
 		rerror(m, err);
 		return;
 	}
@@ -540,7 +522,6 @@ fsstat(Fmsg *m)
 	r.stat = (uchar*)buf;
 	r.nstat = n;
 	respond(m, &r);
-	putblk(b);
 }
 
 void
@@ -615,6 +596,7 @@ fscreate(Fmsg *m)
 	d.gid = "glenda";
 	d.muid = "glenda";
 	mb.op = Oinsert;
+	mb.statop = 0;
 	if(dir2kv(f->qpath, &d, &mb, buf, sizeof(buf)) == -1){
 		rerror(m, "%r");
 		return;
@@ -693,28 +675,26 @@ fsaccess(Dir*, int)
 void
 fsopen(Fmsg *m)
 {
+	char *e, buf[Kvmax];
 	Fcall r;
-	char *e;
 	Dir d;
 	Fid *f;
-	Blk *b;
 	Kvp kv;
 
 	if((f = getfid(m->fid)) == nil){
 		rerror(m, Efid);
 		return;
 	}
-	if((e = fslookup(f, f->dent, &kv, &b, 0)) != nil){
+	if((e = fslookup(f, f->dent, &kv, buf, sizeof(buf), 0)) != nil){
 		rerror(m, e);
 		return;
 	}
 	if(kv2dir(&kv, &d) == -1){
 		rerror(m, Efs);
-		putblk(b);
+		return;
 	}
 	if(fsaccess(&d, m->mode) == -1){
 		rerror(m, Eperm);
-		putblk(b);
 		return;
 	}
 	wlock(f->dent);
@@ -723,7 +703,6 @@ fsopen(Fmsg *m)
 	r.type = Ropen;
 	r.qid = d.qid;
 	r.iounit = f->iounit;
-	putblk(b);
 
 	lock(f);
 	if(f->mode != -1){
@@ -755,12 +734,12 @@ fsreaddir(Fmsg *m, Fid *f, Fcall *r)
 	int n, ns, done;
 	Tree *t;
 	Scan *s;
+	Dir d;
 
 	s = f->scan;
 	if(s != nil && s->offset != 0 && s->offset != m->offset)
 		return Edscan;
 	if(s == nil || m->offset == 0){
-		print("scan starting\n");
 		if((s = mallocz(sizeof(Scan), 1)) == nil)
 			return Enomem;
 
@@ -787,7 +766,8 @@ fsreaddir(Fmsg *m, Fid *f, Fcall *r)
 	p = r->data;
 	n = m->count;
 	if(s->overflow){
-		if((ns = convD2M(&s->dir, (uchar*)p, n)) <= BIT16SZ)
+		kv2dir(&s->kv, &d);
+		if((ns = convD2M(&d, (uchar*)p, n)) <= BIT16SZ)
 			return Edscan;
 		s->overflow = 0;
 		p += ns;
@@ -798,7 +778,8 @@ fsreaddir(Fmsg *m, Fid *f, Fcall *r)
 			return e;
 		if(done)
 			break;
-		if((ns = convD2M(&s->dir, (uchar*)p, n)) <= BIT16SZ){
+		kv2dir(&s->kv, &d);
+		if((ns = convD2M(&d, (uchar*)p, n)) <= BIT16SZ){
 			s->overflow = 1;
 			break;
 		}
@@ -812,7 +793,7 @@ fsreaddir(Fmsg *m, Fid *f, Fcall *r)
 int
 readb(Fid *f, char *d, vlong o, vlong n, int sz)
 {
-	char *e, buf[17];
+	char *e, buf[17], kvbuf[17+32];
 	vlong fb, fo;
 	Bptr bp;
 	Blk *b;
@@ -831,22 +812,19 @@ readb(Fid *f, char *d, vlong o, vlong n, int sz)
 	PBIT64(k.k+1, f->qpath);
 	PBIT64(k.k+9, fb);
 
-	e = fslookup(f, &k, &kv, &b, 0);
+	e = fslookup(f, &k, &kv, kvbuf, sizeof(kvbuf), 0);
 	if(e != nil && e != Eexist){
 		fprint(2, "!!! error: %s", e);
 		werrstr(e);
 		return -1;
 	}
-	fprint(2, "\treadb: key=%K, val=%P\n", &k, &kv);
-	bp = unpackbp(kv.v);
-	putblk(b);
 
+	bp = unpackbp(kv.v);
 	if((b = getblk(bp, GBraw)) == nil)
 		return -1;
 	if(fo+n > Blksz)
 		n = Blksz-fo;
 	if(b != nil){
-		fprint(2, "\tcopying %lld to resp %p\n", n, d);
 		memcpy(d, b->buf+fo, n);
 		putblk(b);
 	}else
@@ -907,14 +885,12 @@ fsread(Fmsg *m)
 		rerror(m, Efid);
 		return;
 	}
-	fprint(2, "\n");
 	r.type = Rread;
 	r.count = 0;
 	if((r.data = malloc(m->count)) == nil){
 		rerror(m, Emem);
 		return;
 	}
-	fprint(2, "\nread{{{{\n");
 	if(f->dent->qid.type & QTDIR)
 		e = fsreaddir(m, f, &r);
 	else
@@ -926,12 +902,12 @@ fsread(Fmsg *m)
 		respond(m, &r);
 		free(r.data);
 	}
-	fprint(2, "\n}}}read\n");
 }
 
 int
 writeb(Fid *f, Msg *m, char *s, vlong o, vlong n, vlong sz)
 {
+	char buf[Kvmax];
 	vlong fb, fo;
 	Bptr bp;
 	Blk *b, *t;
@@ -949,16 +925,13 @@ writeb(Fid *f, Msg *m, char *s, vlong o, vlong n, vlong sz)
 	if(b == nil)
 		return -1;
 	if(fb < sz && (fo != 0 || n != Blksz)){
-		fprint(2, "\tappending to block %B\n", b->bp);
-		if(fslookup(f, m, &kv, &t, 0) != nil){
-			putblk(b);
+		dprint("\tappending to block %B\n", b->bp);
+		if(fslookup(f, m, &kv, buf, sizeof(buf), 0) != nil){
 			return -1;
 		}
 		bp = unpackbp(kv.v);
-		putblk(t);
 
 		if((t = getblk(bp, GBraw)) == nil){
-			putblk(b);
 			return -1;
 		}
 		memcpy(b->buf, t->buf, Blksz);
@@ -974,8 +947,6 @@ writeb(Fid *f, Msg *m, char *s, vlong o, vlong n, vlong sz)
 	assert(b->flag & Bfinal);
 	packbp(m->v, &b->bp);
 	putblk(b);
-	checkfs();
-	poolcheck(mainmem);
 	return n;
 }
 
@@ -1023,12 +994,13 @@ fswrite(Fmsg *m)
 	}
 
 	kv[i].op = Owstat;
+	kv[i].statop = 0;
 	kv[i].k = f->dent->k;
 	kv[i].nk = f->dent->nk;
 	kv[i].v = sbuf;
 	kv[i].nv = 0;
 	if(m->offset+m->count > f->dent->length){
-		kv[i].op |= Owsize;
+		kv[i].statop = Owsize;
 		kv[i].nv += 8;
 		PBIT64(kv[i].v, m->offset+m->count);
 		f->dent->length = m->offset+m->count;

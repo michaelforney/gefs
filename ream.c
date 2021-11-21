@@ -15,6 +15,7 @@ initroot(Blk *r)
 	Kvp kv;
 	Dir d;
 
+	/* nb: values must be inserted in key order */
 	memset(&d, 0, sizeof(Dir));
 	d.qid = (Qid){fs->nextqid++, 0, QTDIR};
 	d.mode = 0755;
@@ -27,16 +28,16 @@ initroot(Blk *r)
 	d.muid = "glenda";
 	if(dir2kv(-1, &d, &kv, buf, sizeof(buf)) == -1)
 		sysfatal("ream: pack root: %r");
-	blkinsert(r, &kv);
+	setval(r, 0, &kv);
 
 	kv.k = buf;
 	kv.nk = 9;
 	kv.v = buf+9;
 	kv.nv = 8;
 	buf[0] = Ksuper;
-	PBIT64(buf+1, 0);
-	PBIT64(buf+9, 0);
-	blkinsert(r, &kv);
+	PBIT64(buf+1, 0ULL);
+	PBIT64(buf+9, 0ULL);
+	setval(r, 1, &kv);
 }
 
 static void

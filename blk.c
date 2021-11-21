@@ -2,7 +2,6 @@
 #include <libc.h>
 #include <fcall.h>
 #include <avl.h>
-#include <pool.h>
 
 #include "dat.h"
 #include "fns.h"
@@ -584,7 +583,7 @@ newblk(int t)
 	b->cprev = nil;
 	b->hnext = nil;
 
-	print("new block %B from %p, flag=%x\n", b->bp, getcallerpc(&t), b->flag);
+	dprint("new block %B from %p, flag=%x\n", b->bp, getcallerpc(&t), b->flag);
 	return cacheblk(b);
 }
 
@@ -745,7 +744,7 @@ freeblk(Blk *b)
 	wlock(b);
 	b->flag |= Bzombie;
 	wunlock(b);
-	fprint(2, "freeing block %B @ %ld, from 0x%p\n", b->bp, b->ref, getcallerpc(&b));
+	dprint("freeing block %B @ %ld, from 0x%p\n", b->bp, b->ref, getcallerpc(&b));
 
 	assert((b->flag & Bqueued) == 0);
 	a = getarena(b->bp.addr);

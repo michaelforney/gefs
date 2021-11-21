@@ -111,6 +111,7 @@ main(int argc, char **argv)
 	fmtinstall('K', Kconv);
 	fmtinstall('R', Rconv);
 	fmtinstall('F', fcallfmt);
+	fmtinstall('Q', Qconv);
 	if(ream){
 		reamfs(argv[0]);
 		exits(nil);

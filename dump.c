@@ -39,7 +39,7 @@ showkey(Fmt *fmt, Key *k)
 }
 
 static int
-showval(Fmt *fmt, Kvp *v, int op)
+showval(Fmt *fmt, Kvp *v, int op, int wsop)
 {
 	char *p;
 	Dir d;
@@ -66,15 +66,15 @@ showval(Fmt *fmt, Kvp *v, int op)
 			break;
 		case Owstat:
 			p = v->v;
-			if(op & Owmtime){
+			if(wsop & Owmtime){
 				n += fmtprint(fmt, "mtime:%llx ", GBIT64(p));
 				p += 8;
 			}
-			if(op & Owsize){
+			if(wsop & Owsize){
 				n += fmtprint(fmt, "size:%llx ", GBIT64(p));
 				p += 8;
 			}
-			if(op & Owmode){
+			if(wsop & Owmode){
 				n += fmtprint(fmt, "mode:%o ", GBIT32(p));
 				p += 4;
 			}
@@ -124,7 +124,7 @@ Mconv(Fmt *fmt)
 	n = fmtprint(fmt, "Msg(%s, ", opname[m->op]);
 	n += showkey(fmt, m);
 	n += fmtprint(fmt, ") => (");
-	n += showval(fmt, m, m->statop);
+	n += showval(fmt, m, m->op, m->statop);
 	n += fmtprint(fmt, ")");
 	return n;
 }
@@ -142,7 +142,7 @@ Pconv(Fmt *fmt)
 	n += showkey(fmt, kv);
 	n += fmtprint(fmt, ") => (");
 	if(kv->type == Vinl)
-		n += showval(fmt, kv, Onop);
+		n += showval(fmt, kv, Onop, 0);
 	else
 		n += fmtprint(fmt, "(%B,%ud))", kv->bp, kv->fill);
 	n += fmtprint(fmt, ")");

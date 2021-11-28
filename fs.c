@@ -41,17 +41,15 @@ fslookup(Fid *f, Key *k, Kvp *kv, char *buf, int nbuf, int lk)
 {
 	char *e;
 	Blk *b;
+	int h;
 
-	if(f->root.bp.addr == -1)
-		b = getroot(&fs->root, nil);
-	else
-		b = getblk(f->root.bp, 0);
-	if(b == nil)
+	assert(f->root.bp.addr == -1);
+	if((b = getroot(&fs->root, &h)) == nil)
 		return Efs;
 
 	if(lk)
 		rlock(f->dent);
-	e = btlookupat(b, k, kv, buf, nbuf);
+	e = btlookupat(b, h, k, kv, buf, nbuf);
 	if(lk)
 		runlock(f->dent);
 	putblk(b);

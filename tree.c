@@ -1198,75 +1198,45 @@ getroot(Tree *t, int *h)
 	return getblk(bp, 0);
 }
 
-static char*
-collect(Blk *b, Key *k, Kvp *r, char *buf, int nbuf, int *done)
+char*
+btlookupat(Blk *b, int h, Key *k, Kvp *r, char *buf, int nbuf)
 {
-	int i, idx, same;
+	int i, j, ok, same;
 	char *err;
+	Blk **p;
 	Msg m;
 
-	*done = 0;
-	idx = bufsearch(b, k, &m, &same);
-	if(!same)
-		return nil;
-	err = Eexist;
-	for(i = idx; i < b->nbuf; i++){
-		getmsg(b, i, &m);
-		if(keycmp(&m, k) != 0)
-			break;
-		switch(m.op){
-		case Oinsert:
-			cpkvp(r, &m, buf, nbuf);
-			*done = 1;
-			err = nil;
-			break;
-		case Odelete:
-			*done = 1;
-			err = Eexist;
-			break;
-		case Owstat:
-//			statupdate(r, &m);
-			break;
-		default:
-			return Efs;
-		}
-	}
-	return err;
-}
-
-char*
-btlookupat(Blk *b0, Key *k, Kvp *r, char *buf, int nbuf)
-{
-	int idx, same, done, r0;
-	char *ret, *err;
-	Blk *b, *c;
-
-	r0 = b0->ref;
-	b = refblk(b0);
 	assert(k != r);
-	while(b->type == Tpivot){
-		ret = collect(b, k, r, buf, nbuf, &done);
-		if(done)
-			return ret;
-		idx = blksearch(b, k, r, nil);
-		if(idx == -1){
-			assert(b0->ref == r0 + (b == b0) ? 1 : 0);
-			putblk(b);
-			return Eexist;
-		}
-		if((c = getblk(r->bp, 0)) == nil)
-			return Efs;
-		putblk(b);
-		b = c;
-	}
-	assert(b->type == Tleaf);
+	if((p = calloc(h, sizeof(Blk*))) == nil)
+		return Emem;
 	err = Eexist;
-	blksearch(b, k, r, &same);
-	if(same){
-		cpkvp(r, r, buf, nbuf);
-		err = nil;
+	p[0] = refblk(b);
+	for(i = 1; i < h; i++){
+		if(blksearch(p[i-1], k, r, nil) == -1)
+			goto Out;
+		if((p[i] = getblk(r->bp, 0)) == nil)
+			return Efs;
 	}
-	putblk(b);
+	blksearch(p[h-1], k, r, &ok);
+	if(ok)
+		cpkvp(r, r, buf, nbuf);
+	for(i = h - 2; i >= 0; i--){
+		j = bufsearch(p[i], k, &m, &same);
+		if(!same)
+			continue;
+		for(; j < p[i]->nbuf; j++){
+			getmsg(p[i], j, &m);
+			if(keycmp(k, &m) != 0)
+				break;
+			ok = apply(r, &m, buf, nbuf);
+		}
+	}
+	if(ok)
+		err = nil;
+Out:
+	for(i = 0; i < h; i++)
+		if(p[i] != nil)
+			putblk(p[i]);
 	return err;
 }
 
@@ -1275,10 +1245,11 @@ btlookup(Tree *t, Key *k, Kvp *r, char *buf, int nbuf)
 {
 	char *ret;
 	Blk *b;
+	int h;
 
-	if((b = getroot(t, nil)) == nil)
+	if((b = getroot(t, &h)) == nil)
 		return Efs;
-	ret = btlookupat(b, k, r, buf, nbuf);
+	ret = btlookupat(b, h, k, r, buf, nbuf);
 	putblk(b);
 
 	return ret;

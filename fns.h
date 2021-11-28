@@ -40,7 +40,7 @@ void	setval(Blk*, int, Kvp*);
 
 int	btupsert(Tree*, Msg*, int);
 char	*btlookup(Tree*, Key*, Kvp*, char*, int);
-char	*btlookupat(Blk*, Key*, Kvp*, char*, int);
+char	*btlookupat(Blk*, int, Key*, Kvp*, char*, int);
 char	*btscan(Tree*, Scan*, char*, int);
 char	*btnext(Scan*, Kvp*, int*);
 void	btdone(Scan*);

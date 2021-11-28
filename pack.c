@@ -242,11 +242,8 @@ kv2statbuf(Kvp *kv, char *buf, int nbuf)
 
 	if(kv2dir(kv, &d) == -1)
 		return -1;
-	dprint("have %d bytes to pack into\n", nbuf);
-	if((n = convD2M(&d, (uchar*)buf, nbuf)) <= BIT16SZ){
-		fprint(2, "here...failed convert??, needed %d\n", GBIT16(buf));
+	if((n = convD2M(&d, (uchar*)buf, nbuf)) <= BIT16SZ)
 		return -1;
-	}
 	return n;	
 }
 

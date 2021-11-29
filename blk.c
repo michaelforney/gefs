@@ -16,6 +16,8 @@ static vlong	blkalloc_lk(Arena*);
 static int	blkdealloc_lk(vlong);
 static void	cachedel(vlong);
 
+QLock blklock;
+
 Blk*
 readblk(vlong bp, int flg)
 {
@@ -41,7 +43,7 @@ readblk(vlong bp, int flg)
 	b->bp.addr = bp;
 	b->bp.hash = -1;
 	b->bp.gen = -1;
-	b->ref = 0;	/* caller must increment */
+	b->ref = 1;
 	b->cnext = nil;
 	b->cprev = nil;
 	b->hnext = nil;
@@ -559,12 +561,8 @@ newblk(int t)
 		 * to the block, so we only
 		 * want to reset the refs
 		 * on an allocation.
-		 *
-		 * cacheblk incrmeents the
-		 * refcount, so we want to
-		 * start off at zero here.
 		 */
-		b->ref = 0;
+		b->ref = 1;
 	}
 	b->type = t;
 	b->flag = Bdirty;
@@ -680,18 +678,31 @@ getblk(Bptr bp, int flg)
 {
 	Blk *b;
 
-	if((b = lookupblk(bp.addr)) == nil){
-		if((b = readblk(bp.addr, flg)) == nil)
-			return nil;
-		if(blkhash(b) != bp.hash){
-			werrstr("corrupt block %B: %llx != %llx", bp, blkhash(b), bp.hash);
-			return nil;
-		}
-		b->bp.hash = bp.hash;
-		b->bp.gen = bp.gen;
+	if((b = lookupblk(bp.addr)) != nil)
+		return cacheblk(b);
+
+	qlock(&blklock);
+	if((b = lookupblk(bp.addr)) != nil){
+		cacheblk(b);
+		qunlock(&blklock);
+		return b;
 	}
-	assert(b->bp.addr == bp.addr);
-	return cacheblk(b);
+	if((b = readblk(bp.addr, flg)) == nil){
+		qunlock(&blklock);
+		return nil;
+	}
+	if(blkhash(b) != bp.hash){
+		werrstr("corrupt block %B: %llx != %llx", bp, blkhash(b), bp.hash);
+		qunlock(&blklock);
+		abort();
+		return nil;
+	}
+	b->bp.hash = bp.hash;
+	b->bp.gen = bp.gen;
+	cacheblk(b);
+	qunlock(&blklock);
+
+	return b;
 }
 
 Blk*
@@ -743,6 +754,7 @@ freeblk(Blk *b)
 
 	wlock(b);
 	b->flag |= Bzombie;
+	b->freed = getcallerpc(&b);
 	wunlock(b);
 	dprint("freeing block %B @ %ld, from 0x%p\n", b->bp, b->ref, getcallerpc(&b));
 

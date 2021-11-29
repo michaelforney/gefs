@@ -186,20 +186,31 @@ static int
 bufsearch(Blk *b, Key *k, Msg *m, int *same)
 {
 	int lo, hi, mid, r;
+	Msg cmp;
 
 	r = -1;
 	lo = 0;
-	hi = b->nbuf - 1;
-	while(lo <= hi){
+	hi = b->nbuf;
+	while(lo < hi){
 		mid = (hi + lo) / 2;
-		getmsg(b, mid, m);
-		r = keycmp(k, m);
+		getmsg(b, mid, &cmp);
+		r = keycmp(k, &cmp);
 		if(r < 0)
-			hi = mid - 1;
+			hi = mid;
 		else
 			lo = mid + 1;
 	}
+	/*
+	 * we can have duplicate messages, and we
+	 * want to point to the first of them:
+	 * scan backwards.
+	 */
 	lo--;
+	for(; lo > 0; lo--){
+		getmsg(b, lo-1, &cmp);
+		if(keycmp(k, &cmp) != 0)
+			break;
+	}
 	if(lo >= 0){
 		getmsg(b, lo, m);
 		r = keycmp(k, m);
@@ -351,11 +362,13 @@ apply(Kvp *r, Msg *m, char *buf, int nbuf)
 {
 	switch(m->op){
 	case Odelete:
+		assert(keycmp(r, m) == 0);
 		return 0;
 	case Oinsert:
 		cpkvp(r, m, buf, nbuf);
 		return 1;
 	case Owstat:
+		assert(keycmp(r, m) == 0);
 		statupdate(r, m);
 		return 1;
 	}
@@ -429,13 +442,14 @@ updateleaf(Path *up, Path *p)
 				print("%d(/%d), %d: %M not insert\n", i, b->nval, j, &m);
 				abort();
 			}
+			cpkvp(&v, &m, buf, sizeof(buf));
 			spc -= valsz(&m);
 			goto Copy;
 		case 0:
 			i++;
 			while(j < up->hi){
-		Copy:
 				ok = apply(&v, &m, buf, sizeof(buf));
+		Copy:
 				j++;
 				p->pullsz += msgsz(&m);
 				if(j >= up->hi || pullmsg(up, j, &v, &m, &full, spc) != 0)
@@ -620,13 +634,14 @@ splitleaf(Path *up, Path *p, Kvp *mid)
 				print("%d(/%d), %d: %M not insert\n", i, b->nval, j, &m);
 				abort();
 			}
+			cpkvp(&v, &m, buf, sizeof(buf));
 			spc -= valsz(&m);
 			goto Copy;
 		case 0:
 			i++;
 			while(j < up->hi){
-		Copy:
 				ok = apply(&v, &m, buf, sizeof(buf));
+		Copy:
 				p->pullsz += msgsz(&m);
 				j++;
 				if(j == up->hi || pullmsg(up, j, &v, &m, &full, spc) != 0)
@@ -1210,21 +1225,27 @@ btlookupat(Blk *b, int h, Key *k, Kvp *r, char *buf, int nbuf)
 	if((p = calloc(h, sizeof(Blk*))) == nil)
 		return Emem;
 	err = Eexist;
+	ok = 0;
 	p[0] = refblk(b);
 	for(i = 1; i < h; i++){
 		if(blksearch(p[i-1], k, r, nil) == -1)
-			goto Out;
+			break;
 		if((p[i] = getblk(r->bp, 0)) == nil)
 			return Efs;
 	}
-	blksearch(p[h-1], k, r, &ok);
+	if(p[h-1] != nil)
+		blksearch(p[h-1], k, r, &ok);
 	if(ok)
 		cpkvp(r, r, buf, nbuf);
-	for(i = h - 2; i >= 0; i--){
-		j = bufsearch(p[i], k, &m, &same);
-		if(!same)
+	for(i = h-2; i >= 0; i--){
+		if(p[i] == nil)
 			continue;
-		for(; j < p[i]->nbuf; j++){
+		j = bufsearch(p[i], k, &m, &same);
+		if(j < 0 || !same)
+			continue;
+		assert(ok || m.op == Oinsert);
+		ok = apply(r, &m, buf, nbuf);
+		for(j++; j < p[i]->nbuf; j++){
 			getmsg(p[i], j, &m);
 			if(keycmp(k, &m) != 0)
 				break;
@@ -1233,7 +1254,6 @@ btlookupat(Blk *b, int h, Key *k, Kvp *r, char *buf, int nbuf)
 	}
 	if(ok)
 		err = nil;
-Out:
 	for(i = 0; i < h; i++)
 		if(p[i] != nil)
 			putblk(p[i]);

@@ -13,13 +13,10 @@ cacheblk(Blk *b)
 	Blk *e, *c;
 	u32int h;
 
-	/* FIXME: better hash. */
-	refblk(b);
 	assert(b->bp.addr != 0);
 	if(b->flag & Bzombie){
-		print("caching zombie: %B, flg=%x\n", b->bp, b->flag);
-		sleep(30*1000);
-//		abort();
+		print("caching zombie: %B, flg=%x, freed=0x%p\n", b->bp, b->flag, b->freed);
+		abort();
 	}
 	h = ihash(b->bp.addr);
 	bkt = &fs->cache[h % fs->cmax];
@@ -121,8 +118,10 @@ lookupblk(vlong off)
 	bkt = &fs->cache[h % fs->cmax];
 	lock(bkt);
 	for(b = bkt->b; b != nil; b = b->hnext)
-		if(b->bp.addr == off)
+		if(b->bp.addr == off){
+ 			refblk(b);
 			break;
+		}
 	unlock(bkt);
 	return b;
 }

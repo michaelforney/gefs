@@ -101,7 +101,7 @@ reamfs(char *dev)
 		sysfatal("ream: disk too small");
 	if((s = mallocz(sizeof(Blk), 1)) == nil)
 		sysfatal("ream: %r");
-
+	refblk(s);
 
 	sz = d->length;
 	sz = sz - (sz % Blksz) - Blksz;
@@ -145,6 +145,7 @@ reamfs(char *dev)
 	 */
 	if((r = newblk(Tleaf)) == nil)
 		sysfatal("ream: allocate root: %r");
+	refblk(r);
 	initroot(r);
 	finalize(r);
 	syncblk(r);

@@ -363,6 +363,7 @@ struct Fid {
 
 	u32int	fid;
 	vlong	qpath;
+	long	ref;
 	int	mode;
 	int	iounit;
 
@@ -435,6 +436,8 @@ struct Blk {
 
 	vlong	logsz;	/* for allocation log */
 	vlong	lognxt;	/* for allocation log */
+
+	uintptr	freed;	/* debug */
 
 	Bptr	bp;
 	long	ref;

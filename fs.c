@@ -149,7 +149,17 @@ getfid(u32int fid)
 		if(f->fid == fid)
 			break;
 	unlock(&fs->fidtablk);
+	ainc(&f->ref);
 	return f;
+}
+
+void
+putfid(Fid *f)
+{
+	if(adec(&f->ref) == 0){
+		clunkdent(f->dent);
+		free(f);
+	}
 }
 
 Fid*
@@ -164,6 +174,7 @@ dupfid(int new, Fid *f)
 
 	*n = *f;
 	n->fid = new;
+	n->ref = 2; /* one for dup, one for clunk */
 	n->mode = -1;
 	n->next = nil;
 
@@ -198,16 +209,13 @@ clunkfid(Fid *fid)
 	pf = &fs->fidtab[h];
 	for(f = fs->fidtab[h]; f != nil; f = f->next){
 		if(f == fid){
+			assert(adec(&f->ref) != 0);
 			*pf = f->next;
-			goto Found;
+			break;
 		}
 		pf = &f->next;
 	}
-	abort();
-Found:
-	clunkdent(fid->dent);
 	unlock(&fs->fidtablk);
-	free(fid);
 }
 
 void
@@ -453,6 +461,7 @@ fswalk(Fmsg *m)
 		p = packstr(&err, p, e, m->wname[i]);
 		if(err){
 			rerror(m, "bad walk: %r");
+			putfid(o);
 			return;
 		}
 		k.k = kbuf;
@@ -462,6 +471,7 @@ fswalk(Fmsg *m)
 		}
 		if(kv2dir(&kv, &d) == -1){
 			rerror(m, Efs);
+			putfid(o);
 			return;
 		}
 		prev = d.qid.path;
@@ -470,14 +480,17 @@ fswalk(Fmsg *m)
 	r.nwqid = i;
 	if(i == 0 && m->nwname != 0){
 		rerror(m, estr);
+		putfid(o);
 		return;
 	}
 	f = o;
 	if(m->fid != m->newfid && i == m->nwname){
 		if((f = dupfid(m->newfid, o)) == nil){
-			rerror(m, "%r");
+			rerror(m, Emem);
+			putfid(o);
 			return;
 		}
+		putfid(o);
 	}
 	if(i > 0){
 		dent = getdent(f->root.bp.addr, up, &d);
@@ -485,6 +498,7 @@ fswalk(Fmsg *m)
 			if(m->fid != m->newfid)
 				clunkfid(f);
 			rerror(m, Enomem);
+			putfid(f);
 			return;
 		}
 		if(i == m->nwname){
@@ -493,6 +507,7 @@ fswalk(Fmsg *m)
 		}
 	}
 	respond(m, &r);
+	putfid(f);
 }
 
 void
@@ -510,16 +525,19 @@ fsstat(Fmsg *m)
 	}
 	if((err = btlookup(&fs->root, f->dent, &kv, kvbuf, sizeof(kvbuf))) != nil){
 		rerror(m, err);
+		putfid(f);
 		return;
 	}
 	if((n = kv2statbuf(&kv, buf, sizeof(buf))) == -1){
 		rerror(m, "stat: %r");
+		putfid(f);
 		return;
 	}
 	r.type = Rstat;
 	r.stat = (uchar*)buf;
 	r.nstat = n;
 	respond(m, &r);
+	putfid(f);
 }
 
 void
@@ -550,6 +568,7 @@ fsclunk(Fmsg *m)
 	clunkfid(f);
 	r.type = Rclunk;
 	respond(m, &r);
+	putfid(f);
 }
 
 void
@@ -596,11 +615,13 @@ fscreate(Fmsg *m)
 	mb.op = Oinsert;
 	mb.statop = 0;
 	if(dir2kv(f->qpath, &d, &mb, buf, sizeof(buf)) == -1){
-		rerror(m, "%r");
+		rerror(m, Efs);
+		putfid(f);
 		return;
 	}
 	if(btupsert(&fs->root, &mb, 1) == -1){
 		rerror(m, "%r");
+		putfid(f);
 		return;
 	}
 	dent = getdent(f->root.bp.addr, f->qpath, &d);
@@ -608,6 +629,7 @@ fscreate(Fmsg *m)
 		if(m->fid != m->newfid)
 			clunkfid(f);
 		rerror(m, Enomem);
+		putfid(f);
 		return;
 	}
 
@@ -616,6 +638,7 @@ fscreate(Fmsg *m)
 		unlock(f);
 		clunkdent(dent);
 		rerror(m, Einuse);
+		putfid(f);
 		return;
 	}
 	f->mode = m->mode;
@@ -631,6 +654,7 @@ fscreate(Fmsg *m)
 	r.qid = d.qid;
 	r.iounit = f->iounit;
 	respond(m, &r);
+	putfid(f);
 }
 
 void
@@ -654,6 +678,7 @@ fsremove(Fmsg *m)
 	if(btupsert(&fs->root, &mb, 1) == -1){
 		runlock(f->dent);
 		rerror(m, "remove: %r");
+		putfid(f);
 		return;
 	}
 	runlock(f->dent);
@@ -661,6 +686,7 @@ fsremove(Fmsg *m)
 
 	r.type = Rremove;
 	respond(m, &r);
+	putfid(f);
 }
 
 int
@@ -685,14 +711,17 @@ fsopen(Fmsg *m)
 	}
 	if((e = fslookup(f, f->dent, &kv, buf, sizeof(buf), 0)) != nil){
 		rerror(m, e);
+		putfid(f);
 		return;
 	}
 	if(kv2dir(&kv, &d) == -1){
 		rerror(m, Efs);
+		putfid(f);
 		return;
 	}
 	if(fsaccess(&d, m->mode) == -1){
 		rerror(m, Eperm);
+		putfid(f);
 		return;
 	}
 	wlock(f->dent);
@@ -706,15 +735,16 @@ fsopen(Fmsg *m)
 	if(f->mode != -1){
 		rerror(m, Einuse);
 		unlock(f);
+		putfid(f);
 		return;
 	}
 	f->mode = m->mode;
-	if((f->mode & 0x7) == OEXEC){
-		lock(&fs->root.lk);
-		f->root = fs->root;
+//	if((f->mode & 0x7) == OEXEC){
+//		lock(&fs->root.lk);
+//		f->root = fs->root;
 //		refblk(fs->root.bp);
-		unlock(&fs->root.lk);
-	}
+//		unlock(&fs->root.lk);
+//	}
 	if(f->mode & OTRUNC){
 		wlock(f->dent);
 //		freeb(f->dent, 0, dent->length);
@@ -723,6 +753,7 @@ fsopen(Fmsg *m)
 	}
 	unlock(f);
 	respond(m, &r);
+	putfid(f);
 }
 
 char*
@@ -812,7 +843,6 @@ readb(Fid *f, char *d, vlong o, vlong n, int sz)
 
 	e = fslookup(f, &k, &kv, kvbuf, sizeof(kvbuf), 0);
 	if(e != nil && e != Eexist){
-		fprint(2, "!!! error: %s", e);
 		werrstr(e);
 		return -1;
 	}
@@ -857,7 +887,7 @@ fsreadfile(Fmsg *m, Fid *f, Fcall *r)
 	while(c != 0){
 		n = readb(f, p, o, c, e->length);
 		if(n == -1){
-			fprint(2, "read: %r\n");
+			fprint(2, "read %K [%Q]@%lld+%lld: %r\n", &e->Key, e->qid, o, c);
 			runlock(e);
 			return Efs;
 		}
@@ -887,6 +917,7 @@ fsread(Fmsg *m)
 	r.count = 0;
 	if((r.data = malloc(m->count)) == nil){
 		rerror(m, Emem);
+		putfid(f);
 		return;
 	}
 	if(f->dent->qid.type & QTDIR)
@@ -895,11 +926,12 @@ fsread(Fmsg *m)
 		e = fsreadfile(m, f, &r);
 	if(e != nil){
 		rerror(m, e);
+		putfid(f);
 		return;
-	}else{
-		respond(m, &r);
-		free(r.data);
 	}
+	respond(m, &r);
+	free(r.data);
+	putfid(f);
 }
 
 int
@@ -924,14 +956,11 @@ writeb(Fid *f, Msg *m, char *s, vlong o, vlong n, vlong sz)
 		return -1;
 	if(fb < sz && (fo != 0 || n != Blksz)){
 		dprint("\tappending to block %B\n", b->bp);
-		if(fslookup(f, m, &kv, buf, sizeof(buf), 0) != nil){
+		if(fslookup(f, m, &kv, buf, sizeof(buf), 0) != nil)
 			return -1;
-		}
 		bp = unpackbp(kv.v);
-
-		if((t = getblk(bp, GBraw)) == nil){
+		if((t = getblk(bp, GBraw)) == nil)
 			return -1;
-		}
 		memcpy(b->buf, t->buf, Blksz);
 		freeblk(t);
 		putblk(t);
@@ -965,6 +994,7 @@ fswrite(Fmsg *m)
 	if((f->mode&0x7) != OWRITE){
 		dprint("f->mode: %x\n", f->mode);
 		rerror(m, Einuse);
+		putfid(f);
 		return;
 	}
 
@@ -984,6 +1014,8 @@ fswrite(Fmsg *m)
 			// FIXME: free pages
 			wunlock(f->dent);
 			rerror(m, "%r");
+			putfid(f);
+			abort();
 			return;
 		}
 		p += n;
@@ -1005,13 +1037,16 @@ fswrite(Fmsg *m)
 	}
 	if(btupsert(&fs->root, kv, i+1) == -1){
 		fprint(2, "upsert: %r\n");
+		putfid(f);
 		abort();
+		return;
 	}
 	wunlock(f->dent);
 
 	r.type = Rwrite;
 	r.count = m->count;
 	respond(m, &r);
+	putfid(f);
 }
 
 void

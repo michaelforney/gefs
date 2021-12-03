@@ -307,15 +307,15 @@ showpath(Path *p, int np)
 }
 
 void
-showfree(char *m)
+showfree(int fd, char *m)
 {
 	Arange *r;
 	int i;
 
 	print("=== %s\n", m);
 	for(i = 0; i < fs->narena; i++){
-		print("arena %d:\n", i);
+		fprint(fd, "arena %d:\n", i);
 		for(r = (Arange*)avlmin(fs->arenas[i].free); r != nil; r = (Arange*)avlnext(r))
-			print("\t%llx+%llx\n", r->off, r->len);
+			fprint(fd, "\t%llx+%llx\n", r->off, r->len);
 	}
 }

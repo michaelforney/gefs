@@ -63,7 +63,7 @@ void	showpath(Path*, int);
 void	showfs(int, char*);
 void	showfids(int);
 void	showcache(int);
-void	showfree(char*);
+void	showfree(int, char*);
 int	checkfs(void);
 
 #define dprint(...) \

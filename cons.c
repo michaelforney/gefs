@@ -34,6 +34,10 @@ runcons(void *pfd)
 					showcache(fd);
 					break;
 				}
+				if(strcmp(arg[1], "free") == 0){
+					showfree(fd, "free");
+					break;
+				}
 				/* wet floor */
 			default:
 				fprint(fd, "show me yours first\n");

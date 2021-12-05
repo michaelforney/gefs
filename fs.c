@@ -40,34 +40,29 @@ static char*
 fslookup(Fid *f, Key *k, Kvp *kv, char *buf, int nbuf, int lk)
 {
 	char *e;
-	Blk *b;
-	int h;
 
-	assert(f->root.bp.addr == -1);
-	if((b = getroot(&fs->root, &h)) == nil)
-		return Efs;
-
+	if(f->mnt == nil)
+		return Eattach;
 	if(lk)
 		rlock(f->dent);
-	e = btlookupat(b, h, k, kv, buf, nbuf);
+	e = btlookup(&f->mnt->root, k, kv, buf, nbuf);
 	if(lk)
 		runlock(f->dent);
-	putblk(b);
 	return e;
 }
 
 static Dent*
-getdent(vlong root, vlong pqid, Dir *d)
+getdent(vlong pqid, Dir *d)
 {
 	Dent *e;
 	char *ek, *eb;
 	u32int h;
 	int err;
 
-	h = (ihash(d->qid.path) ^ ihash(root)) % Ndtab;
+	h = ihash(d->qid.path) % Ndtab;
 	lock(&fs->dtablk);
 	for(e = fs->dtab[h]; e != nil; e = e->next){
-		if(e->qid.path == d->qid.path && e->rootb == root){
+		if(e->qid.path == d->qid.path){
 			ainc(&e->ref);
 			unlock(&fs->dtablk);
 			return e;
@@ -79,7 +74,6 @@ getdent(vlong root, vlong pqid, Dir *d)
 		return nil;
 	e->ref = 1;
 	e->qid = d->qid;
-	e->rootb = root;
 	e->k = e->buf;
 	e->nk = 9 + strlen(d->name) + 1;
 
@@ -177,6 +171,7 @@ dupfid(int new, Fid *f)
 	n->ref = 2; /* one for dup, one for clunk */
 	n->mode = -1;
 	n->next = nil;
+	n->mnt = f->mnt;
 
 	lock(&fs->fidtablk);
 	ainc(&n->dent->ref);
@@ -370,8 +365,9 @@ fsauth(Fmsg *m)
 void
 fsattach(Fmsg *m, int iounit)
 {
-	char *p, *ep, buf[Kvmax], kvbuf[Kvmax];
+	char *p, *ep, dbuf[Kvmax], kvbuf[Kvmax];
 	int err;
+	Mount *mnt;
 	Dent *e;
 	Fcall r;
 	Kvp kv;
@@ -379,24 +375,58 @@ fsattach(Fmsg *m, int iounit)
 	Fid f;
 	Dir d;
 
-	err = 0;
-	p = buf;
-	ep = buf + sizeof(buf);
-	p = pack8(&err, p, ep, Kent);
-	p = pack64(&err, p, ep, -1ULL);
-	p = packstr(&err, p, ep, "");
-	dk.k = buf;
-	dk.nk = p - buf;
-	if(btlookup(&fs->root, &dk, &kv, kvbuf, sizeof(kvbuf)) != nil){
+	if((mnt = malloc(sizeof(Mount))) == nil){
+		rerror(m, Emem);
+		return;
+	}
+
+	if(1+strlen(m->aname) >= sizeof(mnt->kbuf)){
+		rerror(m, Ename);
+		return;
+	}
+	print("attach %s\n", m->aname);
+	mnt->m.k = mnt->kbuf;
+	mnt->m.k[0] = Ksnap;
+	mnt->m.nk = 1+snprint(mnt->m.k+1, sizeof(mnt->kbuf)-1, "%s", m->aname);
+	mnt->m.v = mnt->vbuf;
+	mnt->m.nv = sizeof(mnt->vbuf);
+	if(btlookup(&fs->snap, &mnt->m, &kv, kvbuf, sizeof(kvbuf)) != nil){
+		rerror(m, Enosnap);
+		return;
+	}
+
+	if(kv.nv != Rootsz+Ptrsz){
 		rerror(m, Efs);
 		return;
 	}
-	r.type = Rattach;
+	p = kv.v;
+	mnt->root.ht = GBIT32(p); p += 4;
+	mnt->root.bp.addr = GBIT64(p); p += 8;
+	mnt->root.bp.hash = GBIT64(p); p += 8;
+	mnt->root.bp.gen = GBIT64(p); p += 8;
+	mnt->dead.addr = GBIT64(p); p += 8;
+	mnt->dead.hash = GBIT64(p); p += 8;
+	mnt->dead.gen = GBIT64(p);
+
+	err = 0;
+	p = dbuf;
+	ep = dbuf + sizeof(dbuf);
+	p = pack8(&err, p, ep, Kent);
+	p = pack64(&err, p, ep, -1ULL);
+	p = packstr(&err, p, ep, "");
+	if(err)
+		abort();
+	dk.k = dbuf;
+	dk.nk = p - dbuf;
+	if(btlookup(&mnt->root, &dk, &kv, kvbuf, sizeof(kvbuf)) != nil){
+		rerror(m, Efs);
+		return;
+	}
 	if(kv2dir(&kv, &d) == -1){
 		rerror(m, Efs);
 		return;
 	}
-	if((e = getdent(-1, -1, &d)) == nil){
+	if((e = getdent(-1, &d)) == nil){
 		rerror(m, Efs);
 		return;
 	}
@@ -411,16 +441,17 @@ fsattach(Fmsg *m, int iounit)
 
 	memset(&f, 0, sizeof(Fid));
 	f.fid = NOFID;
+	f.mnt = mnt;
 	f.qpath = d.qid.path;
 	f.mode = -1;
-	f.root.bp.addr = -1;
-	f.root.bp.hash = -1;
 	f.iounit = iounit;
 	f.dent = e;
 	if(dupfid(m->fid, &f) == nil){
 		rerror(m, Enomem);
 		return;
 	}
+
+	r.type = Rattach;
 	r.qid = d.qid;
 	respond(m, &r);
 	return;
@@ -493,7 +524,7 @@ fswalk(Fmsg *m)
 		putfid(o);
 	}
 	if(i > 0){
-		dent = getdent(f->root.bp.addr, up, &d);
+		dent = getdent(up, &d);
 		if(dent == nil){
 			if(m->fid != m->newfid)
 				clunkfid(f);
@@ -523,7 +554,7 @@ fsstat(Fmsg *m)
 		rerror(m, "no such fid");
 		return;
 	}
-	if((err = btlookup(&fs->root, f->dent, &kv, kvbuf, sizeof(kvbuf))) != nil){
+	if((err = btlookup(&f->mnt->root, f->dent, &kv, kvbuf, sizeof(kvbuf))) != nil){
 		rerror(m, err);
 		putfid(f);
 		return;
@@ -619,12 +650,12 @@ fscreate(Fmsg *m)
 		putfid(f);
 		return;
 	}
-	if(btupsert(&fs->root, &mb, 1) == -1){
+	if(btupsert(&f->mnt->root, &mb, 1) == -1){
 		rerror(m, "%r");
 		putfid(f);
 		return;
 	}
-	dent = getdent(f->root.bp.addr, f->qpath, &d);
+	dent = getdent(f->qpath, &d);
 	if(dent == nil){
 		if(m->fid != m->newfid)
 			clunkfid(f);
@@ -653,6 +684,11 @@ fscreate(Fmsg *m)
 	r.type = Rcreate;
 	r.qid = d.qid;
 	r.iounit = f->iounit;
+	if(snapshot(f->mnt) == -1){
+		rerror(m, Efs);
+		putfid(f);
+		return;
+	}
 	respond(m, &r);
 	putfid(f);
 }
@@ -675,7 +711,7 @@ fsremove(Fmsg *m)
 	mb.nk = f->dent->nk;
 	mb.nv = 0;
 //showfs("preremove");
-	if(btupsert(&fs->root, &mb, 1) == -1){
+	if(btupsert(&f->mnt->root, &mb, 1) == -1){
 		runlock(f->dent);
 		rerror(m, "remove: %r");
 		putfid(f);
@@ -684,6 +720,11 @@ fsremove(Fmsg *m)
 	runlock(f->dent);
 	clunkfid(f);
 
+	if(snapshot(f->mnt) == -1){
+		rerror(m, Efs);
+		putfid(f);
+		return;
+	}
 	r.type = Rremove;
 	respond(m, &r);
 	putfid(f);
@@ -761,7 +802,6 @@ fsreaddir(Fmsg *m, Fid *f, Fcall *r)
 {
 	char pfx[9], *p, *e;
 	int n, ns, done;
-	Tree *t;
 	Scan *s;
 	Dir d;
 
@@ -774,8 +814,7 @@ fsreaddir(Fmsg *m, Fid *f, Fcall *r)
 
 		pfx[0] = Kent;
 		PBIT64(pfx+1, f->qpath);
-		t = (f->root.bp.addr != -1) ? &f->root : &fs->root;
-		if((e = btscan(t, s, pfx, sizeof(pfx))) != nil){
+		if((e = btscan(&f->mnt->root, s, pfx, sizeof(pfx))) != nil){
 			free(r->data);
 			btdone(s);
 			return e;
@@ -1035,7 +1074,7 @@ fswrite(Fmsg *m)
 		PBIT64(kv[i].v, m->offset+m->count);
 		f->dent->length = m->offset+m->count;
 	}
-	if(btupsert(&fs->root, kv, i+1) == -1){
+	if(btupsert(&f->mnt->root, kv, i+1) == -1){
 		fprint(2, "upsert: %r\n");
 		putfid(f);
 		abort();
@@ -1043,9 +1082,15 @@ fswrite(Fmsg *m)
 	}
 	wunlock(f->dent);
 
+	if(snapshot(f->mnt) == -1){
+		rerror(m, Efs);
+		putfid(f);
+		return;
+	}
+
 	r.type = Rwrite;
 	r.count = m->count;
-	respond(m, &r);
+ 	respond(m, &r);
 	putfid(f);
 }
 

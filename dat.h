@@ -16,6 +16,7 @@ typedef struct Arange	Arange;
 typedef struct Bucket	Bucket;
 typedef struct Chan	Chan;
 typedef struct Tree	Tree;
+typedef struct Mount	Mount;
 
 enum {
 	KiB	= 1024ULL,
@@ -50,6 +51,7 @@ enum {
 	
 
 	Hdrsz	= 10,
+	Rootsz	= 4+Ptrsz,		/* root pointer */
 	Blkspc	= Blksz - Hdrsz,
 	Bufspc  = Blkspc / 2,
 	Pivspc	= Blkspc - Bufspc,
@@ -95,6 +97,8 @@ enum {
 #define Emem	"out of memory"
 #define Ename	"invalid file name"
 #define Enomem	"out of memory"
+#define Eattach	"attach required"
+#define Enosnap	"no snapshot by that name exists"
 
 /*
  * All metadata blocks share a common header:
@@ -268,7 +272,7 @@ struct Gefs {
 	int	fd;
 	long	broken;
 
-	Tree	root;
+	Tree	snap;
 
 	Lock	qidlk;
 	vlong	nextqid;
@@ -351,6 +355,14 @@ struct Dent {
 	char	buf[Maxent];
 };
 
+struct Mount {
+	Msg	m;
+	char	kbuf[Keymax];
+	char	vbuf[Rootsz+Ptrsz];
+	Tree	root;
+	Bptr	dead;
+};
+
 struct Fid {
 	Lock;
 	Fid	*next;
@@ -359,7 +371,9 @@ struct Fid {
 	 * instead of the most recent root, to prevent
 	 * paging in the wrong executable.
 	 */
-	Tree	root;
+	char	snap[64];
+	Mount	*mnt;
+//	Tree	root;
 
 	u32int	fid;
 	vlong	qpath;

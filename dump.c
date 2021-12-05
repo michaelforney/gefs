@@ -25,8 +25,8 @@ showkey(Fmt *fmt, Key *k)
 	case Kent:	/* pqid[8] name[n] => dir[n]:	serialized Dir */
 		n = fmtprint(fmt, "ent dir:%llx, name:\"%.*s\")", GBIT64(k->k+1), k->nk-11, k->k+11);
 		break;
-	case Ksnap:	/* name[n] => dent[16] ptr[16]:	snapshot root */
-		n = fmtprint(fmt, "snap dent:%llx ptr:%llx", GBIT64(k->k+1), GBIT64(k->k+9));
+	case Ksnap:	/* name[n] => tree[24]:	snapshot root */
+		n = fmtprint(fmt, "snap name:\"%.*s\"", k->nk-1, k->k+1);
 		break;
 	case Ksuper:	/* qid[8] => pqid[8]:		parent dir */
 		n = fmtprint(fmt, "up parent:%llx ptr:%llx", GBIT64(k->k+1), GBIT64(k->k+9));
@@ -42,13 +42,17 @@ static int
 showval(Fmt *fmt, Kvp *v, int op)
 {
 	char *p;
+	Bptr bp;
 	Dir d;
-	int n;
+	int n, ht;
 
 	n = 0;
 	switch(v->k[0]){
 	case Kdat:	/* qid[8] off[8] => ptr[16]:	pointer to data page */
-		n = fmtprint(fmt, "blk:%llx, hash:%llx", GBIT64(v->v), GBIT64(v->v+8));
+		bp.addr = GBIT64(v->v+0);
+		bp.hash = GBIT64(v->v+8);
+		bp.gen = GBIT64(v->v+16);
+		n = fmtprint(fmt, "ptr:%B", bp);
 		break;
 	case Kent:	/* pqid[8] name[n] => dir[n]:	serialized Dir */
 		switch(op){
@@ -84,7 +88,11 @@ showval(Fmt *fmt, Kvp *v, int op)
 		}
 		break;
 	case Ksnap:	/* name[n] => dent[16] ptr[16]:	snapshot root */
-		n = fmtprint(fmt, "blk:%llx, hash:%llx", GBIT64(v->v), GBIT64(v->v+8));
+		ht = GBIT32(v->v);
+		bp.addr = GBIT64(v->v+4);
+		bp.hash = GBIT64(v->v+12);
+		bp.gen = GBIT64(v->v+20);
+		n = fmtprint(fmt, "ht:%d, ptr:%B", ht, bp);
 		break;
 	case Ksuper:	/* qid[8] => pqid[8]:		parent dir */
 		n = fmtprint(fmt, "parent: %llx", GBIT64(v->v));

@@ -27,7 +27,7 @@ uvlong	blkhash(Blk*);
 u32int	ihash(vlong);
 void	finalize(Blk*);
 char*	fillsuper(Blk*);
-int	snapshot(void);
+int	snapshot(Mount*);
 uvlong	siphash(void*, usize);
 void	reamfs(char*);
 int	loadarena(Arena*, vlong);
@@ -40,7 +40,6 @@ void	setval(Blk*, int, Kvp*);
 
 int	btupsert(Tree*, Msg*, int);
 char	*btlookup(Tree*, Key*, Kvp*, char*, int);
-char	*btlookupat(Blk*, int, Key*, Kvp*, char*, int);
 char	*btscan(Tree*, Scan*, char*, int);
 char	*btnext(Scan*, Kvp*, int*);
 void	btdone(Scan*);

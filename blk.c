@@ -295,9 +295,7 @@ Nextblk:
 
 		case LogFlush:
 			dprint("log@%d: flush: %llx\n", i, off>>8);
-			lock(&fs->root.lk);
-			fs->root.bp.gen = off >> 8;
-			unlock(&fs->root.lk);
+			fs->nextgen = (off >> 8)+1;
 			break;
 		case LogAlloc:
 		case LogAlloc1:
@@ -563,23 +561,23 @@ newblk(int t)
 		 * on an allocation.
 		 */
 		b->ref = 1;
+		b->cnext = nil;
+		b->cprev = nil;
+		b->hnext = nil;
 	}
 	b->type = t;
-	b->flag = Bdirty;
 	b->bp.addr = bp;
 	b->bp.hash = -1;
 	b->bp.gen = fs->nextgen;
 	b->data = b->buf + Hdrsz;
 
+	b->flag = Bdirty;
 	b->nval = 0;
 	b->valsz = 0;
 	b->nbuf = 0;
 	b->bufsz = 0;
 	b->logsz = 0;
 	b->lognxt = 0;
-	b->cnext = nil;
-	b->cprev = nil;
-	b->hnext = nil;
 
 	dprint("new block %B from %p, flag=%x\n", b->bp, getcallerpc(&t), b->flag);
 	return cacheblk(b);
@@ -623,10 +621,10 @@ fillsuper(Blk *b)
 	PBIT32(p, Blksz); p += 4;
 	PBIT32(p, Bufspc); p += 4;
 	PBIT32(p, Hdrsz); p += 4;
-	PBIT32(p, fs->root.ht); p += 4;
-	PBIT64(p, fs->root.bp.addr); p += 8;
-	PBIT64(p, fs->root.bp.hash); p += 8;
-	PBIT64(p, fs->root.bp.gen); p += 8;
+	PBIT32(p, fs->snap.ht); p += 4;
+	PBIT64(p, fs->snap.bp.addr); p += 8;
+	PBIT64(p, fs->snap.bp.hash); p += 8;
+	PBIT64(p, fs->nextgen); p += 8;
 	PBIT32(p, fs->narena); p += 4;
 	PBIT64(p, fs->arenasz); p += 8;
 	PBIT64(p, fs->nextqid); p += 8;
@@ -692,7 +690,7 @@ getblk(Bptr bp, int flg)
 		return nil;
 	}
 	if(blkhash(b) != bp.hash){
-		werrstr("corrupt block %B: %llx != %llx", bp, blkhash(b), bp.hash);
+		fprint(2, "corrupt block %B: %llx != %llx\n", bp, blkhash(b), bp.hash);
 		qunlock(&blklock);
 		abort();
 		return nil;
@@ -763,27 +761,4 @@ freeblk(Blk *b)
 	lock(a);
 	blkdealloc_lk(b->bp.addr);
 	unlock(a);
-}
-
-int
-sync(void)
-{
-	int i, r;
-	Blk *b;
-
-	r = 0;
-	for(i = 0; i < fs->narena; i++){
-		b = fs->arenas[i].logtl;
-		finalize(b);
-		if(syncblk(b) == -1)
-			r = -1;
-	}
-	/* FIXME: hit it with a big hammer -- flush the whole cache */
-	for(b = fs->chead; b != nil; b = b->cnext){
-		if(!(b->flag & Bdirty))
-			continue;
-		if(syncblk(b) == -1)
-			r = -1;
-	}
-	return r;
 }

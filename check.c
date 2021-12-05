@@ -184,7 +184,7 @@ checkfs(void)
 	ok = 1;
 	if(badfree())
 		ok = 0;
-	if((b = getroot(&fs->root, &height)) != nil){
+	if((b = getroot(&fs->snap, &height)) != nil){
 		if(badblk(b, height-1, nil, 0))
 			ok = 0;
 		putblk(b);
@@ -206,6 +206,7 @@ rshowblk(int fd, Blk *b, int indent, int recurse)
 		fprint(fd, "NIL\n");
 		return;
 	}
+	fprint(fd, "%.*s     +{%B}\n", 4*indent, spc, b->bp);
 	if(b->type == Tpivot){
 		for(i = 0; i < b->nbuf; i++){
 			getmsg(b, i, &m);
@@ -249,10 +250,10 @@ showfs(int fd, char *m)
 	Blk *b;
 	int h;
 
-	fprint(fd, "=== %s\n", m);
-	fprint(fd, "\tht: %d\n", fs->root.ht);
-	fprint(fd, "\trt: %B\n", fs->root.bp);
-	b = getroot(&fs->root, &h);
+	fprint(fd, "=== %s %B\n", m, fs->snap.bp);
+	fprint(fd, "\tht: %d\n", fs->snap.ht);
+	fprint(fd, "\trt: %B\n", fs->snap.bp);
+	b = getroot(&fs->snap, &h);
 	rshowblk(fd, b, 0, 1);
 	putblk(b);
 }

@@ -1189,7 +1189,6 @@ Again:
 		showpath(path, npath);
 		abort();
 	}
-	snapshot();
 	if(redo)
 		goto Again;
 	return 0;
@@ -1418,20 +1417,35 @@ btdone(Scan *s)
 }
 
 int
-snapshot(void)
+snapshot(Mount *mnt)
 {
-	Arena *a;
-	Blk *s;
-	int i, r;
+	mnt->m.op = Oinsert;
+	PBIT32(mnt->m.v +  0, mnt->root.ht);
+	PBIT64(mnt->m.v +  4, mnt->root.bp.addr);
+	PBIT64(mnt->m.v + 12, mnt->root.bp.hash);
+	PBIT64(mnt->m.v + 20, mnt->root.bp.gen);
+	PBIT64(mnt->m.v + 28, mnt->dead.addr);
+	PBIT64(mnt->m.v + 36, mnt->dead.hash);
+	PBIT64(mnt->m.v + 42, mnt->dead.gen);
+	if(btupsert(&fs->snap, &mnt->m, 1) == -1)
+		return -1;
+	if(sync() == -1)
+		return -1;
+	return 0;
+}
 
-	r = 0;
-	s = fs->super;
+int
+sync(void)
+{
+	int i, r;
+	Arena *a;
+	Blk *b, *s;
 
 	qlock(&fs->snaplk);
-	lock(&fs->root.lk);
+	r = 0;
+	s = fs->super;
 	fillsuper(s);
 	enqueue(s);
-	unlock(&fs->root.lk);
 
 	for(i = 0; i < fs->narena; i++){
 		a = &fs->arenas[i];
@@ -1439,8 +1453,15 @@ snapshot(void)
 		if(syncblk(a->logtl) == -1)
 			r = -1;
 	}
+	for(b = fs->chead; b != nil; b = b->cnext){
+		if(!(b->flag & Bdirty))
+			continue;
+		if(syncblk(b) == -1)
+			r = -1;
+	}
 	if(r != -1)
 		r = syncblk(s);
+
 	qunlock(&fs->snaplk);
 	return r;
 }

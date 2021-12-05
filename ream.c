@@ -41,6 +41,27 @@ initroot(Blk *r)
 }
 
 static void
+initsnap(Blk *s, Blk *r)
+{
+	char kbuf[32], vbuf[Rootsz+Ptrsz];
+	Kvp kv;
+
+	kv.k = kbuf;
+	kv.v = vbuf;
+	kv.k[0] = Ksnap;
+	kv.nk = 1 + snprint(kv.k+1, sizeof(kbuf)-1, "main");
+	kv.nv = sizeof(vbuf);
+	PBIT32(kv.v +  0, 1);
+	PBIT64(kv.v +  4, r->bp.addr);
+	PBIT64(kv.v + 12, r->bp.hash);
+	PBIT64(kv.v + 20, r->bp.gen);
+	PBIT64(kv.v + 28, -1ULL);
+	PBIT64(kv.v + 36, -1ULL);
+	PBIT64(kv.v + 42, -1ULL);
+	setval(s, 0, &kv);
+}
+
+static void
 reamarena(Arena *a, vlong start, vlong asz)
 {
 	vlong addr, bo, bh;
@@ -89,7 +110,8 @@ void
 reamfs(char *dev)
 {
 	vlong sz, asz, off;
-	Blk *s, *r;
+	Blk *s, *r, *t;
+	Mount *mnt;
 	Dir *d;
 	int i;
 
@@ -101,6 +123,9 @@ reamfs(char *dev)
 		sysfatal("ream: disk too small");
 	if((s = mallocz(sizeof(Blk), 1)) == nil)
 		sysfatal("ream: %r");
+	if((mnt = mallocz(sizeof(Mount), 1)) == nil)
+		sysfatal("ream: alloc mount: %r");
+	fs->super = s;
 	refblk(s);
 
 	sz = d->length;
@@ -130,33 +155,45 @@ reamfs(char *dev)
 	s->bp.addr = sz;
 	s->data = s->buf + Hdrsz;
 	s->ref = 2;
-	fillsuper(s);
-	finalize(s);
-	syncblk(s);
 
 	for(i = 0; i < fs->narena; i++)
 		if((loadarena(&fs->arenas[i], i*asz)) == -1)
 			sysfatal("ream: loadarena: %r");
 
+	if((t = newblk(Tleaf)) == nil)
+		sysfatal("ream: allocate root: %r");
+	refblk(t);
+	initroot(t);
+	finalize(t);
+	syncblk(t);
+
+	mnt->root.ht = 1;
+	mnt->root.bp = t->bp;
+
 	/*
 	 * Now that we have a completely empty fs, give it
-	 * a single root block that the tree will insert
+	 * a single snap block that the tree will insert
 	 * into, and take a snapshot as the initial state.
 	 */
 	if((r = newblk(Tleaf)) == nil)
-		sysfatal("ream: allocate root: %r");
+		sysfatal("ream: allocate snaps: %r");
 	refblk(r);
-	initroot(r);
+	initsnap(r, t);
 	finalize(r);
 	syncblk(r);
+	fs->snap.bp = r->bp;
+	fs->snap.ht = 1;
 
-	fs->super = s;
-	fs->root.bp = r->bp;
-	fs->root.ht = 1;
-	snapshot();
+	fillsuper(s);
+	finalize(s);
+	syncblk(s);
 
+	sync();
+
+	putblk(t);
 	putblk(s);
 	putblk(r);
+	free(mnt);
 	if(sync() == -1)
 		sysfatal("ream: sync: %r");
 }

@@ -6,6 +6,40 @@
 #include "dat.h"
 #include "fns.h"
 
+static void
+cachedel(vlong del)
+{
+	Bucket *bkt;
+	Blk *b, **p;
+	u32int h;
+
+	/* FIXME: better hash. */
+	h = ihash(del);
+	bkt = &fs->cache[h % fs->cmax];
+	lock(bkt);
+	p = &bkt->b;
+	for(b = bkt->b; b != nil; b = b->hnext){
+		if(b->bp.addr == del){
+			*p = b->hnext;
+			break;
+		}
+		p = &b->hnext;
+	}
+	unlock(bkt);
+	assert(b != nil);
+
+	if(b->cnext != nil)
+		b->cnext->cprev = b->cprev;
+	if(b->cprev != nil)
+		b->cprev->cnext = b->cnext;
+	if(fs->ctail == b)
+		fs->ctail = b->cprev;
+	if(fs->chead == b)
+		fs->chead = b->cnext;
+	b->cnext = nil;
+	b->cprev = nil;
+}
+
 Blk*
 cacheblk(Blk *b)
 {
@@ -26,6 +60,7 @@ cacheblk(Blk *b)
 			goto Found;
 		assert(b->bp.addr != e->bp.addr);
 	}
+	b->hnext = bkt->b;
 	bkt->b = b;
 Found:
 	unlock(bkt);
@@ -58,52 +93,15 @@ Found:
 	}
 	c=0;
 	USED(c);
-/*
+#ifdef NOTYET
 	for(c = fs->ctail; c != nil && fs->ccount >= fs->cmax; c = fs->ctail){
-		fs->ctail = c->cprev;
-		fs->ccount--; 
+		cachedel(c->bp.addr);
 		putblk(c);
 	}
-*/
+#endif
 Cached:
 	unlock(&fs->lrulk);
 	return b;
-}
-
-static void
-cachedel(vlong del)
-{
-	Bucket *bkt;
-	Blk *b, **p;
-	u32int h;
-
-	/* FIXME: better hash. */
-	h = ihash(del);
-
-	bkt = &fs->cache[h % fs->cmax];
-	lock(bkt);
-	p = &bkt->b;
-	for(b = bkt->b; b != nil; b = b->hnext){
-		if(b->bp.addr == del){
-			*p = b->hnext;
-			break;
-		}
-		p = &b->hnext;
-	}
-	unlock(bkt);
-	if(b == nil)
-		return;
-
-	lock(&fs->lrulk);
-	if(b->cnext != nil)
-		b->cnext->cprev = b->cprev;
-	if(b->cprev != nil)
-		b->cprev->cnext = b->cnext;
-	if(fs->ctail == b)
-		fs->ctail = b->cprev;
-	if(fs->chead == nil)
-		fs->chead = b;
-	unlock(&fs->lrulk);
 }
 
 Blk*

@@ -1097,7 +1097,7 @@ fswrite(Fmsg *m)
 void
 runfs(void *pfd)
 {
-	int fd, msgmax;
+	int fd, msgmax, versioned;
 	char err[128];
 	QLock *wrlk;
 	Fcall r;
@@ -1105,6 +1105,7 @@ runfs(void *pfd)
 
 	fd = (uintptr)pfd;
 	msgmax = Max9p;
+	versioned = 0;
 	if((wrlk = mallocz(sizeof(QLock), 1)) == nil)
 		fshangup(fd, "alloc wrlk: %r");
 	while(1){
@@ -1116,13 +1117,12 @@ runfs(void *pfd)
 			fshangup(fd, "invalid message: %r");
 			return;
 		}
-/*
 		if(m->type != Tversion && !versioned){
 			fshangup(fd, "version required");
 			return;
 		}
-*/
 		m->wrlk = wrlk;
+		versioned = 1;
 		dprint("← %F\n", &m->Fcall);
 		switch(m->type){
 		/* sync setup */

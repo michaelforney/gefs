@@ -34,6 +34,7 @@ enum {
 	Nsec	= 1000*1000*1000,	/* nanoseconds to the second */
 	Maxname	= 256,			/* maximum size of a name element */
 	Maxent	= 9+Maxname+1,		/* maximum size of ent key, with terminator */
+	Maxproc	= 8,			/* maximum number of worker procs */
 
 	/*
 	 * Kpmax must be no more than 1/4 of pivspc, or
@@ -68,7 +69,9 @@ enum {
 	 */
 	Kdat,	/* qid[8] off[8] => ptr[16]:	pointer to data page */
 	Kent,	/* pqid[8] name[n] => dir[n]:	serialized Dir */
-	Ksnap,	/* name[n] => dent[16] ptr[16]:	snapshot root */
+	Ksnap,	/* id[8] => tree[]:		snapshot */
+	Ksnapid,	/* qid[8] => tree[]:		snapshot for exec, transient */
+	
 	Ksuper,	/* qid[8] => pqid[8]:		parent dir */
 };
 
@@ -81,7 +84,7 @@ enum {
 };
 
 //#define Efs	"i will not buy this fs, it is scratched"
-#define Efs (abort(), "nope")
+#define Efs	(abort(), "broken")
 #define Eio	"i/o error"
 #define Efid	"bad fid"
 #define Edscan	"invalid dir scan offset"
@@ -164,7 +167,7 @@ enum {
  *
  *	nval[2]
  *	valsz[2]
- *	_pad[4]sure, 
+ *	pad[4]sure, 
  *
  * Within these nodes, pointers have the following
  * layout:
@@ -268,6 +271,14 @@ struct Gefs {
 
 	Chan	*wrchan;
 	Chan	*rdchan;
+	int	nproc;
+
+	Lock	activelk;
+	int	active[Maxproc];
+	int	lastactive[Maxproc];
+	Lock	freelk;
+	Blk	*freep;
+	Blk	*freehd;
 
 	int	fd;
 	long	broken;
@@ -356,6 +367,7 @@ struct Dent {
 };
 
 struct Mount {
+	long	ref;
 	Msg	m;
 	char	kbuf[Keymax];
 	char	vbuf[Rootsz+Ptrsz];
@@ -373,7 +385,6 @@ struct Fid {
 	 */
 	char	snap[64];
 	Mount	*mnt;
-//	Tree	root;
 
 	u32int	fid;
 	vlong	qpath;
@@ -438,6 +449,9 @@ struct Blk {
 	Blk	*cnext;
 	Blk	*cprev;
 	Blk	*hnext;
+
+	/* Freelist entry */
+	Blk	*fnext;
 
 	short	flag;
 

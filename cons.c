@@ -7,7 +7,7 @@
 #include "fns.h"
 
 void
-runcons(void *pfd)
+runcons(int, void *pfd)
 {
 	char buf[256], *arg[4];
 	int fd, n, narg;

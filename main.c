@@ -27,7 +27,7 @@ initfs(vlong cachesz)
 }
 
 void
-launch(void (*f)(void *), void *arg, char *text)
+launch(void (*f)(int, void *), int wid, void *arg, char *text)
 {
 	int pid;
 
@@ -37,7 +37,7 @@ launch(void (*f)(void *), void *arg, char *text)
 		sysfatal("can't fork: %r");
 	if (pid == 0) {
 		procsetname("%s", text);
-		(*f)(arg);
+		(*f)(wid, arg);
 		exits("child returned");
 	}
 }
@@ -121,16 +121,14 @@ main(int argc, char **argv)
 		srvfd = postfd(srvname, "");
 		ctlfd = postfd(srvname, ".cmd");
 		loadfs(argv[0]);
-		launch(runcons, (void*)ctlfd, "ctl");
-		launch(runwrite, nil, "writeio");
-		launch(runread, nil, "readio");
-//		launch(runfs, (void*)srvfd, "fs");
-		runfs((void*)srvfd);
-//		launch(syncproc, nil, "sync");
-//		launch(flushproc, &fs->flushev, "flush");
-//		for(i = 1; i < argc; i++)
-//			if(test(argv[i]) == -1)
-//				sysfatal("test %s: %r\n", argv[i]);
+		launch(runcons, fs->nproc++, (void*)ctlfd, "ctl");
+		launch(runwrite, fs->nproc++, nil, "writeio");
+		launch(runread, fs->nproc++, nil, "readio");
+//		launch(runfs, fs->nproc++, (void*)srvfd, "fs");
+//		launch(taskproc, fs->nproc++, nil, "tasks");
+//		launch(syncproc, fs->nproc++, &fs->flushev, "sync");
+		assert(fs->nproc < Maxproc);
+		runfs(fs->nproc++, (void*)srvfd);
 		exits(nil);
 	}
 }

@@ -91,6 +91,13 @@ getdent(vlong pqid, Dir *d)
 }
 
 static void
+clunkmount(Mount *mnt)
+{
+	if(mnt != nil && adec(&mnt->ref) == 0)
+		free(mnt);
+}
+
+static void
 clunkdent(Dent *de)
 {
 	Dent *e, **pe;
@@ -150,10 +157,11 @@ getfid(u32int fid)
 void
 putfid(Fid *f)
 {
-	if(adec(&f->ref) == 0){
-		clunkdent(f->dent);
-		free(f);
-	}
+	if(adec(&f->ref) != 0)
+		return;
+	clunkmount(f->mnt);
+	clunkdent(f->dent);
+	free(f);
 }
 
 Fid*
@@ -171,7 +179,8 @@ dupfid(int new, Fid *f)
 	n->ref = 2; /* one for dup, one for clunk */
 	n->mode = -1;
 	n->next = nil;
-	n->mnt = f->mnt;
+	if(n->mnt != nil)
+		ainc(&n->mnt->ref);
 
 	lock(&fs->fidtablk);
 	ainc(&n->dent->ref);
@@ -375,7 +384,7 @@ fsattach(Fmsg *m, int iounit)
 	Fid f;
 	Dir d;
 
-	if((mnt = malloc(sizeof(Mount))) == nil){
+	if((mnt = mallocz(sizeof(Mount), 1)) == nil){
 		rerror(m, Emem);
 		return;
 	}
@@ -605,7 +614,7 @@ fsclunk(Fmsg *m)
 void
 fscreate(Fmsg *m)
 {
-	char buf[Kvmax];
+	char *e, buf[Kvmax];
 	Dent *dent;
 	Fcall r;
 	Msg mb;
@@ -650,8 +659,8 @@ fscreate(Fmsg *m)
 		putfid(f);
 		return;
 	}
-	if(btupsert(&f->mnt->root, &mb, 1) == -1){
-		rerror(m, "%r");
+	if((e = btupsert(&f->mnt->root, &mb, 1)) != nil){
+		rerror(m, e);
 		putfid(f);
 		return;
 	}
@@ -684,8 +693,8 @@ fscreate(Fmsg *m)
 	r.type = Rcreate;
 	r.qid = d.qid;
 	r.iounit = f->iounit;
-	if(snapshot(f->mnt) == -1){
-		rerror(m, Efs);
+	if((e = snapshot(f->mnt)) != nil){
+		rerror(m, e);
 		putfid(f);
 		return;
 	}
@@ -699,6 +708,7 @@ fsremove(Fmsg *m)
 	Fcall r;
 	Msg mb;
 	Fid *f;
+	char *e;
 
 	if((f = getfid(m->fid)) == nil){
 		rerror(m, "no such fid");
@@ -711,17 +721,17 @@ fsremove(Fmsg *m)
 	mb.nk = f->dent->nk;
 	mb.nv = 0;
 //showfs("preremove");
-	if(btupsert(&f->mnt->root, &mb, 1) == -1){
+	if((e = btupsert(&f->mnt->root, &mb, 1)) != nil){
 		runlock(f->dent);
-		rerror(m, "remove: %r");
+		rerror(m, e);
 		putfid(f);
 		return;
 	}
 	runlock(f->dent);
 	clunkfid(f);
 
-	if(snapshot(f->mnt) == -1){
-		rerror(m, Efs);
+	if((e = snapshot(f->mnt)) != nil){
+		rerror(m, e);
 		putfid(f);
 		return;
 	}
@@ -1019,7 +1029,8 @@ writeb(Fid *f, Msg *m, char *s, vlong o, vlong n, vlong sz)
 void
 fswrite(Fmsg *m)
 {
-	char sbuf[8], offbuf[4][Ptrsz+Offksz], *p;
+	char sbuf[8], offbuf[4][Ptrsz+Offksz];
+	char *p, *e;
 	vlong n, o, c;
 	Msg kv[4];
 	Fcall r;
@@ -1074,16 +1085,16 @@ fswrite(Fmsg *m)
 		PBIT64(kv[i].v, m->offset+m->count);
 		f->dent->length = m->offset+m->count;
 	}
-	if(btupsert(&f->mnt->root, kv, i+1) == -1){
-		fprint(2, "upsert: %r\n");
+	if((e = btupsert(&f->mnt->root, kv, i+1)) != nil){
+		rerror(m, e);
 		putfid(f);
 		abort();
 		return;
 	}
 	wunlock(f->dent);
 
-	if(snapshot(f->mnt) == -1){
-		rerror(m, Efs);
+	if((e = snapshot(f->mnt)) != nil){
+		rerror(m, e);
 		putfid(f);
 		return;
 	}
@@ -1095,7 +1106,7 @@ fswrite(Fmsg *m)
 }
 
 void
-runfs(void *pfd)
+runfs(int wid, void *pfd)
 {
 	int fd, msgmax, versioned;
 	char err[128];
@@ -1113,6 +1124,7 @@ runfs(void *pfd)
 			fshangup(fd, "truncated message: %r");
 			return;
 		}
+		quiesce(wid);
 		if(convM2S(m->buf, m->sz, m) == 0){
 			fshangup(fd, "invalid message: %r");
 			return;
@@ -1151,16 +1163,18 @@ runfs(void *pfd)
 			respond(m, &r);
 			break;
 		}
+		quiesce(wid);
 	}
 }
 
 void
-runwrite(void *)
+runwrite(int wid, void *)
 {
 	Fmsg *m;
 
 	while(1){
 		m = chrecv(fs->wrchan);
+		quiesce(wid);
 		switch(m->type){
 		case Tflush:	rerror(m, "unimplemented flush");	break;
 		case Tcreate:	fscreate(m);	break;
@@ -1168,20 +1182,68 @@ runwrite(void *)
 		case Twstat:	fswstat(m);	break;
 		case Tremove:	fsremove(m);	break;
 		}
+		quiesce(wid);
 	}
 }
 
 void
-runread(void *)
+runread(int wid, void *)
 {
 	Fmsg *m;
 
 	while(1){
 		m = chrecv(fs->rdchan);
+		quiesce(wid);
 		switch(m->type){
 		case Twalk:	fswalk(m);	break;
 		case Tread:	fsread(m);	break;
 		case Tstat:	fsstat(m);	break;
 		}
+		quiesce(wid);
 	}
+}
+
+void
+quiesce(int tid)
+{
+	int i, allquiesced;
+	Blk *p, *n;
+
+	lock(&fs->activelk);
+	allquiesced = 1;
+	fs->active[tid]++;
+	for(i = 0; i < fs->nproc; i++){
+		/*
+		 * Odd parity on quiescence implies
+		 * that we're between the exit from
+		 * and waiting for the next message
+		 * that enters us into the critical
+		 * section.
+		 */
+		if((fs->active[i] & 1) == 0)
+			continue;
+		if(fs->active[i] == fs->lastactive[i])
+			allquiesced = 0;
+	}
+	if(allquiesced)
+		for(i = 0; i < fs->nproc; i++)
+			fs->lastactive[i] = fs->active[i];
+	unlock(&fs->activelk);
+	if(!allquiesced)
+		return;
+
+	lock(&fs->freelk);
+	p = nil;
+	if(fs->freep != nil){
+		p = fs->freep->fnext;
+		fs->freep->fnext = nil;
+	}
+	unlock(&fs->freelk);
+
+	while(p != nil){
+		n = p->fnext;
+		reclaimblk(p);
+		p = n;
+	}
+	fs->freep = fs->freehd;
 }

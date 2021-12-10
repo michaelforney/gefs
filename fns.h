@@ -21,13 +21,15 @@ Arena*	getarena(vlong);
 void	putblk(Blk*);
 int	syncblk(Blk*);
 void	enqueue(Blk*);
+void	quiesce(int);
 void	freeblk(Blk*);
+void	reclaimblk(Blk*);
 ushort	blkfill(Blk*);
 uvlong	blkhash(Blk*);
 u32int	ihash(vlong);
 void	finalize(Blk*);
 char*	fillsuper(Blk*);
-int	snapshot(Mount*);
+char*	snapshot(Mount*);
 uvlong	siphash(void*, usize);
 void	reamfs(char*);
 int	loadarena(Arena*, vlong);
@@ -38,10 +40,10 @@ int	endfs(void);
 int	compresslog(Arena*);
 void	setval(Blk*, int, Kvp*);
 
-int	btupsert(Tree*, Msg*, int);
-char	*btlookup(Tree*, Key*, Kvp*, char*, int);
-char	*btscan(Tree*, Scan*, char*, int);
-char	*btnext(Scan*, Kvp*, int*);
+char*	btupsert(Tree*, Msg*, int);
+char*	btlookup(Tree*, Key*, Kvp*, char*, int);
+char*	btscan(Tree*, Scan*, char*, int);
+char*	btnext(Scan*, Kvp*, int*);
 void	btdone(Scan*);
 
 
@@ -106,10 +108,10 @@ void	victim(Blk *b, Path *p);
 Chan	*mkchan(int);
 Fmsg	*chrecv(Chan*);
 void	chsend(Chan*, Fmsg*);
-void	runfs(void*);
-void	runwrite(void*);
-void	runread(void*);
-void	runcons(void*);
+void	runfs(int, void*);
+void	runwrite(int, void*);
+void	runread(int, void*);
+void	runcons(int, void*);
 
 /* it's in libc... */
 extern int cas(long *, long, long);

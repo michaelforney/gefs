@@ -570,6 +570,7 @@ newblk(int t)
 	b->bp.hash = -1;
 	b->bp.gen = fs->nextgen;
 	b->data = b->buf + Hdrsz;
+	b->fnext = nil;
 
 	b->flag = Bdirty;
 	b->nval = 0;
@@ -735,18 +736,23 @@ blkfill(Blk *b)
 void
 putblk(Blk *b)
 {
-	if(b == nil)
+	if(b == nil || adec(&b->ref) != 0)
 		return;
-	if(adec(&b->ref) == 0){
-		fprint(2, "wat: free %B @ %ld\n", b->bp, b->ref);
-		assert(0);
-		assert((b->flag & Bqueued) || !(b->flag & Bdirty));
-		free(b);
-	}
+	assert((b->flag & Bqueued) || !(b->flag & Bdirty));
+	free(b);
 }
 
 void
 freeblk(Blk *b)
+{
+	lock(&fs->freelk);
+	b->fnext = fs->freehd;
+	fs->freehd = b;
+	unlock(&fs->freelk);
+}
+
+void
+reclaimblk(Blk *b)
 {
 	Arena *a;
 

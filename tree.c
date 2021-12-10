@@ -1100,7 +1100,7 @@ msgcmp(void *a, void *b)
 	return keycmp((Msg*)a, (Msg*)b);
 }
 
-int
+char*
 btupsert(Tree *t, Msg *msg, int nmsg)
 {
 	int i, npath, redo, dh, sz, height;
@@ -1111,18 +1111,14 @@ btupsert(Tree *t, Msg *msg, int nmsg)
 	sz = 0;
 	qsort(msg, nmsg, sizeof(Msg), msgcmp);
 	for(i = 0; i < nmsg; i++){
-		if(msg[i].nk + 2 > Keymax){
-			werrstr("overlong key");
-			return -1;
-		}
+		if(msg[i].nk + 2 > Keymax)
+			return Efs;
 		sz += msgsz(&msg[i]);
 	}
 
 Again:
-	if((b = getroot(t, &height)) == nil){
-		werrstr("get root: %r");
-		return -1;
-	}
+	if((b = getroot(t, &height)) == nil)
+		return Efs;
 
 	/*
 	 * The tree can grow in height by 1 when we
@@ -1132,7 +1128,7 @@ Again:
 	redo = 0;
 	npath = 0;
 	if((path = calloc((height + 2), sizeof(Path))) == nil)
-		return -1;
+		return Emem;
 	path[npath].b = nil;
 	path[npath].idx = -1;
 	path[npath].midx = -1;
@@ -1195,7 +1191,7 @@ Again:
 Error:
 	freepath(path, npath);
 	free(path);
-	return -1;
+	return;
 }
 
 Blk*
@@ -1416,9 +1412,12 @@ btdone(Scan *s)
 	free(s->path);
 }
 
-int
+
+char*
 snapshot(Mount *mnt)
 {
+	char *e;
+
 	mnt->m.op = Oinsert;
 	PBIT32(mnt->m.v +  0, mnt->root.ht);
 	PBIT64(mnt->m.v +  4, mnt->root.bp.addr);
@@ -1427,10 +1426,10 @@ snapshot(Mount *mnt)
 	PBIT64(mnt->m.v + 28, mnt->dead.addr);
 	PBIT64(mnt->m.v + 36, mnt->dead.hash);
 	PBIT64(mnt->m.v + 42, mnt->dead.gen);
-	if(btupsert(&fs->snap, &mnt->m, 1) == -1)
-		return -1;
+	if((e = btupsert(&fs->snap, &mnt->m, 1)) != nil)
+		return e;
 	if(sync() == -1)
-		return -1;
+		return Eio;
 	return 0;
 }
 

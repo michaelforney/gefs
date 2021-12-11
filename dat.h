@@ -71,7 +71,6 @@ enum {
 	Kent,	/* pqid[8] name[n] => dir[n]:	serialized Dir */
 	Ksnap,	/* id[8] => tree[]:		snapshot */
 	Ksnapid,	/* qid[8] => tree[]:		snapshot for exec, transient */
-	
 	Ksuper,	/* qid[8] => pqid[8]:		parent dir */
 };
 
@@ -287,7 +286,8 @@ struct Gefs {
 
 	Lock	qidlk;
 	vlong	nextqid;
-	vlong	nextgen; /* unlocked: only touched by mutator thread */
+	Lock	genlk;
+	vlong	nextgen;
 
 	Arena	*arenas;
 	int	narena;

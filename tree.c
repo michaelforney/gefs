@@ -114,7 +114,7 @@ setval(Blk *b, int i, Kvp *kv)
 	if(2*b->nval + b->valsz > spc){
 		dprint("2*%d + %d > %d [ksz: %d, vsz: %d]\n",
 			2*b->nval, b->valsz, spc, kv->nk, kv->nv);
-		showblk(b, "setval overflow", 1);
+		showblk(2, b, "setval overflow", 1);
 		abort();
 	}
 	assert(2*b->nval + b->valsz <= spc);
@@ -468,8 +468,8 @@ updateleaf(Path *up, Path *p)
 		p->pullsz += msgsz(&m);
 		if(m.op != Oinsert){
 			print("%d(/%d), %d: %M not insert\n", i, b->nval, j, &m);
-			showblk(up->b, "parent", 0);
-			showblk(p->b, "current", 0);
+			showblk(2, up->b, "parent", 0);
+			showblk(2, p->b, "current", 0);
 			abort();
 		}
 		while(pullmsg(up, j, &v, &m, &full, spc) == 0){
@@ -1176,13 +1176,12 @@ Again:
 	lock(&t->lk);
 	t->ht += dh;
 	t->bp = rb->bp;
-	fs->nextgen++;
 	unlock(&t->lk);
 	freepath(path, npath);
 	free(path);
-	if(!checkfs()){
-		showfs(1, "broken");
-		showpath(path, npath);
+	if(!checkfs(2)){
+		showtree(2, t, "broken");
+		showpath(2, path, npath);
 		abort();
 	}
 	if(redo)
@@ -1191,7 +1190,7 @@ Again:
 Error:
 	freepath(path, npath);
 	free(path);
-	return;
+	return Efs;
 }
 
 Blk*
@@ -1419,6 +1418,8 @@ snapshot(Mount *mnt)
 	char *e;
 
 	mnt->m.op = Oinsert;
+//	mnt->m.k[0] = Ksnap;
+//	PBIT64(mnt->m.k +  1, fs->nextgen++);
 	PBIT32(mnt->m.v +  0, mnt->root.ht);
 	PBIT64(mnt->m.v +  4, mnt->root.bp.addr);
 	PBIT64(mnt->m.v + 12, mnt->root.bp.hash);

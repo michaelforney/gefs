@@ -121,7 +121,7 @@ clunkdent(Dent *de)
 }
 
 void
-showfids(int fd)
+showfid(int fd, char**, int)
 {
 	int i;
 	Fid *f;

@@ -30,6 +30,7 @@ u32int	ihash(vlong);
 void	finalize(Blk*);
 char*	fillsuper(Blk*);
 char*	snapshot(Mount*);
+char*	loadsnap(Tree*, char*);
 uvlong	siphash(void*, usize);
 void	reamfs(char*);
 int	loadarena(Arena*, vlong);
@@ -59,13 +60,16 @@ void	getval(Blk *, int, Kvp *);
 void	getmsg(Blk *, int, Msg *);
 
 void	initshow(void);
-void	showblk(Blk*, char*, int);
-void	showpath(Path*, int);
-void	showfs(int, char*);
-void	showfids(int);
-void	showcache(int);
-void	showfree(int, char*);
-int	checkfs(void);
+void	showblk(int, Blk*, char*, int);
+void	showpath(int, Path*, int);
+void	showtree(int, Tree*, char*);
+
+void	showfs(int, char**, int);
+void	showsnap(int, char**, int);
+void	showfid(int, char**, int);
+void	showcache(int, char**, int);
+void	showfree(int, char**, int);
+int	checkfs(int);
 
 #define dprint(...) \
 	do{ \

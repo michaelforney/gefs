@@ -25,7 +25,7 @@ isfree(vlong bp)
 }
 
 static int
-badblk(Blk *b, int h, Kvp *lo, Kvp *hi)
+badblk(int fd, Blk *b, int h, Kvp *lo, Kvp *hi)
 {
 	Kvp x, y;
 	Msg mx, my;
@@ -35,51 +35,51 @@ badblk(Blk *b, int h, Kvp *lo, Kvp *hi)
 
 	fail = 0;
 	if(h < 0){
-		fprint(2, "node too deep (loop?\n");
+		fprint(fd, "node too deep (loop?\n");
 		fail++;
 		return fail;
 	} 
 	if(b->type == Tleaf){
 		if(h != 0){
-			fprint(2, "unbalanced leaf\n");
+			fprint(fd, "unbalanced leaf\n");
 			fail++;
 		}
 		if(h != 0 && b->nval < 2){
-			fprint(2, "underfilled leaf\n");
+			fprint(fd, "underfilled leaf\n");
 			fail++;
 		}
 	}
 	if(b->type == Tpivot && b->nval < 2){
-		fprint(2, "underfilled  pivot\n");
+		fprint(fd, "underfilled  pivot\n");
 		fail++;
 	}
 	getval(b, 0, &x);
 	if(lo && keycmp(lo, &x) > 0){
-		fprint(2, "out of range keys %P != %P\n", lo, &x);
-		showblk(b, "wut", 1);
+		fprint(fd, "out of range keys %P != %P\n", lo, &x);
+		showblk(2, b, "wut", 1);
 		fail++;
 	}
 	for(i = 1; i < b->nval; i++){
 		getval(b, i, &y);
 		if(hi && keycmp(&y, hi) >= 0){
-			fprint(2, "out of range keys %P >= %P\n", &y, hi);
+			fprint(fd, "out of range keys %P >= %P\n", &y, hi);
 			fail++;
 		}
 		if(b->type == Tpivot){
 			if(isfree(x.bp.addr)){
-				fprint(2, "freed block in use: %llx\n", x.bp.addr);
+				fprint(fd, "freed block in use: %llx\n", x.bp.addr);
 				fail++;
 			}
 			if((c = getblk(x.bp, 0)) == nil){
-				fprint(2, "corrupt block: %r\n");
+				fprint(fd, "corrupt block: %r\n");
 				fail++;
 				continue;
 			}
 			if(blkfill(c) != x.fill){
-				fprint(2, "mismatched block fill\n");
+				fprint(fd, "mismatched block fill\n");
 				fail++;
 			}
-			if(badblk(c, h - 1, &x, &y))
+			if(badblk(fd, c, h - 1, &x, &y))
 				fail++;
 			putblk(c);
 		}
@@ -88,11 +88,11 @@ badblk(Blk *b, int h, Kvp *lo, Kvp *hi)
 		case -1:
 			break;
 		case 0:
-			fprint(2, "duplicate keys %P, %P\n", &x, &y);
+			fprint(fd, "duplicate keys %P, %P\n", &x, &y);
 			fail++;
 			break;
 		case 1:
-			fprint(2, "misordered keys %P, %P\n", &x, &y);
+			fprint(fd, "misordered keys %P, %P\n", &x, &y);
 			fail++;
 			break;
 		}
@@ -101,17 +101,17 @@ badblk(Blk *b, int h, Kvp *lo, Kvp *hi)
 	if(b->type == Tpivot){
 		getval(b, b->nval-1, &y);
 		if((c = getblk(x.bp, 0)) == nil){
-			fprint(2, "corrupt block: %r\n");
+			fprint(fd, "corrupt block: %r\n");
 			fail++;
 		}
-		if(c != nil && badblk(c, h - 1, &y, nil))
+		if(c != nil && badblk(fd, c, h - 1, &y, nil))
 			fail++;
 	}
 	if(b->type == Tpivot){
 		if(b->nbuf > 0){
 			getmsg(b, 0, &mx);
 			if(hi && keycmp(&mx, hi) >= 0){
-				fprint(2, "out of range messages %P != %M\n", hi, &mx);
+				fprint(fd, "out of range messages %P != %M\n", hi, &mx);
 				fail++;
 			}
 		}
@@ -124,21 +124,21 @@ badblk(Blk *b, int h, Kvp *lo, Kvp *hi)
 				break;
 			case Owstat:		/* kvp dirent */
 				if((my.statop & ~(Owsize|Owname|Owmode|Owmtime)) != 0){
-					fprint(2, "invalid stat op %d\n", my.statop);
+					fprint(fd, "invalid stat op %d\n", my.statop);
 					fail++;
 				}
 				break;
 			default:
-				fprint(2, "invalid message op %d\n", my.op);
+				fprint(fd, "invalid message op %d\n", my.op);
 				fail++;
 				break;
 			}
 			if(hi && keycmp(&y, hi) > 0){
-				fprint(2, "out of range keys %P >= %P\n", &y, hi);
+				fprint(fd, "out of range keys %P >= %P\n", &y, hi);
 				fail++;
 			}
 			if(keycmp(&mx, &my) == 1){
-				fprint(2, "misordered keys %P, %P\n", &x, &y);
+				fprint(fd, "misordered keys %P, %P\n", &x, &y);
 				fail++;
 				break;
 			}
@@ -174,9 +174,8 @@ badfree(void)
 	return fail;
 }
 
-/* TODO: this will grow into fsck. */
 int
-checkfs(void)
+checkfs(int fd)
 {
 	int ok, height;
 	Blk *b;
@@ -185,7 +184,7 @@ checkfs(void)
 	if(badfree())
 		ok = 0;
 	if((b = getroot(&fs->snap, &height)) != nil){
-		if(badblk(b, height-1, nil, 0))
+		if(badblk(fd, b, height-1, nil, 0))
 			ok = 0;
 		putblk(b);
 	}
@@ -238,28 +237,63 @@ initshow(void)
 }
 
 void
-showblk(Blk *b, char *m, int recurse)
+showblk(int fd, Blk *b, char *m, int recurse)
 {
-	fprint(2, "=== %s\n", m);
-	rshowblk(2, b, 0, recurse);
+	fprint(fd, "=== %s\n", m);
+	rshowblk(fd, b, 0, recurse);
 }
 
 void
-showfs(int fd, char *m)
+showtree(int fd, Tree *t, char *m)
 {
 	Blk *b;
 	int h;
 
-	fprint(fd, "=== %s %B\n", m, fs->snap.bp);
+	fprint(fd, "=== [%s] %B\n", m, fs->snap.bp);
 	fprint(fd, "\tht: %d\n", fs->snap.ht);
 	fprint(fd, "\trt: %B\n", fs->snap.bp);
-	b = getroot(&fs->snap, &h);
+	b = getroot(t, &h);
 	rshowblk(fd, b, 0, 1);
 	putblk(b);
 }
 
 void
-showcache(int fd)
+showfs(int fd, char **ap, int na)
+{
+	char *p, *e, *name, kbuf[Kvmax], kvbuf[Kvmax];;
+	Tree t;
+	Key k;
+	Kvp kv;
+
+	name = (na == 0) ? "main" : ap[0];
+	k.k = kbuf;
+	k.k[0] = Ksnap;
+	k.nk = 1+snprint(k.k+1, sizeof(kbuf)-1, "%s", name);
+	if((e = btlookup(&fs->snap, &k, &kv, kvbuf, sizeof(kvbuf))) != nil){
+		fprint(fd, "lookup %K: %s\n", &k, e);
+		return;
+	}
+	if(kv.nv != Rootsz+Ptrsz){
+		fprint(fd, "bad snap %P\n", &kv);
+		return;
+	}
+
+	p = kv.v;
+	t.ht = GBIT32(p); p += 4;
+	t.bp.addr = GBIT64(p); p += 8;
+	t.bp.hash = GBIT64(p); p += 8;
+	t.bp.gen = GBIT64(p);
+	showtree(fd, &t, name);
+}
+
+void
+showsnap(int fd, char **, int)
+{
+	showtree(fd, &fs->snap, "snaps");
+}
+
+void
+showcache(int fd, char**, int)
 {
 	Bucket *bkt;
 	Blk *b;
@@ -278,8 +312,9 @@ showcache(int fd)
 }
 
 void
-showpath(Path *p, int np)
+showpath(int fd, Path *p, int np)
 {
+#define A(b) (b ? b->bp.addr : -1)
 	int i;
 	char *op[] = {
 	[POmod] = "POmod",
@@ -288,10 +323,9 @@ showpath(Path *p, int np)
 	[POmerge] = "POmerge",
 	};
 
-	print("path:\n");
-#define A(b) (b ? b->bp.addr : -1)
+	fprint(fd, "path:\n");
 	for(i = 0; i < np; i++){
-		print("\t[%d] ==>\n"
+		fprint(fd, "\t[%d] ==>\n"
 			"\t\t%s: b(%p)=%llx [%s]\n"
 			"\t\tnl(%p)=%llx, nr(%p)=%llx\n"
 			"\t\tidx=%d, midx=%d\n"
@@ -308,12 +342,11 @@ showpath(Path *p, int np)
 }
 
 void
-showfree(int fd, char *m)
+showfree(int fd, char **, int)
 {
 	Arange *r;
 	int i;
 
-	print("=== %s\n", m);
 	for(i = 0; i < fs->narena; i++){
 		fprint(fd, "arena %d:\n", i);
 		for(r = (Arange*)avlmin(fs->arenas[i].free); r != nil; r = (Arange*)avlnext(r))

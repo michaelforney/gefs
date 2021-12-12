@@ -584,29 +584,6 @@ newblk(int t)
 	return cacheblk(b);
 }
 
-
-int
-syncblk(Blk *b)
-{
-	assert(b->flag & Bfinal);
-	lock(b);
-	b->flag &= ~(Bqueued|Bdirty);
-	unlock(b);
-	return pwrite(fs->fd, b->buf, Blksz, b->bp.addr);
-}
-
-void
-enqueue(Blk *b)
-{
-	assert(b->flag&Bdirty);
-	finalize(b);
-	if(syncblk(b) == -1){
-		ainc(&fs->broken);
-		fprint(2, "write: %r");
-		abort();
-	}
-}
-
 char*
 fillsuper(Blk *b)
 {

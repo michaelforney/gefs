@@ -13,6 +13,7 @@ OFILES=\
 	main.$O\
 	pack.$O\
 	ream.$O\
+	sync.$O\
 	tree.$O\
 	util.$O\
 

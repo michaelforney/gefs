@@ -120,11 +120,11 @@ badblk(int fd, Blk *b, int h, Kvp *lo, Kvp *hi)
 			switch(my.op){
 			case Oinsert:	/* new kvp */
 			case Odelete:	/* delete kvp */
-			case Oqdelete:	/* delete kvp if exists */
+			case Oclearb:	/* delete kvp if exists */
 				break;
 			case Owstat:		/* kvp dirent */
-				if((my.statop & ~(Owsize|Owname|Owmode|Owmtime)) != 0){
-					fprint(fd, "invalid stat op %d\n", my.statop);
+				if((my.statop & ~(Owsize|Owmode|Owmtime)) != 0){
+					fprint(2, "invalid stat op %d\n", my.statop);
 					fail++;
 				}
 				break;

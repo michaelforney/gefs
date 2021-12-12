@@ -49,11 +49,19 @@ showval(Fmt *fmt, Kvp *v, int op)
 	n = 0;
 	switch(v->k[0]){
 	case Kdat:	/* qid[8] off[8] => ptr[16]:	pointer to data page */
-		bp.addr = GBIT64(v->v+0);
-		bp.hash = GBIT64(v->v+8);
-		bp.gen = GBIT64(v->v+16);
-		n = fmtprint(fmt, "ptr:%B", bp);
-		break;
+		switch(op){
+		case Odelete:
+		case Oclearb:
+			n = 0;
+			break;
+		case Onop:
+		case Oinsert:
+			bp.addr = GBIT64(v->v+0);
+			bp.hash = GBIT64(v->v+8);
+			bp.gen = GBIT64(v->v+16);
+			n = fmtprint(fmt, "ptr:%B", bp);
+			break;
+		}
 	case Kent:	/* pqid[8] name[n] => dir[n]:	serialized Dir */
 		switch(op){
 		case Onop:
@@ -120,7 +128,7 @@ Mconv(Fmt *fmt)
 	char *opname[] = {
 	[Oinsert]	"Oinsert",
 	[Odelete]	"Odelete",
-	[Oqdelete]	"Oqdelete",
+	[Oclearb]	"Oclearb",
 	[Owstat]	"Owstat",
 	};
 	Msg *m;

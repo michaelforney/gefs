@@ -7,7 +7,9 @@
 #include "dat.h"
 #include "fns.h"
 
-int
+static char*	clearb(Fid*, vlong, vlong);
+
+static int
 okname(char *name)
 {
 	int i;
@@ -34,262 +36,6 @@ nextqid(void)
 	q = fs->nextqid++;
 	unlock(&fs->qidlk);
 	return q;
-}
-
-static char*
-fslookup(Fid *f, Key *k, Kvp *kv, char *buf, int nbuf, int lk)
-{
-	char *e;
-
-	if(f->mnt == nil)
-		return Eattach;
-	if(lk)
-		rlock(f->dent);
-	e = btlookup(&f->mnt->root, k, kv, buf, nbuf);
-	if(lk)
-		runlock(f->dent);
-	return e;
-}
-
-static Dent*
-getdent(vlong pqid, Dir *d)
-{
-	Dent *e;
-	char *ek, *eb;
-	u32int h;
-	int err;
-
-	h = ihash(d->qid.path) % Ndtab;
-	lock(&fs->dtablk);
-	for(e = fs->dtab[h]; e != nil; e = e->next){
-		if(e->qid.path == d->qid.path){
-			ainc(&e->ref);
-			unlock(&fs->dtablk);
-			return e;
-		}
-	}
-
-	err = 0;
-	if((e = mallocz(sizeof(Dent), 1)) == nil)
-		return nil;
-	e->ref = 1;
-	e->qid = d->qid;
-	e->k = e->buf;
-	e->nk = 9 + strlen(d->name) + 1;
-
-	ek = e->buf;
-	eb = ek + sizeof(e->buf);
-	ek = pack8(&err, ek, eb, Kent);
-	ek = pack64(&err, ek, eb, pqid);
-	ek = packstr(&err, ek, eb, d->name);
-	e->nk = ek - e->buf;
-	e->next = fs->dtab[h];
-	fs->dtab[h] = e;
-
-	unlock(&fs->dtablk);
-	return e;
-}
-
-static void
-clunkmount(Mount *mnt)
-{
-	if(mnt != nil && adec(&mnt->ref) == 0)
-		free(mnt);
-}
-
-static void
-clunkdent(Dent *de)
-{
-	Dent *e, **pe;
-	u32int h;
-
-	if(adec(&de->ref) == 0){
-		h = (ihash(de->qid.path) ^ ihash(de->rootb)) % Ndtab;
-		lock(&fs->dtablk);
-		pe = &fs->dtab[h];
-		for(e = fs->dtab[h]; e != nil; e = e->next){
-			if(e == de){
-				*pe = e->next;
-				unlock(&fs->dtablk);
-				free(de);
-				return;
-			}
-			pe = &e->next;
-		}
-		abort();
-	}
-}
-
-void
-showfid(int fd, char**, int)
-{
-	int i;
-	Fid *f;
-
-	lock(&fs->fidtablk);
-	fprint(fd, "fids:---\n");
-	for(i = 0; i < Nfidtab; i++)
-		for(f = fs->fidtab[i]; f != nil; f = f->next){
-			rlock(f->dent);
-			fprint(fd, "\tfid[%d]: %d [refs=%ld, k=%K, qid=%Q]\n",
-				i, f->fid, f->dent->ref, &f->dent->Key, f->dent->qid);
-			runlock(f->dent);
-		}
-	unlock(&fs->fidtablk);
-}
-
-Fid*
-getfid(u32int fid)
-{
-	u32int h;
-	Fid *f;
-
-	h = ihash(fid) % Nfidtab;
-	lock(&fs->fidtablk);
-	for(f = fs->fidtab[h]; f != nil; f = f->next)
-		if(f->fid == fid)
-			break;
-	unlock(&fs->fidtablk);
-	ainc(&f->ref);
-	return f;
-}
-
-void
-putfid(Fid *f)
-{
-	if(adec(&f->ref) != 0)
-		return;
-	clunkmount(f->mnt);
-	clunkdent(f->dent);
-	free(f);
-}
-
-Fid*
-dupfid(int new, Fid *f)
-{
-	Fid *n, *o;
-	u32int h;
-
-	h = ihash(new) % Nfidtab;
-	if((n = malloc(sizeof(Fid))) == nil)
-		return nil;
-
-	*n = *f;
-	n->fid = new;
-	n->ref = 2; /* one for dup, one for clunk */
-	n->mode = -1;
-	n->next = nil;
-	if(n->mnt != nil)
-		ainc(&n->mnt->ref);
-
-	lock(&fs->fidtablk);
-	ainc(&n->dent->ref);
-	for(o = fs->fidtab[h]; o != nil; o = o->next)
-		if(o->fid == new)
-			break;
-	if(o == nil){
-		n->next = fs->fidtab[h];
-		fs->fidtab[h] = n;
-	}
-	unlock(&fs->fidtablk);
-
-	if(o != nil){
-		werrstr("fid in use: %d == %d", o->fid, new);
-		abort();
-		free(n);
-		return nil;
-	}
-	return n;
-}
-
-void
-clunkfid(Fid *fid)
-{
-	Fid *f, **pf;
-	u32int h;
-
-	lock(&fs->fidtablk);
-	h = ihash(fid->fid) % Nfidtab;
-	pf = &fs->fidtab[h];
-	for(f = fs->fidtab[h]; f != nil; f = f->next){
-		if(f == fid){
-			assert(adec(&f->ref) != 0);
-			*pf = f->next;
-			break;
-		}
-		pf = &f->next;
-	}
-	unlock(&fs->fidtablk);
-}
-
-void
-fshangup(int fd, char *fmt, ...)
-{
-	va_list ap;
-
-	va_start(ap, fmt);
-	vfprint(2, fmt, ap);
-	va_end(ap);
-	close(fd);
-	abort();
-}
-
-Fmsg*
-readmsg(int fd, int max)
-{
-	char szbuf[4];
-	int sz;
-	Fmsg *m;
-
-	if(readn(fd, szbuf, 4) != 4)
-		return nil;
-	sz = GBIT32(szbuf);
-	if(sz > max)
-		return nil;
-	if((m = malloc(sizeof(Fmsg)+sz)) == nil)
-		return nil;
-	if(readn(fd, m->buf+4, sz-4) != sz-4){
-		werrstr("short read: %r");
-		free(m);
-		return nil;
-	}
-	m->fd = fd;
-	m->sz = sz;
-	PBIT32(m->buf, sz);
-	return m;
-}
-
-void
-respond(Fmsg *m, Fcall *r)
-{
-	uchar buf[Max9p];
-	int w, n;
-
-	r->tag = m->tag;
-	dprint("→ %F\n", r);
-	if((n = convS2M(r, buf, sizeof(buf))) == 0)
-		abort();
-	qlock(m->wrlk);
-	w = write(m->fd, buf, n);
-	qunlock(m->wrlk);
-	if(w != n)
-		fshangup(m->fd, "failed write");
-	free(m);
-}
-
-void
-rerror(Fmsg *m, char *fmt, ...)
-{
-	char buf[128];
-	va_list ap;
-	Fcall r;
-
-	va_start(ap, fmt);
-	vsnprint(buf, sizeof(buf), fmt, ap);
-	va_end(ap);
-	r.type = Rerror;
-	r.ename = buf;
-	respond(m, &r);
 }
 
 Chan*
@@ -344,6 +90,369 @@ chsend(Chan *c, Fmsg *m)
 }
 
 void
+fshangup(int fd, char *fmt, ...)
+{
+	va_list ap;
+
+	va_start(ap, fmt);
+	vfprint(2, fmt, ap);
+	va_end(ap);
+	close(fd);
+	abort();
+}
+
+static void
+respond(Fmsg *m, Fcall *r)
+{
+	uchar buf[Max9p];
+	int w, n;
+
+	r->tag = m->tag;
+	dprint("→ %F\n", r);
+	if((n = convS2M(r, buf, sizeof(buf))) == 0)
+		abort();
+	qlock(m->wrlk);
+	w = write(m->fd, buf, n);
+	qunlock(m->wrlk);
+	if(w != n)
+		fshangup(m->fd, "failed write");
+	free(m);
+}
+
+static void
+rerror(Fmsg *m, char *fmt, ...)
+{
+	char buf[128];
+	va_list ap;
+	Fcall r;
+
+	va_start(ap, fmt);
+	vsnprint(buf, sizeof(buf), fmt, ap);
+	va_end(ap);
+	r.type = Rerror;
+	r.ename = buf;
+	respond(m, &r);
+}
+
+
+static char*
+lookup(Fid *f, Key *k, Kvp *kv, char *buf, int nbuf, int lk)
+{
+	char *e;
+
+	if(f->mnt == nil)
+		return Eattach;
+	if(lk)
+		rlock(f->dent);
+	e = btlookup(&f->mnt->root, k, kv, buf, nbuf);
+	if(lk)
+		runlock(f->dent);
+	return e;
+}
+
+static char*
+clearb(Fid *f, vlong o, vlong sz)
+{
+	char *e, buf[Offksz];
+	Msg m;
+
+	for(; o < sz; o += Blksz){
+		m.k = buf;
+		m.nk = sizeof(buf);
+		m.op = Oclearb;
+		m.k[0] = Kdat;
+		PBIT64(m.k+1, f->qpath);
+		PBIT64(m.k+9, o);
+		m.v = nil;
+		m.nv = 0;
+		if((e = btupsert(&f->mnt->root, &m, 1)) != nil)
+			return e;
+	}
+	return nil;
+}
+
+static int
+readb(Fid *f, char *d, vlong o, vlong n, int sz)
+{
+	char *e, buf[17], kvbuf[17+32];
+	vlong fb, fo;
+	Bptr bp;
+	Blk *b;
+	Key k;
+	Kvp kv;
+
+	if(o >= sz)
+		return 0;
+
+	fb = o & ~(Blksz-1);
+	fo = o & (Blksz-1);
+
+	k.k = buf;
+	k.nk = sizeof(buf);
+	k.k[0] = Kdat;
+	PBIT64(k.k+1, f->qpath);
+	PBIT64(k.k+9, fb);
+
+	e = lookup(f, &k, &kv, kvbuf, sizeof(kvbuf), 0);
+	if(e != nil && e != Eexist){
+		werrstr(e);
+		return -1;
+	}
+
+	bp = unpackbp(kv.v);
+	if((b = getblk(bp, GBraw)) == nil)
+		return -1;
+	if(fo+n > Blksz)
+		n = Blksz-fo;
+	if(b != nil){
+		memcpy(d, b->buf+fo, n);
+		putblk(b);
+	}else
+		memset(d, 0, n);
+	return n;
+}
+
+static int
+writeb(Fid *f, Msg *m, char *s, vlong o, vlong n, vlong sz)
+{
+	char buf[Kvmax];
+	vlong fb, fo;
+	Bptr bp;
+	Blk *b, *t;
+	Kvp kv;
+
+	fb = o & ~(Blksz-1);
+	fo = o & (Blksz-1);
+
+	m->k[0] = Kdat;
+	PBIT64(m->k+1, f->qpath);
+	PBIT64(m->k+9, fb);
+
+
+	b = newblk(Traw);
+	if(b == nil)
+		return -1;
+	if(fb < sz && (fo != 0 || n != Blksz)){
+		dprint("\tappending to block %B\n", b->bp);
+		if(lookup(f, m, &kv, buf, sizeof(buf), 0) != nil)
+			return -1;
+		bp = unpackbp(kv.v);
+		if((t = getblk(bp, GBraw)) == nil)
+			return -1;
+		memcpy(b->buf, t->buf, Blksz);
+		freeblk(t);
+		putblk(t);
+	}
+	if(fo+n > Blksz)
+		n = Blksz-fo;
+	memcpy(b->buf+fo, s, n);
+	enqueue(b);
+
+	bp.gen = fs->nextgen;
+	assert(b->flag & Bfinal);
+	packbp(m->v, &b->bp);
+	putblk(b);
+	return n;
+}
+
+static Dent*
+getdent(vlong pqid, Dir *d)
+{
+	Dent *e;
+	char *ek, *eb;
+	u32int h;
+	int err;
+
+	h = ihash(d->qid.path) % Ndtab;
+	lock(&fs->dtablk);
+	for(e = fs->dtab[h]; e != nil; e = e->next){
+		if(e->qid.path == d->qid.path){
+			ainc(&e->ref);
+			unlock(&fs->dtablk);
+			return e;
+		}
+	}
+
+	err = 0;
+	if((e = mallocz(sizeof(Dent), 1)) == nil)
+		return nil;
+	e->ref = 1;
+	e->qid = d->qid;
+	e->length = d->length;
+	e->k = e->buf;
+	e->nk = 9 + strlen(d->name) + 1;
+
+	ek = e->buf;
+	eb = ek + sizeof(e->buf);
+	ek = pack8(&err, ek, eb, Kent);
+	ek = pack64(&err, ek, eb, pqid);
+	ek = packstr(&err, ek, eb, d->name);
+	e->nk = ek - e->buf;
+	e->next = fs->dtab[h];
+	fs->dtab[h] = e;
+
+	unlock(&fs->dtablk);
+	return e;
+}
+
+static void
+clunkmount(Mount *mnt)
+{
+	if(mnt != nil && adec(&mnt->ref) == 0)
+		free(mnt);
+}
+
+static void
+clunkdent(Dent *de)
+{
+	Dent *e, **pe;
+	u32int h;
+
+	if(adec(&de->ref) == 0){
+		h = ihash(de->qid.path) % Ndtab;
+		lock(&fs->dtablk);
+		pe = &fs->dtab[h];
+		for(e = fs->dtab[h]; e != nil; e = e->next){
+			if(e == de){
+				*pe = e->next;
+				unlock(&fs->dtablk);
+				free(de);
+				return;
+			}
+			pe = &e->next;
+		}
+		abort();
+	}
+}
+
+void
+showfid(int fd, char**, int)
+{
+	int i;
+	Fid *f;
+
+	lock(&fs->fidtablk);
+	fprint(fd, "fids:---\n");
+	for(i = 0; i < Nfidtab; i++)
+		for(f = fs->fidtab[i]; f != nil; f = f->next){
+			rlock(f->dent);
+			fprint(fd, "\tfid[%d]: %d [refs=%ld, k=%K, qid=%Q]\n",
+				i, f->fid, f->dent->ref, &f->dent->Key, f->dent->qid);
+			runlock(f->dent);
+		}
+	unlock(&fs->fidtablk);
+}
+
+static Fid*
+getfid(u32int fid)
+{
+	u32int h;
+	Fid *f;
+
+	h = ihash(fid) % Nfidtab;
+	lock(&fs->fidtablk);
+	for(f = fs->fidtab[h]; f != nil; f = f->next)
+		if(f->fid == fid)
+			break;
+	unlock(&fs->fidtablk);
+	ainc(&f->ref);
+	return f;
+}
+
+static void
+putfid(Fid *f)
+{
+	if(adec(&f->ref) != 0)
+		return;
+	clunkmount(f->mnt);
+	clunkdent(f->dent);
+	free(f);
+}
+
+static Fid*
+dupfid(int new, Fid *f)
+{
+	Fid *n, *o;
+	u32int h;
+
+	h = ihash(new) % Nfidtab;
+	if((n = malloc(sizeof(Fid))) == nil)
+		return nil;
+
+	*n = *f;
+	n->fid = new;
+	n->ref = 2; /* one for dup, one for clunk */
+	n->mode = -1;
+	n->next = nil;
+	if(n->mnt != nil)
+		ainc(&n->mnt->ref);
+
+	lock(&fs->fidtablk);
+	ainc(&n->dent->ref);
+	for(o = fs->fidtab[h]; o != nil; o = o->next)
+		if(o->fid == new)
+			break;
+	if(o == nil){
+		n->next = fs->fidtab[h];
+		fs->fidtab[h] = n;
+	}
+	unlock(&fs->fidtablk);
+
+	if(o != nil){
+		werrstr("fid in use: %d == %d", o->fid, new);
+		abort();
+		free(n);
+		return nil;
+	}
+	return n;
+}
+
+static void
+clunkfid(Fid *fid)
+{
+	Fid *f, **pf;
+	u32int h;
+
+	lock(&fs->fidtablk);
+	h = ihash(fid->fid) % Nfidtab;
+	pf = &fs->fidtab[h];
+	for(f = fs->fidtab[h]; f != nil; f = f->next){
+		if(f == fid){
+			assert(adec(&f->ref) != 0);
+			*pf = f->next;
+			break;
+		}
+		pf = &f->next;
+	}
+	unlock(&fs->fidtablk);
+}
+
+static Fmsg*
+readmsg(int fd, int max)
+{
+	char szbuf[4];
+	int sz;
+	Fmsg *m;
+
+	if(readn(fd, szbuf, 4) != 4)
+		return nil;
+	sz = GBIT32(szbuf);
+	if(sz > max)
+		return nil;
+	if((m = malloc(sizeof(Fmsg)+sz)) == nil)
+		return nil;
+	if(readn(fd, m->buf+4, sz-4) != sz-4){
+		werrstr("short read: %r");
+		free(m);
+		return nil;
+	}
+	m->fd = fd;
+	m->sz = sz;
+	PBIT32(m->buf, sz);
+	return m;
+}
+
+static void
 fsversion(Fmsg *m, int *msz)
 {
 	Fcall r;
@@ -361,7 +470,7 @@ fsversion(Fmsg *m, int *msz)
 	respond(m, &r);
 }
 
-void
+static void
 fsauth(Fmsg *m)
 {
 	Fcall r;
@@ -371,7 +480,7 @@ fsauth(Fmsg *m)
 	respond(m, &r);
 }
 
-void
+static void
 fsattach(Fmsg *m, int iounit)
 {
 	char *p, *ep, dbuf[Kvmax], kvbuf[Kvmax];
@@ -506,7 +615,7 @@ fswalk(Fmsg *m)
 		}
 		k.k = kbuf;
 		k.nk = p - kbuf;
-		if((estr = fslookup(o, &k, &kv, kvbuf, sizeof(kvbuf), 0)) != nil){
+		if((estr = lookup(o, &k, &kv, kvbuf, sizeof(kvbuf), 0)) != nil){
 			break;
 		}
 		if(kv2dir(&kv, &d) == -1){
@@ -685,7 +794,13 @@ fscreate(Fmsg *m)
 	f->qpath = d.qid.path;
 	f->dent = dent;
 	wlock(f->dent);
-//	freeb(dent, 0, dent->length);
+	if((e = clearb(f, 0, dent->length)) != nil){
+		unlock(f);
+		clunkdent(dent);
+		rerror(m, e);
+		putfid(f);
+		return;
+	}
 	dent->length = 0;
 	wunlock(f->dent);
 	unlock(f);
@@ -720,8 +835,13 @@ fsremove(Fmsg *m)
 	mb.k = f->dent->k;
 	mb.nk = f->dent->nk;
 	mb.nv = 0;
-//showfs("preremove");
 	if((e = btupsert(&f->mnt->root, &mb, 1)) != nil){
+		runlock(f->dent);
+		rerror(m, e);
+		putfid(f);
+		return;
+	}
+	if((e = clearb(f, 0, f->dent->length)) != nil){
 		runlock(f->dent);
 		rerror(m, e);
 		putfid(f);
@@ -760,7 +880,7 @@ fsopen(Fmsg *m)
 		rerror(m, Efid);
 		return;
 	}
-	if((e = fslookup(f, f->dent, &kv, buf, sizeof(buf), 0)) != nil){
+	if((e = lookup(f, f->dent, &kv, buf, sizeof(buf), 0)) != nil){
 		rerror(m, e);
 		putfid(f);
 		return;
@@ -868,47 +988,6 @@ fsreaddir(Fmsg *m, Fid *f, Fcall *r)
 	return nil;
 }
 
-int
-readb(Fid *f, char *d, vlong o, vlong n, int sz)
-{
-	char *e, buf[17], kvbuf[17+32];
-	vlong fb, fo;
-	Bptr bp;
-	Blk *b;
-	Key k;
-	Kvp kv;
-
-	if(o >= sz)
-		return 0;
-
-	fb = o & ~(Blksz-1);
-	fo = o & (Blksz-1);
-
-	k.k = buf;
-	k.nk = sizeof(buf);
-	k.k[0] = Kdat;
-	PBIT64(k.k+1, f->qpath);
-	PBIT64(k.k+9, fb);
-
-	e = fslookup(f, &k, &kv, kvbuf, sizeof(kvbuf), 0);
-	if(e != nil && e != Eexist){
-		werrstr(e);
-		return -1;
-	}
-
-	bp = unpackbp(kv.v);
-	if((b = getblk(bp, GBraw)) == nil)
-		return -1;
-	if(fo+n > Blksz)
-		n = Blksz-fo;
-	if(b != nil){
-		memcpy(d, b->buf+fo, n);
-		putblk(b);
-	}else
-		memset(d, 0, n);
-	return n;
-}
-
 char*
 fsreadfile(Fmsg *m, Fid *f, Fcall *r)
 {
@@ -983,48 +1062,6 @@ fsread(Fmsg *m)
 	putfid(f);
 }
 
-int
-writeb(Fid *f, Msg *m, char *s, vlong o, vlong n, vlong sz)
-{
-	char buf[Kvmax];
-	vlong fb, fo;
-	Bptr bp;
-	Blk *b, *t;
-	Kvp kv;
-
-	fb = o & ~(Blksz-1);
-	fo = o & (Blksz-1);
-
-	m->k[0] = Kdat;
-	PBIT64(m->k+1, f->qpath);
-	PBIT64(m->k+9, fb);
-
-
-	b = newblk(Traw);
-	if(b == nil)
-		return -1;
-	if(fb < sz && (fo != 0 || n != Blksz)){
-		dprint("\tappending to block %B\n", b->bp);
-		if(fslookup(f, m, &kv, buf, sizeof(buf), 0) != nil)
-			return -1;
-		bp = unpackbp(kv.v);
-		if((t = getblk(bp, GBraw)) == nil)
-			return -1;
-		memcpy(b->buf, t->buf, Blksz);
-		freeblk(t);
-		putblk(t);
-	}
-	if(fo+n > Blksz)
-		n = Blksz-fo;
-	memcpy(b->buf+fo, s, n);
-	enqueue(b);
-
-	bp.gen = fs->nextgen;
-	assert(b->flag & Bfinal);
-	packbp(m->v, &b->bp);
-	putblk(b);
-	return n;
-}
 
 void
 fswrite(Fmsg *m)
@@ -1207,7 +1244,7 @@ void
 quiesce(int tid)
 {
 	int i, allquiesced;
-	Blk *p, *n;
+	Bfree *p, *n;
 
 	lock(&fs->activelk);
 	allquiesced = 1;
@@ -1235,14 +1272,14 @@ quiesce(int tid)
 	lock(&fs->freelk);
 	p = nil;
 	if(fs->freep != nil){
-		p = fs->freep->fnext;
-		fs->freep->fnext = nil;
+		p = fs->freep->next;
+		fs->freep->next = nil;
 	}
 	unlock(&fs->freelk);
 
 	while(p != nil){
-		n = p->fnext;
-		reclaimblk(p);
+		n = p->next;
+		reclaimblk(p->bp);
 		p = n;
 	}
 	fs->freep = fs->freehd;

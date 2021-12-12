@@ -38,7 +38,7 @@ readblk(vlong bp, int flg)
 		off += n;
 		rem -= n;
 	}
-	memset(&b->RWLock, 0, sizeof(RWLock));
+	memset(&b->Lock, 0, sizeof(Lock));
 	b->type = (flg&GBraw) ? Traw : GBIT16(b->buf+0);
 	b->bp.addr = bp;
 	b->bp.hash = -1;
@@ -589,9 +589,9 @@ int
 syncblk(Blk *b)
 {
 	assert(b->flag & Bfinal);
-	wlock(b);
+	lock(b);
 	b->flag &= ~(Bqueued|Bdirty);
-	wunlock(b);
+	unlock(b);
 	return pwrite(fs->fd, b->buf, Blksz, b->bp.addr);
 }
 
@@ -614,9 +614,9 @@ fillsuper(Blk *b)
 
 	assert(b->type == Tsuper);
 	p = b->data;
-	wlock(b);
+	lock(b);
 	b->flag |= Bdirty;
-	wunlock(b);
+	unlock(b);
 	memcpy(p, "gefs0001", 8); p += 8;
 	PBIT32(p, 0); p += 4; /* dirty */
 	PBIT32(p, Blksz); p += 4;
@@ -638,7 +638,7 @@ finalize(Blk *b)
 	vlong h;
 
 //	assert((b->flag & Bfinal) == 0);
-	wlock(b);
+	lock(b);
 	b->flag |= Bfinal;
 	if(b->type != Traw)
 		PBIT16(b->buf, b->type);
@@ -669,7 +669,7 @@ finalize(Blk *b)
 	case Tarena:
 		break;
 	}
-	wunlock(b);
+	unlock(b);
 }
 
 Blk*
@@ -745,26 +745,36 @@ putblk(Blk *b)
 void
 freeblk(Blk *b)
 {
+	lock(b);
+	assert((b->flag & Bqueued) == 0);
+	b->flag |= Bzombie;
+	b->freed = getcallerpc(&b);
+	unlock(b);
+	dprint("freeing block %B @ %ld, from 0x%p\n", b->bp, b->ref, getcallerpc(&b));
+	freebp(b->bp);
+}
+
+void
+freebp(Bptr bp)
+{
+	Bfree *f;
+
+	if((f = malloc(sizeof(Bfree))) == nil)
+		return;
+	f->bp = bp;
 	lock(&fs->freelk);
-	b->fnext = fs->freehd;
-	fs->freehd = b;
+	f->next = fs->freehd;
+	fs->freehd = f;
 	unlock(&fs->freelk);
 }
 
 void
-reclaimblk(Blk *b)
+reclaimblk(Bptr bp)
 {
 	Arena *a;
 
-	wlock(b);
-	b->flag |= Bzombie;
-	b->freed = getcallerpc(&b);
-	wunlock(b);
-	dprint("freeing block %B @ %ld, from 0x%p\n", b->bp, b->ref, getcallerpc(&b));
-
-	assert((b->flag & Bqueued) == 0);
-	a = getarena(b->bp.addr);
+	a = getarena(bp.addr);
 	lock(a);
-	blkdealloc_lk(b->bp.addr);
+	blkdealloc_lk(bp.addr);
 	unlock(a);
 }

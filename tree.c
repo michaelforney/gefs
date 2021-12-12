@@ -349,10 +349,6 @@ statupdate(Kvp *kv, Msg *m)
 		p += 4;
 		PBIT32(kv->v+33, v);
 	}
-	if(m->statop & Owname){
-		fprint(2, "renames not yet supported\n");
-		abort();
-	}
 	if(p != m->v + m->nv)
 		fprint(2, "malformed wstat message");
 }
@@ -361,6 +357,7 @@ int
 apply(Kvp *r, Msg *m, char *buf, int nbuf)
 {
 	switch(m->op){
+	case Oclearb:
 	case Odelete:
 		assert(keycmp(r, m) == 0);
 		return 0;
@@ -406,6 +403,7 @@ updateleaf(Path *up, Path *p)
 	char buf[Msgmax];
 	int i, j, o, ok, full, spc;
 	Blk *b, *n;
+	Bptr bp;
 	Msg m;
 	Kvp v;
 
@@ -448,6 +446,10 @@ updateleaf(Path *up, Path *p)
 		case 0:
 			i++;
 			while(j < up->hi){
+				if(m.op == Oclearb){
+					bp = unpackbp(v.v);
+					freebp(bp);
+				}
 				ok = apply(&v, &m, buf, sizeof(buf));
 		Copy:
 				j++;

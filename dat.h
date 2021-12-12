@@ -7,6 +7,7 @@ typedef struct Key	Key;
 typedef struct Val	Val;
 typedef struct Kvp	Kvp;
 typedef struct Bptr	Bptr;
+typedef struct Bfree	Bfree;
 typedef struct Path	Path;
 typedef struct Scan	Scan;
 typedef struct Dent	Dent;
@@ -69,8 +70,8 @@ enum {
 	 */
 	Kdat,	/* qid[8] off[8] => ptr[16]:	pointer to data page */
 	Kent,	/* pqid[8] name[n] => dir[n]:	serialized Dir */
-	Ksnap,	/* id[8] => tree[]:		snapshot */
-	Ksnapid,	/* qid[8] => tree[]:		snapshot for exec, transient */
+	Ksnap,	/* sid[8] => ref[8], tree[24]:	snapshot root */
+	Kdset,	/* name[] => snapid[]:		dataset (snapshot ref) */
 	Ksuper,	/* qid[8] => pqid[8]:		parent dir */
 };
 
@@ -83,7 +84,7 @@ enum {
 };
 
 //#define Efs	"i will not buy this fs, it is scratched"
-#define Efs	(abort(), "broken")
+#define Efs (abort(), "nope")
 #define Eio	"i/o error"
 #define Efid	"bad fid"
 #define Edscan	"invalid dir scan offset"
@@ -197,13 +198,12 @@ enum {
 	Onop,
 	Oinsert,	/* new kvp */
 	Odelete,	/* delete kvp */
-	Oqdelete,	/* delete kvp if exists */
+	Oclearb,	/* free block ptr if exists */
 	Owstat,		/* kvp dirent */
 	/* wstat flags */
 	Owsize	= 1<<4,
-	Owname	= 1<<5,
-	Owmode	= 1<<6,
-	Owmtime	= 1<<7,
+	Owmode	= 1<<5,
+	Owmtime	= 1<<6,
 };
 
 /*
@@ -255,6 +255,11 @@ struct Tree {
 	int	ht;
 };
 
+struct Bfree {
+	Bptr	bp;
+	Bfree	*next;
+};
+
 /*
  * Overall state of the file sytem.
  * Shadows the superblock contents.
@@ -276,8 +281,8 @@ struct Gefs {
 	int	active[Maxproc];
 	int	lastactive[Maxproc];
 	Lock	freelk;
-	Blk	*freep;
-	Blk	*freehd;
+	Bfree	*freep;
+	Bfree	*freehd;
 
 	int	fd;
 	long	broken;
@@ -286,8 +291,7 @@ struct Gefs {
 
 	Lock	qidlk;
 	vlong	nextqid;
-	Lock	genlk;
-	vlong	nextgen;
+	vlong	nextgen; /* unlocked: only touched by mutator thread */
 
 	Arena	*arenas;
 	int	narena;
@@ -362,7 +366,6 @@ struct Dent {
 
 	Qid	qid;
 	vlong	length;
-	vlong	rootb;
 	char	buf[Maxent];
 };
 
@@ -443,7 +446,7 @@ struct Scan {
 };
 
 struct Blk {
-	RWLock;
+	Lock;
 
 	/* cache entry */
 	Blk	*cnext;

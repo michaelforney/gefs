@@ -85,9 +85,9 @@ Found:
 	b->cprev = nil;
 	fs->chead = b;
 	if((b->flag&Bcached) == 0){
-		wlock(b);
+		lock(b);
 		b->flag |= Bcached;
-		wunlock(b);
+		unlock(b);
 		fs->ccount++;
 		refblk(b);
 	}

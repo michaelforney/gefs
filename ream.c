@@ -43,13 +43,23 @@ initroot(Blk *r)
 static void
 initsnap(Blk *s, Blk *r)
 {
-	char kbuf[32], vbuf[Rootsz+Ptrsz];
+	char kbuf[Keymax], vbuf[Treesz];
 	Kvp kv;
+
 
 	kv.k = kbuf;
 	kv.v = vbuf;
-	kv.k[0] = Ksnap;
+	kv.k[0] = Kdset;
 	kv.nk = 1 + snprint(kv.k+1, sizeof(kbuf)-1, "main");
+	kv.v[0] = Ksnap;
+	PBIT64(kv.v+1, 0);
+	kv.nv = Snapsz;
+	setval(s, 0, &kv);
+	
+	kv.k[0] = Ksnap;
+	PBIT64(kv.k+1, 0);
+	kv.nk = Snapsz;
+
 	kv.nv = sizeof(vbuf);
 	PBIT32(kv.v +  0, 1);
 	PBIT64(kv.v +  4, r->bp.addr);
@@ -58,7 +68,7 @@ initsnap(Blk *s, Blk *r)
 	PBIT64(kv.v + 28, -1ULL);
 	PBIT64(kv.v + 36, -1ULL);
 	PBIT64(kv.v + 42, -1ULL);
-	setval(s, 0, &kv);
+	setval(s, 1, &kv);
 }
 
 static void

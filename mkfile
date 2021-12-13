@@ -15,7 +15,6 @@ OFILES=\
 	ream.$O\
 	sync.$O\
 	tree.$O\
-	util.$O\
 
 HFILES=\
 	dat.h\

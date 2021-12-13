@@ -30,8 +30,8 @@ uvlong	blkhash(Blk*);
 u32int	ihash(vlong);
 void	finalize(Blk*);
 char*	fillsuper(Blk*);
-char*	snapshot(Mount*);
-char*	loadsnap(Tree*, char*);
+char*	snapshot(Tree*, char*, int);
+char*	opensnap(Tree*, char*);
 uvlong	siphash(void*, usize);
 void	reamfs(char*);
 int	loadarena(Arena*, vlong);
@@ -119,4 +119,5 @@ void	runread(int, void*);
 void	runcons(int, void*);
 
 /* it's in libc... */
-extern int cas(long *, long, long);
+extern int cas(long*, long, long);
+extern int cas64(u64int*, u64int, u64int);

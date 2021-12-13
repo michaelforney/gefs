@@ -728,7 +728,10 @@ freeblk(Blk *b)
 	b->freed = getcallerpc(&b);
 	unlock(b);
 	dprint("freeing block %B @ %ld, from 0x%p\n", b->bp, b->ref, getcallerpc(&b));
-	freebp(b->bp);
+	if(b->bp.gen == fs->nextgen)
+		freebp(b->bp);
+//	else
+//		deadlist(b->bp);
 }
 
 void

@@ -483,10 +483,10 @@ fsauth(Fmsg *m)
 static void
 fsattach(Fmsg *m, int iounit)
 {
-	char *p, *ep, dbuf[Kvmax], kvbuf[Kvmax];
+	char *e, *p, *ep, dbuf[Kvmax], kvbuf[Kvmax];
 	int err;
 	Mount *mnt;
-	Dent *e;
+	Dent *de;
 	Fcall r;
 	Kvp kv;
 	Key dk;
@@ -498,33 +498,13 @@ fsattach(Fmsg *m, int iounit)
 		return;
 	}
 
-	if(1+strlen(m->aname) >= sizeof(mnt->kbuf)){
-		rerror(m, Ename);
-		return;
-	}
 	print("attach %s\n", m->aname);
-	mnt->m.k = mnt->kbuf;
-	mnt->m.k[0] = Ksnap;
-	mnt->m.nk = 1+snprint(mnt->m.k+1, sizeof(mnt->kbuf)-1, "%s", m->aname);
-	mnt->m.v = mnt->vbuf;
-	mnt->m.nv = sizeof(mnt->vbuf);
-	if(btlookup(&fs->snap, &mnt->m, &kv, kvbuf, sizeof(kvbuf)) != nil){
-		rerror(m, Enosnap);
+	mnt->name = strdup(m->aname);
+	if((e = opensnap(&mnt->root, m->aname)) != nil){
+		rerror(m, e);
 		return;
 	}
-
-	if(kv.nv != Rootsz+Ptrsz){
-		rerror(m, Efs);
-		return;
-	}
-	p = kv.v;
-	mnt->root.ht = GBIT32(p); p += 4;
-	mnt->root.bp.addr = GBIT64(p); p += 8;
-	mnt->root.bp.hash = GBIT64(p); p += 8;
-	mnt->root.bp.gen = GBIT64(p); p += 8;
-	mnt->dead.addr = GBIT64(p); p += 8;
-	mnt->dead.hash = GBIT64(p); p += 8;
-	mnt->dead.gen = GBIT64(p);
+print("got root %B\n", mnt->root.bp);
 
 	err = 0;
 	p = dbuf;
@@ -544,7 +524,7 @@ fsattach(Fmsg *m, int iounit)
 		rerror(m, Efs);
 		return;
 	}
-	if((e = getdent(-1, &d)) == nil){
+	if((de = getdent(-1, &d)) == nil){
 		rerror(m, Efs);
 		return;
 	}
@@ -555,7 +535,7 @@ fsattach(Fmsg *m, int iounit)
 	 * by one on the refcount. Adjust to
 	 * compensate for the dup.
 	 */
-	adec(&e->ref);
+	adec(&de->ref);
 
 	memset(&f, 0, sizeof(Fid));
 	f.fid = NOFID;
@@ -563,7 +543,7 @@ fsattach(Fmsg *m, int iounit)
 	f.qpath = d.qid.path;
 	f.mode = -1;
 	f.iounit = iounit;
-	f.dent = e;
+	f.dent = de;
 	if(dupfid(m->fid, &f) == nil){
 		rerror(m, Enomem);
 		return;
@@ -808,7 +788,7 @@ fscreate(Fmsg *m)
 	r.type = Rcreate;
 	r.qid = d.qid;
 	r.iounit = f->iounit;
-	if((e = snapshot(f->mnt)) != nil){
+	if((e = snapshot(&f->mnt->root, f->mnt->name, 1)) != nil){
 		rerror(m, e);
 		putfid(f);
 		return;
@@ -850,7 +830,7 @@ fsremove(Fmsg *m)
 	runlock(f->dent);
 	clunkfid(f);
 
-	if((e = snapshot(f->mnt)) != nil){
+	if((e = snapshot(&f->mnt->root, f->mnt->name, 1)) != nil){
 		rerror(m, e);
 		putfid(f);
 		return;
@@ -1130,7 +1110,7 @@ fswrite(Fmsg *m)
 	}
 	wunlock(f->dent);
 
-	if((e = snapshot(f->mnt)) != nil){
+	if((e = snapshot(&f->mnt->root, f->mnt->name, 1)) != nil){
 		rerror(m, e);
 		putfid(f);
 		return;

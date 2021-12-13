@@ -260,29 +260,16 @@ showtree(int fd, Tree *t, char *m)
 void
 showfs(int fd, char **ap, int na)
 {
-	char *p, *e, *name, kbuf[Kvmax], kvbuf[Kvmax];;
+	char *e, *name;
 	Tree t;
-	Key k;
-	Kvp kv;
 
-	name = (na == 0) ? "main" : ap[0];
-	k.k = kbuf;
-	k.k[0] = Ksnap;
-	k.nk = 1+snprint(k.k+1, sizeof(kbuf)-1, "%s", name);
-	if((e = btlookup(&fs->snap, &k, &kv, kvbuf, sizeof(kvbuf))) != nil){
-		fprint(fd, "lookup %K: %s\n", &k, e);
+	name = "main";
+	if(na == 1)
+		name = ap[0];
+	if((e = opensnap(&t, name)) != nil){
+		fprint(fd, "open %s: %s\n", name, e);
 		return;
 	}
-	if(kv.nv != Rootsz+Ptrsz){
-		fprint(fd, "bad snap %P\n", &kv);
-		return;
-	}
-
-	p = kv.v;
-	t.ht = GBIT32(p); p += 4;
-	t.bp.addr = GBIT64(p); p += 8;
-	t.bp.hash = GBIT64(p); p += 8;
-	t.bp.gen = GBIT64(p);
 	showtree(fd, &t, name);
 }
 

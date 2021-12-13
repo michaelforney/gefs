@@ -48,6 +48,8 @@ enum {
 	Ptrsz	= 24,			/* off, hash, gen */
 	Fillsz	= 2,			/* block fill count */
 	Offksz	= 17,			/* type, qid, off */
+	Snapsz	= 9,			/* tag, snapid */
+	Treesz	= 4+Ptrsz+Ptrsz,	/* height, root, deadlist */
 	Kvmax	= Keymax + Inlmax,	/* Key and value */
 	Kpmax	= Keymax + Ptrsz,	/* Key and pointer */
 	
@@ -70,8 +72,8 @@ enum {
 	 */
 	Kdat,	/* qid[8] off[8] => ptr[16]:	pointer to data page */
 	Kent,	/* pqid[8] name[n] => dir[n]:	serialized Dir */
-	Ksnap,	/* sid[8] => ref[8], tree[24]:	snapshot root */
 	Kdset,	/* name[] => snapid[]:		dataset (snapshot ref) */
+	Ksnap,	/* sid[8] => ref[8], tree[52]:	snapshot root */
 	Ksuper,	/* qid[8] => pqid[8]:		parent dir */
 };
 
@@ -252,6 +254,7 @@ struct Bptr {
 struct Tree {
 	Lock	lk;
 	Bptr	bp;
+	Bptr	dp;
 	int	ht;
 };
 
@@ -290,8 +293,8 @@ struct Gefs {
 	Tree	snap;
 
 	Lock	qidlk;
-	vlong	nextqid;
-	vlong	nextgen; /* unlocked: only touched by mutator thread */
+	uvlong	nextqid;
+	uvlong	nextgen; /* unlocked: only touched by mutator thread */
 
 	Arena	*arenas;
 	int	narena;
@@ -371,11 +374,8 @@ struct Dent {
 
 struct Mount {
 	long	ref;
-	Msg	m;
-	char	kbuf[Keymax];
-	char	vbuf[Rootsz+Ptrsz];
+	char	*name;
 	Tree	root;
-	Bptr	dead;
 };
 
 struct Fid {

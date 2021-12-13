@@ -6,6 +6,19 @@
 #include "dat.h"
 #include "fns.h"
 
+vlong
+inc64(uvlong *v, uvlong dv)
+{
+	vlong ov, nv;
+
+	while(1){
+		ov = *v;
+		nv = ov + dv;
+		if(cas64(v, ov, nv))
+			return nv;
+	}
+}
+
 int
 syncblk(Blk *b)
 {
@@ -28,30 +41,87 @@ enqueue(Blk *b)
 	}
 }
 
+char*
+opensnap(Tree *t, char *name)
+{
+	char dbuf[Keymax], buf[Kvmax];
+	char *p, *e;
+	int n;
+	Key k;
+	Kvp kv;
+
+	n = strlen(name);
+	p = dbuf;
+	p[0] = Kdset;			p += 1;
+	memcpy(p, name, n);		p += n;
+	k.k = dbuf;
+	k.nk = p - dbuf;
+	if((e = btlookup(&fs->snap, &k, &kv, buf, sizeof(buf))) != nil)
+		return e;
+	memmove(dbuf, kv.v, kv.nv);
+	k.k = dbuf;
+	k.nk = kv.nv;
+	if((e = btlookup(&fs->snap, &k, &kv, buf, sizeof(buf))) != nil)
+		return e;
+	p = kv.v;
+	t->ht = GBIT32(p);		p += 4;
+	t->bp.addr = GBIT64(p);		p += 8;
+	t->bp.hash = GBIT64(p);		p += 8;
+	t->bp.gen = GBIT64(p);		p += 8;
+	t->dp.addr = GBIT64(p);		p += 8;
+	t->dp.hash = GBIT64(p);		p += 8;
+	t->dp.gen = GBIT64(p);
+	return nil;
+}
 
 char*
-snapshot(Mount *mnt)
+snapshot(Tree *r, char *name, int update)
 {
-	char *e;
+	char dbuf[Keymax], snapbuf[Snapsz], treebuf[Treesz];
+	char *p, *e;
+	uvlong gen;
+	int n;
+	Msg m[2];
 
-	mnt->m.op = Oinsert;
-//	mnt->m.k[0] = Ksnap;
-//	PBIT64(mnt->m.k +  1, fs->nextgen++);
-	PBIT32(mnt->m.v +  0, mnt->root.ht);
-	PBIT64(mnt->m.v +  4, mnt->root.bp.addr);
-	PBIT64(mnt->m.v + 12, mnt->root.bp.hash);
-	PBIT64(mnt->m.v + 20, mnt->root.bp.gen);
-	PBIT64(mnt->m.v + 28, mnt->dead.addr);
-	PBIT64(mnt->m.v + 36, mnt->dead.hash);
-	PBIT64(mnt->m.v + 42, mnt->dead.gen);
-	if((e = btupsert(&fs->snap, &mnt->m, 1)) != nil)
+	n = strlen(name);
+	if(update)
+		gen = inc64(&fs->nextgen, 0);
+	else
+		gen = inc64(&fs->nextgen, 1);
+
+	p = dbuf;
+	m[0].op = Oinsert;
+	p[0] = Kdset;		p += 1;
+	memcpy(p, name, n);	p += n;
+	m[0].k = dbuf;
+	m[0].nk = p - dbuf;
+
+	p = snapbuf;
+	p[0] = Ksnap;		p += 1;
+	PBIT64(p, gen);		p += 8;
+	m[0].v = snapbuf;
+	m[0].nv = p - snapbuf;
+
+	m[1].op = Oinsert;
+	m[1].k = snapbuf;
+	m[1].nk = p - snapbuf;
+	p = treebuf;
+	PBIT32(p, r->ht);	p += 4;
+	PBIT64(p, r->bp.addr);	p += 8;
+	PBIT64(p, r->bp.hash);	p += 8;
+	PBIT64(p, r->bp.gen);	p += 8;
+	PBIT64(p, r->dp.addr);	p += 8;
+	PBIT64(p, r->dp.hash);	p += 8;
+	PBIT64(p, r->dp.gen);	p += 8;
+	m[1].v = treebuf;
+	m[1].nv = p - treebuf;
+	if((e = btupsert(&fs->snap, m, nelem(m))) != nil)
 		return e;
 	if(sync() == -1)
 		return Eio;
 	return 0;
 }
 
-int
 sync(void)
 {
 	int i, r;

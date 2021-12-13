@@ -25,8 +25,11 @@ showkey(Fmt *fmt, Key *k)
 	case Kent:	/* pqid[8] name[n] => dir[n]:	serialized Dir */
 		n = fmtprint(fmt, "ent dir:%llx, name:\"%.*s\")", GBIT64(k->k+1), k->nk-11, k->k+11);
 		break;
+	case Kdset:	/* name[n] => tree[24]:	snapshot ref */
+		n = fmtprint(fmt, "dset name:\"%.*s\"", k->nk-1, k->k+1);
+		break;
 	case Ksnap:	/* name[n] => tree[24]:	snapshot root */
-		n = fmtprint(fmt, "snap name:\"%.*s\"", k->nk-1, k->k+1);
+		n = fmtprint(fmt, "snap id:\"%llx\"", GBIT64(k->k+1));
 		break;
 	case Ksuper:	/* qid[8] => pqid[8]:		parent dir */
 		n = fmtprint(fmt, "up parent:%llx ptr:%llx", GBIT64(k->k+1), GBIT64(k->k+9));
@@ -101,6 +104,9 @@ showval(Fmt *fmt, Kvp *v, int op)
 		bp.hash = GBIT64(v->v+12);
 		bp.gen = GBIT64(v->v+20);
 		n = fmtprint(fmt, "ht:%d, ptr:%B", ht, bp);
+		break;
+	case Kdset:
+		n = fmtprint(fmt, "snap id:\"%llx\"", GBIT64(v->v+1));
 		break;
 	case Ksuper:	/* qid[8] => pqid[8]:		parent dir */
 		n = fmtprint(fmt, "parent: %llx", GBIT64(v->v));

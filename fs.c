@@ -649,7 +649,7 @@ fsstat(Fmsg *m)
 	int n;
 
 	if((f = getfid(m->fid)) == nil){
-		rerror(m, "no such fid");
+		rerror(m, Efid);
 		return;
 	}
 	if((err = btlookup(&f->mnt->root, f->dent, &kv, kvbuf, sizeof(kvbuf))) != nil){
@@ -672,9 +672,128 @@ fsstat(Fmsg *m)
 void
 fswstat(Fmsg *m)
 {
-	USED(m);
-	rerror(m, "wstat unimplemented");
+	char *p, *e, strs[65535], rnbuf[Kvmax], opbuf[Kvmax], kvbuf[Kvmax];
+	int nm, sync;
+	vlong up;
+	Fcall r;
+	Dent *de;
+	Msg mb[3];
+	Dir o, d;
+	Fid *f;
+	Kvp kv;
+	Key k;
+
+	nm = 0;
+	sync = 1;
+	if((f = getfid(m->fid)) == nil){
+		rerror(m, Efid);
+		return;
+	}
+	if(f->dent->qid.type != QTDIR && f->dent->qid.type != QTFILE){
+		rerror(m, Efid);
+		goto Out;
+	}
+	if(convM2D(m->stat, m->nstat, &d, strs) <= BIT16SZ){
+		rerror(m, Edir);
+		goto Out;
+	}
+	de = f->dent;
+	k = f->dent->Key;
+
+	/* A nop qid change is allowed. */
+	if(d.qid.path != ~0 || d.qid.vers != ~0){
+		if(d.qid.path != de->qid.path){
+			rerror(m, Ewstatp);
+			goto Out;
+		}
+		if(d.qid.vers != de->qid.vers){
+			rerror(m, Ewstatv);
+			goto Out;
+		}
+		sync = 0;
+	}
+
+	/*
+	 * rename: verify name is valid, same name renames are nops.
+	 * this is inserted into the tree as a pair of delete/create
+	 * messages.
+	 */
+	if(d.name != nil && *d.name != '\0'){
+		if(okname(d.name) == -1){
+			rerror(m, Ename);
+			goto Out;
+		}
+		/* renaming to the same name is a nop. */
+		mb[nm].op = Odelete;
+		mb[nm].Key = f->dent->Key;
+		nm++;
+		if((e = btlookup(&f->mnt->root, f->dent, &kv, kvbuf, sizeof(kvbuf))) != nil){
+			rerror(m, e);
+			goto Out;
+		}
+		if(kv2dir(&kv, &o) == -1){
+			rerror(m, "stat: %r");
+			goto Out;
+		}
+		o.name = d.name;
+		mb[nm].op = Oinsert;
+		up = GBIT64(f->dent->k+1);
+		if(dir2kv(up, &o, &mb[nm], rnbuf, sizeof(rnbuf)) == -1){
+			rerror(m, Efs);
+			goto Out;
+		}
+		sync = 0;
+		k = mb[nm].Key;
+		nm++;
+	}
+
+	p = opbuf;
+	mb[nm].Key = k;
+	mb[nm].op = Owstat;
+	mb[nm].statop = 0;
+	if(d.mode != ~0){
+		mb[nm].statop |= Owmode;
+		PBIT32(p, d.mode);
+		p += 4;
+		sync = 0;
+	}
+	if(d.length != ~0){
+		mb[nm].statop |= Owsize;
+		PBIT64(p, d.length);
+		p += 8;
+		sync = 0;
+	}
+	if(d.mtime != ~0){
+		mb[nm].statop |= Owmtime;
+		PBIT64(p, (vlong)d.mtime*Nsec);
+		p += 8;
+		sync = 0;
+	}
+	mb[nm].v = opbuf;
+	mb[nm].nv = p - opbuf;
+	nm++;
+	if(sync){
+		rerror(m, Eimpl);
+	}else{
+for(int i = 0; i < nm; i++){
+print("upsert %M\n", &mb[i]);
 }
+		if((e = btupsert(&f->mnt->root, mb, nm)) != nil){
+			rerror(m, e);
+			goto Out;
+		}
+		if((e = snapshot(&f->mnt->root, f->mnt->name, 1)) != nil){
+			rerror(m, e);
+			goto Out;
+		}
+		r.type = Rwstat;
+		respond(m, &r);
+	}
+
+Out:
+	putfid(f);
+}
+
 
 void
 fsclunk(Fmsg *m)
@@ -683,7 +802,7 @@ fsclunk(Fmsg *m)
 	Fid *f;
 
 	if((f = getfid(m->fid)) == nil){
-		rerror(m, "no such fid");
+		rerror(m, Efid);
 		return;
 	}
 
@@ -715,7 +834,7 @@ fscreate(Fmsg *m)
 		return;
 	}
 	if((f = getfid(m->fid)) == nil){
-		rerror(m, "no such fid");
+		rerror(m, Efid);
 		return;
 	}
 	if(m->perm & (DMMOUNT|DMAUTH)){
@@ -806,7 +925,7 @@ fsremove(Fmsg *m)
 	char *e;
 
 	if((f = getfid(m->fid)) == nil){
-		rerror(m, "no such fid");
+		rerror(m, Efid);
 		return;
 	}
 

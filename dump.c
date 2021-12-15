@@ -271,6 +271,7 @@ showfs(int fd, char **ap, int na)
 	Tree t;
 
 	name = "main";
+	memset(&t, 0, sizeof(t));
 	if(na == 1)
 		name = ap[0];
 	if((e = opensnap(&t, name)) != nil){

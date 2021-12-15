@@ -6,6 +6,7 @@ typedef struct Msg	Msg;
 typedef struct Key	Key;
 typedef struct Val	Val;
 typedef struct Kvp	Kvp;
+typedef struct Xdir	Xdir;
 typedef struct Bptr	Bptr;
 typedef struct Bfree	Bfree;
 typedef struct Path	Path;
@@ -86,9 +87,11 @@ enum {
 };
 
 //#define Efs	"i will not buy this fs, it is scratched"
+#define Eimpl	"not implemented"
 #define Efs (abort(), "nope")
 #define Eio	"i/o error"
-#define Efid	"bad fid"
+#define Efid	"unknown fid"
+#define Etype	"invalid fid type"
 #define Edscan	"invalid dir scan offset"
 #define Eexist	"does not exist"
 #define Ebotch	"protocol botch"
@@ -100,10 +103,54 @@ enum {
 #define Einuse	"resource in use"
 #define Ebadf	"invalid file"
 #define Emem	"out of memory"
-#define Ename	"invalid file name"
+#define Ename	"create/wstat -- bad character in file name"
 #define Enomem	"out of memory"
 #define Eattach	"attach required"
-#define Enosnap	"no snapshot by that name exists"
+#define Enosnap	"attach -- bad specifier"
+#define Edir	"invalid directory"
+#define Ebadu	"attach -- unknown user or failed authentication"
+
+#define Ewstatb	"wstat -- unknown bits in qid.type/mode"
+#define Ewstatd	"wstat -- attempt to change directory"
+#define Ewstatg	"wstat -- not in group"
+#define Ewstatl	"wstat -- attempt to make length negative"
+#define Ewstatm	"wstat -- attempt to change muid"
+#define Ewstato	"wstat -- not owner or group leader"
+#define Ewstatp	"wstat -- attempt to change qid.path"
+#define Ewstatq	"wstat -- qid.type/dir.mode mismatch"
+#define Ewstatu	"wstat -- not owner"
+#define Ewstatv	"wstat -- attempt to change qid.vers"
+
+
+//#define Echar		"bad character in directory name",
+//#define Eopen		"read/write -- on non open fid",
+//#define Ecount	"read/write -- count too big",
+//#define Ealloc	"phase error -- directory entry not allocated",
+//#define Eqid		"phase error -- qid does not match",
+//#define Eaccess	"access permission denied",
+//#define Eentry	"directory entry not found",
+//#define Emode		"open/create -- unknown mode",
+//#define Edir1		"walk -- in a non-directory",
+//#define Edir2		"create -- in a non-directory",
+//#define Ephase	"phase error -- cannot happen",
+//#define Eexist	"create/wstat -- file exists",
+//#define Edot		"create/wstat -- . and .. illegal names",
+//#define Eempty	"remove -- directory not empty",
+//#define Ewalk		"walk -- too many (system wide)",
+//#define Eronly	"file system read only",
+//#define Efull		"file system full",
+//#define Eoffset	"read/write -- offset negative",
+//#define Elocked	"open/create -- file is locked",
+//#define Ebroken	"read/write -- lock is broken",
+//#define Eauth		"attach -- authentication failed",
+//#define Eauth2	"read/write -- authentication unimplemented",
+//#define Etoolong	"name too long",
+//#define Efidinuse	"fid in use",
+//#define Econvert	"protocol botch",
+//#define Eversion	"version conversion",
+//#define Eauthnone	"auth -- user 'none' requires no authentication",
+//#define Eauthdisabled	"auth -- authentication disabled",	/* development */
+//#define Eauthfile	"auth -- out of auth files",
 
 /*
  * All metadata blocks share a common header:
@@ -197,15 +244,17 @@ enum {
 };
 
 enum {
-	Onop,
-	Oinsert,	/* new kvp */
-	Odelete,	/* delete kvp */
-	Oclearb,	/* free block ptr if exists */
-	Owstat,		/* kvp dirent */
+	Onop	= 0,	/* nothing */
+	Oinsert	= 1,	/* new kvp */
+	Odelete	= 2,	/* delete kvp */
+	Oclearb	= 3,	/* free block ptr if exists */
+	Owstat	= 4,	/* kvp dirent */
+
 	/* wstat flags */
 	Owsize	= 1<<4,
 	Owmode	= 1<<5,
 	Owmtime	= 1<<6,
+	Owatime	= 1<<7,
 };
 
 /*
@@ -361,14 +410,26 @@ struct Msg {
 	Kvp;
 };
 
+struct Xdir {
+	/* file data */
+	Qid	qid;	/* unique id from server */
+	vlong	mode;	/* permissions */
+	vlong	atime;	/* last read time */
+	vlong	mtime;	/* last write time */
+	uvlong	length;	/* file length */
+	int	uid;	/* owner name */
+	int	gid;	/* group name */
+	int	muid;	/* last modifier name */
+	char	name[Keymax];	/* last element of path */
+};
+
 struct Dent {
 	RWLock;
 	Key;
+	Xdir;
 	Dent	*next;
 	long	ref;
 
-	Qid	qid;
-	vlong	length;
 	char	buf[Maxent];
 };
 
@@ -485,4 +546,3 @@ struct Chan {
 	void	**wp;
 	void*	args[];	/* list of saved pointers, [->size] */
 };
-

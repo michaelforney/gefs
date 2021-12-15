@@ -226,7 +226,7 @@ rshowblk(int fd, Blk *b, int indent, int recurse)
 		fprint(fd, "NIL\n");
 		return;
 	}
-	fprint(fd, "%.*s     +{%B}\n", 4*indent, spc, b->bp);
+	fprint(fd, "%.*s[BLK]|{%B}\n", 4*indent, spc, b->bp);
 	if(b->type == Tpivot){
 		for(i = 0; i < b->nbuf; i++){
 			getmsg(b, i, &m);

@@ -136,8 +136,8 @@ sync(void)
 
 	for(i = 0; i < fs->narena; i++){
 		a = &fs->arenas[i];
-		finalize(a->logtl);
-		if(syncblk(a->logtl) == -1)
+		finalize(a->log.tail);
+		if(syncblk(a->log.tail) == -1)
 			r = -1;
 	}
 	for(b = fs->chead; b != nil; b = b->cnext){

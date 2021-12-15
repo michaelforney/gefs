@@ -18,6 +18,7 @@ typedef struct Arange	Arange;
 typedef struct Bucket	Bucket;
 typedef struct Chan	Chan;
 typedef struct Tree	Tree;
+typedef struct Oplog	Oplog;
 typedef struct Mount	Mount;
 
 enum {
@@ -347,7 +348,7 @@ struct Gefs {
 
 	Arena	*arenas;
 	int	narena;
-	long	nextarena;
+	long	roundrobin;
 	vlong	arenasz;
 
 	Lock	fidtablk;
@@ -364,18 +365,20 @@ struct Gefs {
 	int	cmax;
 };
 
+struct Oplog {
+	vlong	head;	/* log head */
+	vlong	hash;	/* log head hash */
+	Blk	*tail;	/* tail block open for writing */
+};
+
 struct Arena {
 	Lock;
 	Avltree *free;
 	Avltree *partial;
-
-	vlong	log;	/* log head */
-	vlong	logh;	/* log head hash */
-	Blk	*logtl;	/* tail block open for writing */
 	Blk	*b;	/* arena block */
-
 	Blk	**q;	/* write queue */
 	vlong	nq;
+	Oplog	log;
 };
 
 struct Key{

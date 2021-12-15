@@ -22,8 +22,8 @@ loadarena(Arena *a, vlong o)
 	if((b = readblk(o, 0)) == nil)
 		return -1;
 	a->b = b;
-	a->log = GBIT64(b->data+0);
-	a->logh = GBIT64(b->data+8);
+	a->log.head = GBIT64(b->data+0);
+	a->log.hash = GBIT64(b->data+8);
 	if(loadlog(a) == -1)
 		return -1;
 	if(compresslog(a) == -1)

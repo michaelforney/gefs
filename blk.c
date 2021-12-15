@@ -13,6 +13,7 @@ struct Range {
 };
 
 static vlong	blkalloc_lk(Arena*);
+static vlong	blkalloc(void);
 static int	blkdealloc_lk(vlong);
 static void	cachedel(vlong);
 
@@ -75,17 +76,11 @@ readblk(vlong bp, int flg)
 }
 
 static Arena*
-pickarena(vlong hint)
+pickarena(void)
 {
 	long n;
 
-	n = -1; /* shut up, ken */
-	if(hint > 0 || hint < fs->narena)
-		n = hint / fs->arenasz;
-	else if(hint == -1)
-		n = ainc(&fs->nextarena) % fs->narena;
-	else
-		abort();
+	n = (ainc(&fs->roundrobin)/1024) % fs->narena;
 	return &fs->arenas[n];
 }
 
@@ -174,17 +169,22 @@ grabrange(Avltree *t, vlong off, vlong len)
 }
 
 Blk*
-logappend(Arena *a, Blk *lb, vlong off, vlong len, int op)
+logappend(Oplog *ol, Arena *a, vlong off, vlong len, int op)
 {
-	Blk *pb;
+	Blk *pb, *lb;
 	vlong o;
 	char *p;
 
 	assert(off % Blksz == 0);
 	assert(op == LogAlloc || op == LogFree);
+	lb = ol->tail;
 	if(lb == nil || lb->logsz > Logspc - 8){
 		pb = lb;
-		if((o = blkalloc_lk(a)) == -1)
+		if(a == nil)
+			o = blkalloc();
+		else
+			o = blkalloc_lk(a);
+		if(o == -1)
 			return nil;
 		if((lb = mallocz(sizeof(Blk), 1)) == nil)
 			return nil;
@@ -201,7 +201,7 @@ logappend(Arena *a, Blk *lb, vlong off, vlong len, int op)
 			return nil;
 		}
 
-		a->logtl = lb;
+		ol->tail = lb;
 		if(pb != nil){
 			p = pb->data + pb->logsz;
 			PBIT64(p + 0, lb->bp.addr|LogChain);
@@ -239,12 +239,12 @@ logop(Arena *a, vlong off, int op)
 {
 	Blk *b;
 
-	if((b = logappend(a, a->logtl, off, Blksz, op)) == nil)
+	if((b = logappend(&a->log, a, off, Blksz, op)) == nil)
 		return -1;
-	if(a->log == -1)
-		a->log = b->bp.addr;
-	if(b != a->logtl)
-		a->logtl = b;
+	if(a->log.head == -1)
+		a->log.head = b->bp.addr;
+	if(b != a->log.tail)
+		a->log.tail = b;
 	return 0;
 }
 
@@ -258,7 +258,7 @@ loadlog(Arena *a)
 	int op, i, n;
 
 
-	bp = a->log;
+	bp = a->log.head;
 
 Nextblk:
 	if((b = readblk(bp, 0)) == nil)
@@ -329,6 +329,7 @@ compresslog(Arena *a)
 	vlong v, bp, nb, graft, oldhd;
 	int i, n, sz;
 	Blk *hd, *ab, *b;
+	Oplog ol;
 	char *p;
 
 	/*
@@ -362,14 +363,14 @@ compresslog(Arena *a)
 	}
 
 	graft = b->bp.addr;
-	if(a->logtl != nil){
-		finalize(a->logtl);
-		if(syncblk(a->logtl) == -1){
+	if(a->log.tail != nil){
+		finalize(a->log.tail);
+		if(syncblk(a->log.tail) == -1){
 			free(b);
 			return -1;
 		}
 	}
-	a->logtl = b;
+	a->log.tail = b;
 
 	/*
 	 * Prepare what we're writing back.
@@ -399,9 +400,12 @@ compresslog(Arena *a)
 		return -1;
 	}
 	hd = b;
+	ol.hash = -1;
+	ol.head = b->bp.addr;
+	ol.tail = b;
 	b->logsz = Loghdsz;
 	for(i = 0; i < n; i++)
-		if((b = logappend(a, b, log[i].off, log[i].len, LogFree)) == nil)
+		if((b = logappend(&ol, a, log[i].off, log[i].len, LogFree)) == nil)
 			return -1;
 	p = b->data + b->logsz;
 	PBIT64(p, LogChain|graft);
@@ -410,12 +414,12 @@ compresslog(Arena *a)
 	if(syncblk(b) == -1)
 		return -1;
 
-	oldhd = a->log;
-	a->log = hd->bp.addr;
-	a->logh = blkhash(hd);
+	oldhd = a->log.head;
+	a->log.head = hd->bp.addr;
+	a->log.hash = blkhash(hd);
 	ab = a->b;
-	PBIT64(ab->data + 0, a->log);
-	PBIT64(ab->data + 8, a->logh);
+	PBIT64(ab->data + 0, a->log.head);
+	PBIT64(ab->data + 8, a->log.hash);
 	finalize(ab);
 	if(syncblk(ab) == -1)
 		return -1;
@@ -444,8 +448,8 @@ compresslog(Arena *a)
 			unlock(a);
 		}
 	}
-	finalize(a->logtl);
-	if(syncblk(a->logtl) == -1)
+	finalize(a->log.tail);
+	if(syncblk(a->log.tail) == -1)
 		return -1;
 	return 0;
 }
@@ -502,8 +506,8 @@ out:
 	return r;
 }
 
-vlong
-blkalloc(vlong hint)
+static vlong
+blkalloc(void)
 {
 	Arena *a;
 	vlong b;
@@ -511,12 +515,11 @@ blkalloc(vlong hint)
 
 	tries = 0;
 Again:
-	a = pickarena(hint);
+	a = pickarena();
 	if(a == nil || tries == fs->narena){
 		werrstr("no empty arenas");
 		return -1;
 	}
-	lock(a);
 	/*
 	 * TODO: there's an extreme edge case
 	 * here.
@@ -530,6 +533,7 @@ Again:
 	 * correctly.
 	 */
 	tries++;
+	lock(a);
 	if((b = blkalloc_lk(a)) == -1){
 		unlock(a);
 		goto Again;
@@ -548,7 +552,7 @@ newblk(int t)
 	Blk *b;
 	vlong bp;
 
-	if((bp = blkalloc(-1)) == -1)
+	if((bp = blkalloc()) == -1)
 		return nil;
 	if((b = lookupblk(bp)) == nil){
 		if((b = mallocz(sizeof(Blk), 1)) == nil)

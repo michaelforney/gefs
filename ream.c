@@ -83,7 +83,7 @@ reamarena(Arena *a, vlong start, vlong asz)
 		sysfatal("ream: %r");
 	addr += Blksz;	/* arena header */
 
-	a->log = -1;
+	a->log.head = -1;
 	memset(b, 0, sizeof(Blk));
 	b->type = Tlog;
 	b->bp.addr = addr;

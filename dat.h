@@ -406,7 +406,6 @@ struct Kvp {
 
 struct Msg {
 	char	op;
-	char	statop;
 	Kvp;
 };
 

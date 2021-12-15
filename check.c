@@ -121,8 +121,8 @@ badblk(int fd, Blk *b, int h, Kvp *lo, Kvp *hi)
 			case Oclearb:	/* delete kvp if exists */
 				break;
 			case Owstat:		/* kvp dirent */
-				if((my.statop & ~(Owsize|Owmode|Owmtime)) != 0){
-					fprint(2, "invalid stat op %d\n", my.statop);
+				if((my.v[0] & ~(Owsize|Owmode|Owmtime)) != 0){
+					fprint(2, "invalid stat op %x\n", my.v[0]);
 					fail++;
 				}
 				break;

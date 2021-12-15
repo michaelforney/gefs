@@ -37,7 +37,6 @@ void
 cpmsg(Msg *dst, Msg *src, char *buf, int nbuf)
 {
 	dst->op = src->op;
-	dst->statop = src->statop;
 	cpkvp(dst, src, buf, nbuf);
 }
 
@@ -155,8 +154,6 @@ setmsg(Blk *b, int i, Msg *m)
 
 	p = b->data + Bufspc + o;
 	*p = m->op;
-	if(m->op == Owstat)
-		*p |= m->statop;
 	PBIT16(p + 1, m->nk);
 	memcpy(p + 3, m->k, m->nk);
 	PBIT16(p + 3 + m->nk, m->nv);
@@ -174,8 +171,7 @@ getmsg(Blk *b, int i, Msg *m)
 	o = GBIT16(b->data + Pivspc + 2*i);
 	p = b->data + Pivspc + o;
 	m->type = Vinl;
-	m->op = (*p & 0x0f);
-	m->statop = (*p & 0xf0);
+	m->op = *p;
 	m->nk = GBIT16(p + 1);
 	m->k = p + 3;
 	m->nv = GBIT16(p + 3 + m->nk);
@@ -329,22 +325,24 @@ statupdate(Kvp *kv, Msg *m)
 {
 	vlong v;
 	char *p;
+	int op;
 
 	p = m->v;
+	op = *p++;
 	/* bump version */
 	v = GBIT32(kv->v+8);
 	PBIT32(kv->v+8, v+1);
-	if(m->statop & Owmtime){
+	if(op & Owmtime){
 		v = GBIT64(p);
 		p += 8;
 		PBIT32(kv->v+25, v);
 	}
-	if(m->statop & Owsize){
+	if(op & Owsize){
 		v = GBIT64(p);
 		p += 8;
 		PBIT64(kv->v+33, v);
 	}
-	if(m->statop & Owmode){
+	if(op & Owmode){
 		v = GBIT32(p);
 		p += 4;
 		PBIT32(kv->v+33, v);

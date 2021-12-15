@@ -673,7 +673,7 @@ void
 fswstat(Fmsg *m)
 {
 	char *p, *e, strs[65535], rnbuf[Kvmax], opbuf[Kvmax], kvbuf[Kvmax];
-	int nm, sync;
+	int op, nm, sync;
 	vlong up;
 	Fcall r;
 	Dent *de;
@@ -747,37 +747,35 @@ fswstat(Fmsg *m)
 		nm++;
 	}
 
-	p = opbuf;
+	p = opbuf+1;
+	op = 0;
 	mb[nm].Key = k;
 	mb[nm].op = Owstat;
-	mb[nm].statop = 0;
 	if(d.mode != ~0){
-		mb[nm].statop |= Owmode;
+		op |= Owmode;
 		PBIT32(p, d.mode);
 		p += 4;
 		sync = 0;
 	}
 	if(d.length != ~0){
-		mb[nm].statop |= Owsize;
+		op |= Owsize;
 		PBIT64(p, d.length);
 		p += 8;
 		sync = 0;
 	}
 	if(d.mtime != ~0){
-		mb[nm].statop |= Owmtime;
+		op |= Owmtime;
 		PBIT64(p, (vlong)d.mtime*Nsec);
 		p += 8;
 		sync = 0;
 	}
+	opbuf[0] = op;
 	mb[nm].v = opbuf;
 	mb[nm].nv = p - opbuf;
 	nm++;
 	if(sync){
 		rerror(m, Eimpl);
 	}else{
-for(int i = 0; i < nm; i++){
-print("upsert %M\n", &mb[i]);
-}
 		if((e = btupsert(&f->mnt->root, mb, nm)) != nil){
 			rerror(m, e);
 			goto Out;
@@ -861,7 +859,6 @@ fscreate(Fmsg *m)
 	d.gid = "glenda";
 	d.muid = "glenda";
 	mb.op = Oinsert;
-	mb.statop = 0;
 	if(dir2kv(f->qpath, &d, &mb, buf, sizeof(buf)) == -1){
 		rerror(m, Efs);
 		putfid(f);
@@ -1209,18 +1206,17 @@ fswrite(Fmsg *m)
 		c -= n;
 	}
 
+	p = sbuf;
 	kv[i].op = Owstat;
-	kv[i].statop = 0;
 	kv[i].k = f->dent->k;
 	kv[i].nk = f->dent->nk;
-	kv[i].v = sbuf;
-	kv[i].nv = 0;
 	if(m->offset+m->count > f->dent->length){
-		kv[i].statop = Owsize;
-		kv[i].nv += 8;
-		PBIT64(kv[i].v, m->offset+m->count);
+		*p++ = Owsize;
+		PBIT64(p, m->offset+m->count);	p += 8;
 		f->dent->length = m->offset+m->count;
 	}
+	kv[i].v = sbuf;
+	kv[i].nv = p - sbuf;
 	if((e = btupsert(&f->mnt->root, kv, i+1)) != nil){
 		rerror(m, e);
 		putfid(f);

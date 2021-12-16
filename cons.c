@@ -8,6 +8,8 @@
 
 typedef struct Cmd	Cmd;
 
+Cmd cmdtab[];
+
 struct Cmd {
 	char	*name;
 	char	*sub;
@@ -30,9 +32,20 @@ syncfs(int fd, char **, int)
 }
 
 static void
-snapfs(int fd, char **, int)
+snapfs(int fd, char **ap, int na)
 {
-	fprint(fd, "snap\n");
+	char *e;
+	Tree t;
+
+	if((e = opensnap(&t, ap[0])) != nil){
+		fprint(fd, "snap: open %s: %s\n", ap[0], e);
+		return;
+	}
+	if((e = snapshot(&t, ap[na-1], 0)) != nil){
+		fprint(fd, "snap: save %s: %s\n", ap[na-1], e);
+		return;
+	}
+	fprint(fd, "snap %s: ok\n", ap[na-1]);
 }
 
 static void
@@ -44,10 +57,33 @@ fsckfs(int fd, char**, int)
 		fprint(fd, "broken fs\n");
 }
 
+static void
+help(int fd, char **ap, int na)
+{
+	Cmd *c;
+	int i;
+
+	for(c = cmdtab; c->name != nil; c++){
+		if(na == 0 || strcmp(ap[0], c->name) == 0){
+			if(c->sub == nil)
+				fprint(fd, "%s", c->name);
+			else
+				fprint(fd, "%s %s", c->name, c->sub);
+			for(i = 0; i < c->minarg; i++)
+				fprint(fd, " a%d", i);
+			for(i = c->minarg; i < c->maxarg; i++)
+				fprint(fd, " [a%d]", i);
+			fprint(fd, "\n");
+		}
+	}
+}
+
+
 Cmd cmdtab[] = {
 	{.name="sync",	.sub=nil,	.minarg=0, .maxarg=0, .fn=syncfs},
-	{.name="snap",	.sub=nil,	.minarg=1, .maxarg=1, .fn=snapfs},
+	{.name="snap",	.sub=nil,	.minarg=1, .maxarg=2, .fn=snapfs},
 	{.name="check",	.sub=nil,	.minarg=1, .maxarg=1, .fn=fsckfs},
+	{.name="help",	.sub=nil,	.minarg=0, .maxarg=1, .fn=help},
 
 	/* debugging */
 	{.name="show",	.sub="cache",	.minarg=0, .maxarg=0, .fn=showcache},

@@ -151,8 +151,8 @@ dir2kv(vlong up, Dir *d, Kvp *kv, char *buf, int nbuf)
 	ev = pack32(&err, ev, eb, d->qid.vers);
 	ev = pack8(&err, ev, eb, d->qid.type);
 	ev = pack32(&err, ev, eb, d->mode);
-	ev = pack64(&err, ev, eb, d->atime*Nsec);
-	ev = pack64(&err, ev, eb, d->mtime*Nsec);
+	ev = pack64(&err, ev, eb, (vlong)d->atime*Nsec);
+	ev = pack64(&err, ev, eb, (vlong)d->mtime*Nsec);
 	ev = pack64(&err, ev, eb, d->length);
 	ev = packstr(&err, ev, eb, d->uid);
 	ev = packstr(&err, ev, eb, d->gid);

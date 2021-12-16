@@ -851,7 +851,7 @@ fscreate(Fmsg *m)
 	d.qid.vers = 0;
 	d.mode = m->perm;
 	d.name = m->name;
-	d.atime = nsec();
+	d.atime = (nsec() + Nsec/2)/Nsec;
 	d.mtime = d.atime;
 	d.length = 0;
 	d.uid = "glenda";

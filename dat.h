@@ -84,7 +84,6 @@ enum {
 	Bqueued	= 1 << 1,
 	Bfinal	= 1 << 2,
 	Bcached	= 1 << 3,
-	Bzombie	= 1 << 4,
 };
 
 //#define Efs	"i will not buy this fs, it is scratched"

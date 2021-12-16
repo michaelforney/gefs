@@ -48,10 +48,6 @@ cacheblk(Blk *b)
 	u32int h;
 
 	assert(b->bp.addr != 0);
-	if(b->flag & Bzombie){
-		print("caching zombie: %B, flg=%x, freed=0x%p\n", b->bp, b->flag, b->freed);
-		abort();
-	}
 	h = ihash(b->bp.addr);
 	bkt = &fs->cache[h % fs->cmax];
 	lock(bkt);

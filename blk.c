@@ -723,19 +723,10 @@ putblk(Blk *b)
 	free(b);
 }
 
-void
-freeblk(Blk *b)
+static void
+deadlist(Bptr bp)
 {
-	lock(b);
-	assert((b->flag & Bqueued) == 0);
-	b->flag |= Bzombie;
-	b->freed = getcallerpc(&b);
-	unlock(b);
-	dprint("freeing block %B @ %ld, from 0x%p\n", b->bp, b->ref, getcallerpc(&b));
-	if(b->bp.gen == fs->nextgen)
-		freebp(b->bp);
-//	else
-//		deadlist(b->bp);
+	fprint(2, "cross-snap free: %B\n", bp);
 }
 
 void
@@ -750,6 +741,20 @@ freebp(Bptr bp)
 	f->next = fs->freehd;
 	fs->freehd = f;
 	unlock(&fs->freelk);
+}
+
+void
+freeblk(Blk *b)
+{
+	lock(b);
+	assert((b->flag & Bqueued) == 0);
+	b->freed = getcallerpc(&b);
+	unlock(b);
+	dprint("freeing block %B @ %ld, from 0x%p\n", b->bp, b->ref, getcallerpc(&b));
+	if(b->bp.gen == fs->nextgen)
+		freebp(b->bp);
+	else
+		deadlist(b->bp);
 }
 
 void

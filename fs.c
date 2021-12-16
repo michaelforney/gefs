@@ -504,7 +504,6 @@ fsattach(Fmsg *m, int iounit)
 		rerror(m, e);
 		return;
 	}
-print("got root %B\n", mnt->root.bp);
 
 	err = 0;
 	p = dbuf;
@@ -1308,7 +1307,7 @@ runwrite(int wid, void *)
 		m = chrecv(fs->wrchan);
 		quiesce(wid);
 		switch(m->type){
-		case Tflush:	rerror(m, "unimplemented flush");	break;
+		case Tflush:	rerror(m, Eimpl);	break;
 		case Tcreate:	fscreate(m);	break;
 		case Twrite:	fswrite(m);	break;
 		case Twstat:	fswstat(m);	break;

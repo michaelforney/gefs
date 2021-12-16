@@ -46,7 +46,6 @@ loadfs(char *dev)
 	if((d = dirfstat(fs->fd)) == nil)
 		sysfatal("ream: %r");
 	sb = d->length - (d->length % Blksz) - Blksz;
-print("superblock @%llx\n", sb);
 	free(d);
 
 	if((b = readblk(sb, 0)) == nil)

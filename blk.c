@@ -453,10 +453,12 @@ compresslog(Arena *a)
 		return -1;
 	return 0;
 }
+
 /*
  * Allocate from an arena, with lock
- * held. May be called recursively, to
- * alloc space for the alloc log.
+ * held. May be called multiple times
+ * per operation, to alloc space for
+ * the alloc log.
  */
 static vlong
 blkalloc_lk(Arena *a)

@@ -96,7 +96,7 @@ Cmd cmdtab[] = {
 };
 
 void
-runcons(int, void *pfd)
+runcons(int tid, void *pfd)
 {
 	char buf[256], *f[4], **ap;
 	int i, n, nf, na, fd;
@@ -106,6 +106,7 @@ runcons(int, void *pfd)
 	while(1){
 		if((n = read(fd, buf, sizeof(buf)-1)) == -1)
 			break;
+		quiesce(tid);
 		buf[n] = 0;
 		nf = tokenize(buf, f, nelem(f));
 		if(nf == 0 || strlen(f[0]) == 0)
@@ -119,7 +120,8 @@ runcons(int, void *pfd)
 			if(c->sub != nil){
 				if(strcmp(c->sub, *ap) != 0)
 					continue;
-				ap++; na--;
+				ap++;
+				na--;
 			}
 			if(na < c->minarg || na > c->maxarg)
 				continue;
@@ -132,5 +134,6 @@ runcons(int, void *pfd)
 				fprint(fd, " %s", f[i]);
 			fprint(fd, "'\n");
 		}
+		quiesce(tid);
 	}
 }

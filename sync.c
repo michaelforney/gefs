@@ -152,3 +152,48 @@ sync(void)
 	qunlock(&fs->snaplk);
 	return r;
 }
+
+void
+quiesce(int tid)
+{
+	int i, allquiesced;
+	Bfree *p, *n;
+
+	lock(&fs->activelk);
+	allquiesced = 1;
+	fs->active[tid]++;
+	for(i = 0; i < fs->nproc; i++){
+		/*
+		 * Odd parity on quiescence implies
+		 * that we're between the exit from
+		 * and waiting for the next message
+		 * that enters us into the critical
+		 * section.
+		 */
+		if((fs->active[i] & 1) == 0)
+			continue;
+		if(fs->active[i] == fs->lastactive[i])
+			allquiesced = 0;
+	}
+	if(allquiesced)
+		for(i = 0; i < fs->nproc; i++)
+			fs->lastactive[i] = fs->active[i];
+	unlock(&fs->activelk);
+	if(!allquiesced)
+		return;
+
+	lock(&fs->freelk);
+	p = nil;
+	if(fs->freep != nil){
+		p = fs->freep->next;
+		fs->freep->next = nil;
+	}
+	unlock(&fs->freelk);
+
+	while(p != nil){
+		n = p->next;
+		reclaimblk(p->bp);
+		p = n;
+	}
+	fs->freep = fs->freehd;
+}

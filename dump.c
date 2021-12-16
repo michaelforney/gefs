@@ -44,7 +44,7 @@ showkey(Fmt *fmt, Key *k)
 }
 
 static int
-showval(Fmt *fmt, Kvp *v, int op)
+showval(Fmt *fmt, Kvp *v, int op, int flg)
 {
 	char *p;
 	Bptr bp;
@@ -52,6 +52,11 @@ showval(Fmt *fmt, Kvp *v, int op)
 	int n, wop, ht;
 
 	n = 0;
+	if(flg){
+		assert(v->nv == Ptrsz+2);
+		n = fmtprint(fmt, "(%B,%d)", unpackbp(v->v), GBIT16(v->v+Ptrsz));
+		return n;
+	}
 	switch(v->k[0]){
 	case Kdat:	/* qid[8] off[8] => ptr[16]:	pointer to data page */
 		switch(op){
@@ -61,10 +66,7 @@ showval(Fmt *fmt, Kvp *v, int op)
 			break;
 		case Onop:
 		case Oinsert:
-			bp.addr = GBIT64(v->v+0);
-			bp.hash = GBIT64(v->v+8);
-			bp.gen = GBIT64(v->v+16);
-			n = fmtprint(fmt, "ptr:%B", bp);
+			n = fmtprint(fmt, "ptr:%B", unpackbp(v->v));
 			break;
 		}
 	case Kent:	/* pqid[8] name[n] => dir[n]:	serialized Dir */
@@ -141,15 +143,16 @@ Mconv(Fmt *fmt)
 	[Owstat]	"Owstat",
 	};
 	Msg *m;
-	int n;
+	int f, n;
 
+	f = (fmt->flags & FmtSharp) != 0;
 	m = va_arg(fmt->args, Msg*);
 	if(m == nil)
 		return fmtprint(fmt, "Msg{nil}");
 	n = fmtprint(fmt, "Msg(%s, ", opname[m->op]);
 	n += showkey(fmt, m);
 	n += fmtprint(fmt, ") => (");
-	n += showval(fmt, m, m->op);
+	n += showval(fmt, m, m->op, f);
 	n += fmtprint(fmt, ")");
 	return n;
 }
@@ -158,18 +161,16 @@ int
 Pconv(Fmt *fmt)
 {
 	Kvp *kv;
-	int n;
+	int f, n;
 
+	f = (fmt->flags & FmtSharp) != 0;
 	kv = va_arg(fmt->args, Kvp*);
 	if(kv == nil)
 		return fmtprint(fmt, "Kvp{nil}");
 	n = fmtprint(fmt, "Kvp(");
 	n += showkey(fmt, kv);
 	n += fmtprint(fmt, ") => (");
-	if(kv->type == Vinl)
-		n += showval(fmt, kv, Onop);
-	else
-		n += fmtprint(fmt, "(%B,%ud))", kv->bp, kv->fill);
+	n += showval(fmt, kv, Onop, f);
 	n += fmtprint(fmt, ")");
 	return n;
 }
@@ -215,6 +216,7 @@ rshowblk(int fd, Blk *b, int indent, int recurse)
 {
 	Blk *c;
 	int i;
+	Bptr bp;
 	Kvp kv;
 	Msg m;
 
@@ -233,13 +235,16 @@ rshowblk(int fd, Blk *b, int indent, int recurse)
 	}
 	for(i = 0; i < b->nval; i++){
 		getval(b, i, &kv);
-		fprint(fd, "%.*s[%03d]|%P\n", 4*indent, spc, i, &kv);
 		if(b->type == Tpivot){
-			if((c = getblk(kv.bp, 0)) == nil)
+			fprint(fd, "%.*s[%03d]|%#P\n", 4*indent, spc, i, &kv);
+			bp = unpackbp(kv.v);
+			if((c = getblk(bp, 0)) == nil)
 				sysfatal("failed load: %r");
 			if(recurse)
 				rshowblk(fd, c, indent + 1, 1);
 			putblk(c);
+		}else{
+			fprint(fd, "%.*s[%03d]|%P\n", 4*indent, spc, i, &kv);
 		}
 	}
 }

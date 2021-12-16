@@ -57,8 +57,9 @@ char*	estrdup(char*);
 int	keycmp(Key *, Key *);
 
 /* for dumping */
-void	getval(Blk *, int, Kvp *);
-void	getmsg(Blk *, int, Msg *);
+void	getval(Blk*, int, Kvp*);
+void	getmsg(Blk*, int, Msg*);
+Bptr	getptr(Kvp*, int*);
 
 void	initshow(void);
 void	showblk(int, Blk*, char*, int);

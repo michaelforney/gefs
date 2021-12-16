@@ -23,14 +23,8 @@ cpkvp(Kvp *dst, Kvp *src, char *buf, int nbuf)
 	memcpy(buf+ src->nk, src->v, src->nv);
 	dst->k = buf;
 	dst->nk = src->nk;
-	dst->type = src->type;
-	if(src->type == Vinl){
-		dst->v = buf+src->nk;
-		dst->nv = src->nv;
-	}else{
-		dst->bp = src->bp;
-		dst->fill = src->fill;
-	}
+	dst->v = buf+src->nk;
+	dst->nv = src->nv;
 }
 
 void
@@ -66,10 +60,7 @@ msgsz(Msg *m)
 int
 valsz(Kvp *kv)
 {
-	if(kv->type == Vref)
-		return 2 + 2+kv->nk + Ptrsz + Fillsz;
-	else
-		return 2 + 2+kv->nk + 2+kv->nv;
+	return 2 + 2+kv->nk + 2+kv->nv;
 }
 
 void
@@ -79,19 +70,19 @@ getval(Blk *b, int i, Kvp *kv)
 
 	assert(i >= 0 && i < b->nval);
 	o = GBIT16(b->data + 2*i);
-	if(b->type == Tpivot){
-		kv->type = Vref;
-		kv->nk = GBIT16(b->data + o);
-		kv->k = b->data + o + 2;
-		kv->bp = unpackbp(kv->k + kv->nk);
-		kv->fill = GBIT16(kv->k + kv->nk + Ptrsz);
-	}else{
-		kv->type = Vinl;
-		kv->nk = GBIT16(b->data + o);
-		kv->k = b->data + o + 2;
-		kv->nv = GBIT16(kv->k + kv->nk);
-		kv->v = kv->k + kv->nk + 2;
-	}
+	kv->nk = GBIT16(b->data + o);
+	kv->k = b->data + o + 2;
+	kv->nv = GBIT16(kv->k + kv->nk);
+	kv->v = kv->k + kv->nk + 2;
+}
+
+Bptr
+getptr(Kvp *kv, int *fill)
+{
+	assert(kv->nv == Ptrsz || kv->nv == Ptrsz+2);
+	if(fill != nil)
+		*fill = GBIT16(kv->v + Ptrsz);
+	return unpackbp(kv->v);
 }
 
 void
@@ -104,7 +95,7 @@ setval(Blk *b, int i, Kvp *kv)
 	spc = (b->type == Tleaf) ? Leafspc : Pivspc;
 	p = b->data + 2*i;
 	nk = 2 + kv->nk;
-	nv = (kv->type == Vref) ? Ptrsz+Fillsz : 2 + kv->nv;
+	nv = 2 + kv->nv;
 	memmove(p + 2, p, 2*(b->nval - i));
 	b->nval++;
 	b->valsz += nk + nv;
@@ -119,19 +110,26 @@ setval(Blk *b, int i, Kvp *kv)
 	assert(2*b->nval + b->valsz <= spc);
 	assert(2*b->nval <= o);
 	p = b->data + o;
-	if(b->type == Tpivot){
-		PBIT16(b->data + 2*i, o);
-		PBIT16(p +  0, kv->nk);
-		memcpy(p +  2, kv->k, kv->nk);
-		p = packbp(p + kv->nk + 2, &kv->bp);
-		PBIT16(p, kv->fill);
-	} else {
-		PBIT16(b->data + 2*i, o);
-		PBIT16(p +  0, kv->nk);
-		memcpy(p +  2, kv->k, kv->nk);
-		PBIT16(p + kv->nk + 2, kv->nv);
-		memcpy(p + kv->nk + 4, kv->v, kv->nv);
-	}
+	PBIT16(b->data + 2*i, o);
+	PBIT16(p +  0, kv->nk);
+	memcpy(p +  2, kv->k, kv->nk);
+	PBIT16(p + kv->nk + 2, kv->nv);
+	memcpy(p + kv->nk + 4, kv->v, kv->nv);
+}
+
+void
+setptr(Blk *b, int i, Key *k, Bptr bp, int fill)
+{
+	char *p, buf[Ptrsz+2];
+	Kvp kv;
+
+	kv.k = k->k;
+	kv.nk = k->nk;
+	kv.v = buf;
+	kv.nv = sizeof(buf);
+	p = packbp(buf, &bp);
+	PBIT16(p, fill);
+	setval(b, i, &kv);
 }
 
 void
@@ -170,7 +168,6 @@ getmsg(Blk *b, int i, Msg *m)
 	assert(i >= 0 && i < b->nbuf);
 	o = GBIT16(b->data + Pivspc + 2*i);
 	p = b->data + Pivspc + o;
-	m->type = Vinl;
 	m->op = *p;
 	m->nk = GBIT16(p + 1);
 	m->k = p + 3;
@@ -296,10 +293,7 @@ copyup(Blk *n, int i, Path *pp, int *nbytes)
 			if(keycmp(&kv, &m) > 0)
 				kv.Key = m.Key;
 		}
-		kv.type = Vref;
-		kv.bp = pp->nl->bp;
-		kv.fill = blkfill(pp->nl);
-		setval(n, i++, &kv);
+		setptr(n, i++, &kv, pp->nl->bp, blkfill(pp->nl));
 		if(nbytes != nil)
 			*nbytes += valsz(&kv);
 	}
@@ -310,10 +304,7 @@ copyup(Blk *n, int i, Path *pp, int *nbytes)
 			if(keycmp(&kv, &m) > 0)
 				kv.Key = m.Key;
 		}
-		kv.type = Vref;
-		kv.bp = pp->nr->bp;
-		kv.fill = blkfill(pp->nr);
-		setval(n, i++, &kv);
+		setptr(n, i++, &kv, pp->nr->bp, blkfill(pp->nr));
 		if(nbytes != nil)
 			*nbytes += valsz(&kv);
 	}
@@ -916,7 +907,8 @@ trybalance(Path *p, Path *pp, int idx)
 {
 	Blk *l, *m, *r;
 	Kvp kl, kr;
-	int ret;
+	int ret, fill;
+	Bptr bp;
 
 	l = nil;
 	r = nil;
@@ -929,8 +921,9 @@ trybalance(Path *p, Path *pp, int idx)
 	m = refblk(pp->nl);
 	if(idx-1 >= 0){
 		getval(p->b, idx-1, &kl);
-		if(kl.fill + blkfill(m) < Blkspc){
-			if((l = getblk(kl.bp, 0)) == nil)
+		bp = getptr(&kl, &fill);
+		if(fill + blkfill(m) < Blkspc){
+			if((l = getblk(bp, 0)) == nil)
 				goto Out;
 			if(rotmerge(p, pp, idx-1, l, m) == -1)
 				goto Out;
@@ -939,8 +932,9 @@ trybalance(Path *p, Path *pp, int idx)
 	}
 	if(idx+1 < p->b->nval){
 		getval(p->b, idx+1, &kr);
-		if(kr.fill + blkfill(m) < Blkspc){
-			if((r = getblk(kr.bp, 0)) == nil)
+		bp = getptr(&kr, &fill);
+		if(fill + blkfill(m) < Blkspc){
+			if((r = getblk(bp, 0)) == nil)
 				goto Out;
 			if(rotmerge(p, pp, idx, m, r) == -1)
 				goto Out;
@@ -1107,6 +1101,7 @@ btupsert(Tree *t, Msg *msg, int nmsg)
 	Path *path;
 	Blk *b, *rb;
 	Kvp sep;
+	Bptr bp;
 
 	sz = 0;
 	qsort(msg, nmsg, sizeof(Msg), msgcmp);
@@ -1143,7 +1138,8 @@ Again:
 			break;
 		victim(b, &path[npath]);
 		getval(b, path[npath].idx, &sep);
-		b = getblk(sep.bp, 0);
+		bp = getptr(&sep, nil);
+		b = getblk(bp, 0);
 		if(b == nil)
 			goto Error;
 		npath++;
@@ -1213,6 +1209,7 @@ btlookupat(Blk *b, int h, Key *k, Kvp *r, char *buf, int nbuf)
 	int i, j, ok, same;
 	char *err;
 	Blk **p;
+	Bptr bp;
 	Msg m;
 
 	assert(k != r);
@@ -1224,7 +1221,8 @@ btlookupat(Blk *b, int h, Key *k, Kvp *r, char *buf, int nbuf)
 	for(i = 1; i < h; i++){
 		if(blksearch(p[i-1], k, r, nil) == -1)
 			break;
-		if((p[i] = getblk(r->bp, 0)) == nil)
+		bp = getptr(r, nil);
+		if((p[i] = getblk(bp, 0)) == nil)
 			return Efs;
 	}
 	if(p[h-1] != nil)
@@ -1274,9 +1272,10 @@ btscan(Tree *t, Scan *s, char *pfx, int npfx)
 {
 	int i, same;
 	Scanp *p;
+	Bptr bp;
+	Blk *b;
 	Msg m;
 	Kvp v;
-	Blk *b;
 
 	s->done = 0;
 	s->offset = 0;
@@ -1309,7 +1308,8 @@ btscan(Tree *t, Scan *s, char *pfx, int npfx)
 			p[i].bi = bufsearch(b, &s->kv, &m, &same);
 			if(p[i].bi == -1 || !same)
 				p[i].bi++;
-			if((b = getblk(v.bp, 0)) == nil)
+			bp = getptr(&v, nil);
+			if((b = getblk(bp, 0)) == nil)
 				return Eio;
 			p[i+1].b = b;
 		}
@@ -1321,9 +1321,10 @@ btscan(Tree *t, Scan *s, char *pfx, int npfx)
 char *
 btnext(Scan *s, Kvp *r, int *done)
 {
-	Scanp *p;
 	int i, j, h, ok, start, srcbuf;
+	Scanp *p;
 	Msg m, n;
+	Bptr bp;
 	Kvp kv;
 
 	/* load up the correct blocks for the scan */
@@ -1353,7 +1354,8 @@ Again:
 	if(p[start-1].vi < p[start-1].b->nval){
 		for(i = start; i < h; i++){
 			getval(p[i-1].b, p[i-1].vi, &kv);
-			if((p[i].b = getblk(kv.bp, 0)) == nil)
+			bp = getptr(&kv, nil);
+			if((p[i].b = getblk(bp, 0)) == nil)
 				return "error reading block";
 		}
 	

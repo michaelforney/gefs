@@ -48,6 +48,7 @@ enum {
 	Keymax	= 128,			/* key data limit */
 	Inlmax	= 256,			/* inline data limit */
 	Ptrsz	= 24,			/* off, hash, gen */
+	Pptrsz	= 26,			/* off, hash, gen, fill */
 	Fillsz	= 2,			/* block fill count */
 	Offksz	= 17,			/* type, qid, off */
 	Snapsz	= 9,			/* tag, snapid */
@@ -386,19 +387,8 @@ struct Key{
 };
 
 struct Val {
-	int type;
-	union {
-		/* block pointer */
-		struct {
-			Bptr	bp;
-			ushort	fill;
-		};
-		/* inline values */
-		struct {
-			short	nv;
-			char	*v;
-		};
-	};
+	short	nv;
+	char	*v;
 };
 
 struct Kvp {

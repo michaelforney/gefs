@@ -27,9 +27,10 @@ badblk(int fd, Blk *b, int h, Kvp *lo, Kvp *hi)
 {
 	Kvp x, y;
 	Msg mx, my;
-	int i, r;
+	int i, r, fill;
 	Blk *c;
 	int fail;
+	Bptr bp;
 
 	fail = 0;
 	if(h < 0){
@@ -64,16 +65,17 @@ badblk(int fd, Blk *b, int h, Kvp *lo, Kvp *hi)
 			fail++;
 		}
 		if(b->type == Tpivot){
-			if(isfree(x.bp.addr)){
-				fprint(fd, "freed block in use: %llx\n", x.bp.addr);
+			bp = getptr(&x, &fill);
+			if(isfree(bp.addr)){
+				fprint(fd, "freed block in use: %llx\n", bp.addr);
 				fail++;
 			}
-			if((c = getblk(x.bp, 0)) == nil){
+			if((c = getblk(bp, 0)) == nil){
 				fprint(fd, "corrupt block: %r\n");
 				fail++;
 				continue;
 			}
-			if(blkfill(c) != x.fill){
+			if(blkfill(c) != fill){
 				fprint(fd, "mismatched block fill\n");
 				fail++;
 			}
@@ -98,7 +100,8 @@ badblk(int fd, Blk *b, int h, Kvp *lo, Kvp *hi)
 	}
 	if(b->type == Tpivot){
 		getval(b, b->nval-1, &y);
-		if((c = getblk(x.bp, 0)) == nil){
+		bp = getptr(&x, &fill);
+		if((c = getblk(bp, 0)) == nil){
 			fprint(fd, "corrupt block: %r\n");
 			fail++;
 		}

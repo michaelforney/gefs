@@ -161,7 +161,6 @@ dir2kv(vlong up, Dir *d, Kvp *kv, char *buf, int nbuf)
 		werrstr("stat too big: %.*s...", 32, d->name);
 		return -1;
 	}
-	kv->type = Vinl;
 	kv->k = k;
 	kv->nk = ek - k;
 	kv->v = v;
@@ -195,6 +194,7 @@ kv2dir(Kvp *kv, Dir *d)
 	vlong atime, mtime;
 	int err;
 
+	memset(d, 0, sizeof(Dir));
 	err = 0;
 	k = kv->k + 9;
 	ek = kv->k + kv->nk;

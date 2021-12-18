@@ -64,6 +64,7 @@ opensnap(Tree *t, char *name)
 	if((e = btlookup(&fs->snap, &k, &kv, buf, sizeof(buf))) != nil)
 		return e;
 	p = kv.v;
+	memset(t, 0, sizeof(*t));
 	t->ht = GBIT32(p);		p += 4;
 	t->bp.addr = GBIT64(p);		p += 8;
 	t->bp.hash = GBIT64(p);		p += 8;

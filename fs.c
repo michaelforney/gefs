@@ -174,7 +174,7 @@ clearb(Fid *f, vlong o, vlong sz)
 static int
 readb(Fid *f, char *d, vlong o, vlong n, int sz)
 {
-	char *e, buf[17], kvbuf[17+32];
+	char *e, buf[Offksz], kvbuf[Offksz+Ptrsz];
 	vlong fb, fo;
 	Bptr bp;
 	Blk *b;
@@ -583,7 +583,7 @@ fswalk(Fmsg *m)
 	for(i = 0; i < m->nwname; i++){
 		up = prev;
 		p = kbuf;
-		e = p + sizeof(kbuf);
+		e = kbuf + sizeof(kbuf);
 		p = pack8(&err, p, e, Kent);
 		p = pack64(&err, p, e, up);
 		p = packstr(&err, p, e, m->wname[i]);
@@ -1161,7 +1161,7 @@ fsread(Fmsg *m)
 void
 fswrite(Fmsg *m)
 {
-	char sbuf[8], offbuf[4][Ptrsz+Offksz];
+	char sbuf[Wstatmax], offbuf[4][Offksz+Ptrsz];
 	char *p, *e;
 	vlong n, o, c;
 	Msg kv[4];

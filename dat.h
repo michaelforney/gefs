@@ -53,6 +53,7 @@ enum {
 	Offksz	= 17,			/* type, qid, off */
 	Snapsz	= 9,			/* tag, snapid */
 	Treesz	= 4+Ptrsz+Ptrsz,	/* height, root, deadlist */
+	Wstatmax = 1+4+8+8+8,		/* op, mode, len, mtime, atime */
 	Kvmax	= Keymax + Inlmax,	/* Key and value */
 	Kpmax	= Keymax + Ptrsz,	/* Key and pointer */
 	

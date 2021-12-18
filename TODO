@@ -1,6 +1,7 @@
 - Implement: reclaim blocks that escape snapshots
 - Snapshot forking: refcount snapshots, add ids
 - Transient exec snapshots
+- Auth
 - Users and groups:
 	- Permission checks
 	- User and group loading

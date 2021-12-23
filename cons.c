@@ -34,6 +34,7 @@ syncfs(int fd, char **, int)
 static void
 snapfs(int fd, char **ap, int na)
 {
+	vlong gen, old;
 	char *e;
 	Tree t;
 
@@ -41,9 +42,20 @@ snapfs(int fd, char **ap, int na)
 		fprint(fd, "snap: open %s: %s\n", ap[0], e);
 		return;
 	}
-	if((e = snapshot(&t, ap[na-1], 0)) != nil){
+	if((e = snapshot(&t, &gen, &old)) != nil){
 		fprint(fd, "snap: save %s: %s\n", ap[na-1], e);
 		return;
+	}
+	if((e = labelsnap(gen, ap[na-1])) != nil){
+		fprint(fd, "snap: save %s: %s\n", ap[na-1], e);
+		return;
+	}
+	if(na <= 1 || strcmp(ap[0], ap[1]) == 0){
+		/* the label moved */
+		if((e = unrefsnap(old)) != nil){
+			fprint(fd, "snap: unref old: %s\n", e);
+			return;
+		}
 	}
 	fprint(fd, "snap %s: ok\n", ap[na-1]);
 }
@@ -87,7 +99,7 @@ Cmd cmdtab[] = {
 
 	/* debugging */
 	{.name="show",	.sub="cache",	.minarg=0, .maxarg=0, .fn=showcache},
-	{.name="show",	.sub="fs",	.minarg=0, .maxarg=1, .fn=showfs},
+	{.name="show",	.sub="tree",	.minarg=0, .maxarg=1, .fn=showtree},
 	{.name="show",	.sub="snap",	.minarg=0, .maxarg=1, .fn=showsnap},
 	{.name="show",	.sub="fid",	.minarg=0, .maxarg=0, .fn=showfid},
 	{.name="show",	.sub="free",	.minarg=0, .maxarg=0, .fn=showfree},

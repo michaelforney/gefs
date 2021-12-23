@@ -56,25 +56,26 @@ loadfs(char *dev)
 		sysfatal("corrupt superblock: bad magic");
 	p = b->data + 8;
 
-	dirty = GBIT32(p); p += 4; /* dirty */
-	blksz = GBIT32(p); p += 4;
-	bufspc = GBIT32(p); p += 4;
-	hdrsz = GBIT32(p); p += 4;
-	fs->snap.ht = GBIT32(p); p += 4;
-	fs->snap.bp.addr = GBIT64(p); p += 8;
-	fs->snap.bp.hash = GBIT64(p); p += 8;
-	fs->snap.bp.gen = 1;
-	fs->nextgen = GBIT64(p); p += 8;
-	fs->narena = GBIT32(p); p += 4;
-	fs->arenasz = GBIT64(p); p += 8;
-	fs->nextqid = GBIT64(p); p += 8;
+	dirty = GBIT32(p);		p += 4; /* dirty */
+	blksz = GBIT32(p);		p += 4;
+	bufspc = GBIT32(p);		p += 4;
+	hdrsz = GBIT32(p);		p += 4;
+	fs->snap.ht = GBIT32(p);	p += 4;
+	fs->snap.bp.addr = GBIT64(p);	p += 8;
+	fs->snap.bp.hash = GBIT64(p);	p += 8;
+	fs->snap.bp.gen = GBIT64(p);	p += 8;
+	fs->narena = GBIT32(p);		p += 4;
+	fs->arenasz = GBIT64(p);	p += 8;
+	fs->nextqid = GBIT64(p);	p += 8;
 	fs->super = b;
+	fs->nextgen = fs->snap.bp.gen + 1;
 
 	fprint(2, "load: %8s\n", p);
 	fprint(2, "\tsnaptree:\t%B\n", fs->snap.bp);
 	fprint(2, "\tarenas:\t%d\n", fs->narena);
 	fprint(2, "\tarenasz:\t%lld\n", fs->arenasz);
 	fprint(2, "\tnextqid:\t%lld\n", fs->nextqid);
+	fprint(2, "\tnextgen:\t%lld\n", fs->nextgen);
 	if((fs->arenas = calloc(fs->narena, sizeof(Arena))) == nil)
 		sysfatal("malloc: %r");
 	for(i = 0; i < fs->narena; i++)

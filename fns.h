@@ -7,7 +7,7 @@
 #pragma varargck type "X"	char*
 #pragma varargck type "Q"	Qid
 
-extern Gefs	*fs;
+extern Gefs*	fs;
 extern int	debug;
 
 Blk*	newblk(int type);
@@ -22,15 +22,19 @@ void	putblk(Blk*);
 int	syncblk(Blk*);
 void	enqueue(Blk*);
 void	quiesce(int);
-void	freeblk(Blk*);
-void	freebp(Bptr);
+void	freeblk(Tree*, Blk*);
+void	freebp(Tree*, Bptr);
 void	reclaimblk(Bptr);
 ushort	blkfill(Blk*);
 uvlong	blkhash(Blk*);
 u32int	ihash(vlong);
 void	finalize(Blk*);
 char*	fillsuper(Blk*);
-char*	snapshot(Tree*, char*, int);
+char*	snapshot(Tree*, vlong*, vlong*);
+char*	labelsnap(vlong, char*);
+char*	unlabelsnap(vlong, char*);
+char*	refsnap(vlong);
+char*	unrefsnap(vlong);
 char*	opensnap(Tree*, char*);
 uvlong	siphash(void*, usize);
 void	reamfs(char*);
@@ -64,9 +68,8 @@ Bptr	getptr(Kvp*, int*);
 void	initshow(void);
 void	showblk(int, Blk*, char*, int);
 void	showpath(int, Path*, int);
-void	showtree(int, Tree*, char*);
 
-void	showfs(int, char**, int);
+void	showtree(int, char**, int);
 void	showsnap(int, char**, int);
 void	showfid(int, char**, int);
 void	showcache(int, char**, int);
@@ -78,25 +81,28 @@ int	checkfs(int);
 		if(debug) fprint(2, __VA_ARGS__); \
 	}while(0)
 
-char	*pack8(int*, char*, char*, uchar);
-char	*pack16(int*, char*, char*, ushort);
-char	*pack32(int*, char*, char*, uint);
-char	*pack64(int*, char*, char*, uvlong);
-char	*packstr(int*, char*, char*, char*);
+char*	pack8(int*, char*, char*, uchar);
+char*	pack16(int*, char*, char*, ushort);
+char*	pack32(int*, char*, char*, uint);
+char*	pack64(int*, char*, char*, uvlong);
+char*	packstr(int*, char*, char*, char*);
 
 /* void* is a bit hacky, but we want both signed and unsigned to work */
-char	*unpack8(int*, char*, char*, void*);
-char	*unpack16(int*, char*, char*, void*);
-char	*unpack32(int*, char*, char*, void*);
-char	*unpack64(int*, char*, char*, void*);
-char	*unpackstr(int*, char*, char*, char**);
+char*	unpack8(int*, char*, char*, void*);
+char*	unpack16(int*, char*, char*, void*);
+char*	unpack32(int*, char*, char*, void*);
+char*	unpack64(int*, char*, char*, void*);
+char*	unpackstr(int*, char*, char*, char**);
 int	dir2kv(vlong, Dir*, Kvp*, char*, int);
 int	kv2statbuf(Kvp*, char*, int);
 int	kv2dir(Kvp*, Dir*);
 int	kv2qid(Kvp*, Qid*);
 
-char	*packbp(char*, Bptr*);
-Bptr	unpackbp(char*);
+char*	packbp(char*, int, Bptr*);
+Bptr	unpackbp(char*, int);
+char*	packtree(char*, int, Tree*);
+Tree*	unpacktree(Tree*, char*, int);
+char*	packdkey(char*, int, vlong, char*);
 
 /* fmt */
 int	Bconv(Fmt*);
@@ -111,8 +117,8 @@ void	setmsg(Blk *, int, Msg *);
 void	bufinsert(Blk *, Msg *);
 void	victim(Blk *b, Path *p);
 
-Chan	*mkchan(int);
-Fmsg	*chrecv(Chan*);
+Chan*	mkchan(int);
+Fmsg*	chrecv(Chan*);
 void	chsend(Chan*, Fmsg*);
 void	runfs(int, void*);
 void	runwrite(int, void*);

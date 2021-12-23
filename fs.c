@@ -9,6 +9,28 @@
 
 static char*	clearb(Fid*, vlong, vlong);
 
+// FIXME: hack.
+static char*
+updatesnap(Fid *f)
+{
+	vlong gen, old;
+	char *e;
+
+	if((e = snapshot(&f->mnt->root, &gen, &old)) != nil){
+		fprint(2, "snap: save %s: %s\n", f->mnt->name, e);
+		abort();
+	}
+	if((e = labelsnap(gen, f->mnt->name)) != nil){
+		fprint(2, "snap: save %s: %s\n", f->mnt->name, e);
+		abort();
+	}
+	if((e = unrefsnap(old)) != nil){
+		fprint(2, "snap: unref old: %s\n", e);
+		abort();
+	}
+	return nil;
+}
+
 static int
 okname(char *name)
 {
@@ -150,12 +172,17 @@ lookup(Fid *f, Key *k, Kvp *kv, char *buf, int nbuf, int lk)
 	return e;
 }
 
+/*
+ * Clears all blocks in that intersect with
+ * the range listed.
+ */
 static char*
 clearb(Fid *f, vlong o, vlong sz)
 {
 	char *e, buf[Offksz];
 	Msg m;
 
+	o &= ~(Blksz - 1);
 	for(; o < sz; o += Blksz){
 		m.k = buf;
 		m.nk = sizeof(buf);
@@ -174,7 +201,7 @@ clearb(Fid *f, vlong o, vlong sz)
 static int
 readb(Fid *f, char *d, vlong o, vlong n, int sz)
 {
-	char *e, buf[Offksz], kvbuf[Offksz+Ptrsz];
+	char *e, buf[17], kvbuf[17+32];
 	vlong fb, fo;
 	Bptr bp;
 	Blk *b;
@@ -199,7 +226,7 @@ readb(Fid *f, char *d, vlong o, vlong n, int sz)
 		return -1;
 	}
 
-	bp = unpackbp(kv.v);
+	bp = unpackbp(kv.v, kv.nv);
 	if((b = getblk(bp, GBraw)) == nil)
 		return -1;
 	if(fo+n > Blksz)
@@ -213,12 +240,12 @@ readb(Fid *f, char *d, vlong o, vlong n, int sz)
 }
 
 static int
-writeb(Fid *f, Msg *m, char *s, vlong o, vlong n, vlong sz)
+writeb(Fid *f, Msg *m, Bptr *ret, char *s, vlong o, vlong n, vlong sz)
 {
 	char buf[Kvmax];
 	vlong fb, fo;
-	Bptr bp;
 	Blk *b, *t;
+	Bptr bp;
 	Kvp kv;
 
 	fb = o & ~(Blksz-1);
@@ -233,14 +260,13 @@ writeb(Fid *f, Msg *m, char *s, vlong o, vlong n, vlong sz)
 	if(b == nil)
 		return -1;
 	if(fb < sz && (fo != 0 || n != Blksz)){
-		dprint("\tappending to block %B\n", b->bp);
 		if(lookup(f, m, &kv, buf, sizeof(buf), 0) != nil)
 			return -1;
-		bp = unpackbp(kv.v);
+		bp = unpackbp(kv.v, kv.nv);
 		if((t = getblk(bp, GBraw)) == nil)
 			return -1;
 		memcpy(b->buf, t->buf, Blksz);
-		freeblk(t);
+		freeblk(&f->mnt->root, t);
 		putblk(t);
 	}
 	if(fo+n > Blksz)
@@ -248,9 +274,8 @@ writeb(Fid *f, Msg *m, char *s, vlong o, vlong n, vlong sz)
 	memcpy(b->buf+fo, s, n);
 	enqueue(b);
 
-	bp.gen = fs->nextgen;
-	assert(b->flag & Bfinal);
-	packbp(m->v, &b->bp);
+	packbp(m->v, m->nv, &b->bp);
+	*ret = b->bp;
 	putblk(b);
 	return n;
 }
@@ -258,41 +283,36 @@ writeb(Fid *f, Msg *m, char *s, vlong o, vlong n, vlong sz)
 static Dent*
 getdent(vlong pqid, Dir *d)
 {
-	Dent *e;
-	char *ek, *eb;
+	Dent *de;
+	char *e;
 	u32int h;
-	int err;
 
 	h = ihash(d->qid.path) % Ndtab;
 	lock(&fs->dtablk);
-	for(e = fs->dtab[h]; e != nil; e = e->next){
-		if(e->qid.path == d->qid.path){
-			ainc(&e->ref);
+	for(de = fs->dtab[h]; de != nil; de = de->next){
+		if(de->qid.path == d->qid.path){
+			ainc(&de->ref);
 			unlock(&fs->dtablk);
-			return e;
+			return de;
 		}
 	}
 
-	err = 0;
-	if((e = mallocz(sizeof(Dent), 1)) == nil)
+	if((de = mallocz(sizeof(Dent), 1)) == nil)
 		return nil;
-	e->ref = 1;
-	e->qid = d->qid;
-	e->length = d->length;
-	e->k = e->buf;
-	e->nk = 9 + strlen(d->name) + 1;
+	de->ref = 1;
+	de->qid = d->qid;
+	de->length = d->length;
+	de->k = de->buf;
+	de->nk = 9 + strlen(d->name) + 1;
 
-	ek = e->buf;
-	eb = ek + sizeof(e->buf);
-	ek = pack8(&err, ek, eb, Kent);
-	ek = pack64(&err, ek, eb, pqid);
-	ek = packstr(&err, ek, eb, d->name);
-	e->nk = ek - e->buf;
-	e->next = fs->dtab[h];
-	fs->dtab[h] = e;
+	if((e = packdkey(de->buf, sizeof(de->buf), pqid, d->name)) == nil)
+		return nil;
+	de->nk = e - de->buf;
+	de->next = fs->dtab[h];
+	fs->dtab[h] = de;
 
 	unlock(&fs->dtablk);
-	return e;
+	return de;
 }
 
 static void
@@ -483,8 +503,7 @@ fsauth(Fmsg *m)
 static void
 fsattach(Fmsg *m, int iounit)
 {
-	char *e, *p, *ep, dbuf[Kvmax], kvbuf[Kvmax];
-	int err;
+	char *e, *p, dbuf[Kvmax], kvbuf[Kvmax];
 	Mount *mnt;
 	Dent *de;
 	Fcall r;
@@ -505,18 +524,14 @@ fsattach(Fmsg *m, int iounit)
 		return;
 	}
 
-	err = 0;
-	p = dbuf;
-	ep = dbuf + sizeof(dbuf);
-	p = pack8(&err, p, ep, Kent);
-	p = pack64(&err, p, ep, -1ULL);
-	p = packstr(&err, p, ep, "");
-	if(err)
-		abort();
+	if((p = packdkey(dbuf, sizeof(dbuf), -1ULL, "")) == nil){
+		rerror(m, Elength);
+		return;
+	}
 	dk.k = dbuf;
 	dk.nk = p - dbuf;
-	if(btlookup(&mnt->root, &dk, &kv, kvbuf, sizeof(kvbuf)) != nil){
-		rerror(m, Efs);
+	if((e = btlookup(&mnt->root, &dk, &kv, kvbuf, sizeof(kvbuf))) != nil){
+		rerror(m, e);
 		return;
 	}
 	if(kv2dir(&kv, &d) == -1){
@@ -557,15 +572,15 @@ fsattach(Fmsg *m, int iounit)
 void
 fswalk(Fmsg *m)
 {
-	char *p, *e, *estr, kbuf[Maxent], kvbuf[Kvmax];
+	char *p, *e, kbuf[Maxent], kvbuf[Kvmax];
 	vlong up, prev;
-	int i, err;
 	Fid *o, *f;
 	Dent *dent;
 	Fcall r;
 	Kvp kv;
 	Key k;
 	Dir d;
+	int i;
 
 	if((o = getfid(m->fid)) == nil){
 		rerror(m, Efid);
@@ -575,26 +590,20 @@ fswalk(Fmsg *m)
 		rerror(m, Einuse);
 		return;
 	}
-	err = 0;
-	estr = nil;
+	e = nil;
 	up = o->qpath;
 	prev = o->qpath;
 	r.type = Rwalk;
 	for(i = 0; i < m->nwname; i++){
 		up = prev;
-		p = kbuf;
-		e = kbuf + sizeof(kbuf);
-		p = pack8(&err, p, e, Kent);
-		p = pack64(&err, p, e, up);
-		p = packstr(&err, p, e, m->wname[i]);
-		if(err){
-			rerror(m, "bad walk: %r");
+		if((p = packdkey(kbuf, sizeof(kbuf), up, m->wname[i])) == nil){
+			rerror(m, Elength);
 			putfid(o);
 			return;
 		}
 		k.k = kbuf;
 		k.nk = p - kbuf;
-		if((estr = lookup(o, &k, &kv, kvbuf, sizeof(kvbuf), 0)) != nil){
+		if((e = lookup(o, &k, &kv, kvbuf, sizeof(kvbuf), 0)) != nil){
 			break;
 		}
 		if(kv2dir(&kv, &d) == -1){
@@ -607,7 +616,7 @@ fswalk(Fmsg *m)
 	}
 	r.nwqid = i;
 	if(i == 0 && m->nwname != 0){
-		rerror(m, estr);
+		rerror(m, e);
 		putfid(o);
 		return;
 	}
@@ -779,7 +788,7 @@ fswstat(Fmsg *m)
 			rerror(m, e);
 			goto Out;
 		}
-		if((e = snapshot(&f->mnt->root, f->mnt->name, 1)) != nil){
+		if((e = updatesnap(f)) != nil){
 			rerror(m, e);
 			goto Out;
 		}
@@ -903,7 +912,7 @@ fscreate(Fmsg *m)
 	r.type = Rcreate;
 	r.qid = d.qid;
 	r.iounit = f->iounit;
-	if((e = snapshot(&f->mnt->root, f->mnt->name, 1)) != nil){
+	if((e = updatesnap(f)) != nil){
 		rerror(m, e);
 		putfid(f);
 		return;
@@ -945,7 +954,7 @@ fsremove(Fmsg *m)
 	runlock(f->dent);
 	clunkfid(f);
 
-	if((e = snapshot(&f->mnt->root, f->mnt->name, 1)) != nil){
+	if((e = updatesnap(f)) != nil){
 		rerror(m, e);
 		putfid(f);
 		return;
@@ -1161,13 +1170,14 @@ fsread(Fmsg *m)
 void
 fswrite(Fmsg *m)
 {
-	char sbuf[Wstatmax], offbuf[4][Offksz+Ptrsz];
+	char sbuf[Wstatmax], kbuf[4][Offksz], vbuf[4][Ptrsz];
 	char *p, *e;
 	vlong n, o, c;
+	int i, j;
+	Bptr bp[4];
 	Msg kv[4];
 	Fcall r;
 	Fid *f;
-	int i;
 
 	if((f = getfid(m->fid)) == nil){
 		rerror(m, Efid);
@@ -1186,14 +1196,14 @@ fswrite(Fmsg *m)
 	c = m->count;
 	for(i = 0; i < nelem(kv)-1 && c != 0; i++){
 		kv[i].op = Oinsert;
-		kv[i].k = offbuf[i];
-		kv[i].nk = Offksz;
-		kv[i].v = offbuf[i]+Offksz;
-		kv[i].nv = 16;
-		n = writeb(f, &kv[i], p, o, c, f->dent->length);
+		kv[i].k = kbuf[i];
+		kv[i].nk = sizeof(kbuf[i]);
+		kv[i].v = vbuf[i];
+		kv[i].nv = sizeof(vbuf[i]);
+		n = writeb(f, &kv[i], &bp[i], p, o, c, f->dent->length);
 		if(n == -1){
-			// badwrite(f, i);
-			// FIXME: free pages
+			for(j = 0; j < i; j++)
+				freebp(&f->mnt->root, bp[i]);
 			wunlock(f->dent);
 			rerror(m, "%r");
 			putfid(f);
@@ -1224,7 +1234,7 @@ fswrite(Fmsg *m)
 	}
 	wunlock(f->dent);
 
-	if((e = snapshot(&f->mnt->root, f->mnt->name, 1)) != nil){
+	if((e = updatesnap(f)) != nil){
 		rerror(m, e);
 		putfid(f);
 		return;

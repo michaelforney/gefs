@@ -52,7 +52,7 @@ opensnap(Tree *t, char *name)
 
 	n = strlen(name);
 	p = dbuf;
-	p[0] = Kdset;			p += 1;
+	p[0] = Klabel;			p += 1;
 	memcpy(p, name, n);		p += n;
 	k.k = dbuf;
 	k.nk = p - dbuf;
@@ -63,71 +63,123 @@ opensnap(Tree *t, char *name)
 	k.nk = kv.nv;
 	if((e = btlookup(&fs->snap, &k, &kv, buf, sizeof(buf))) != nil)
 		return e;
-	p = kv.v;
-	memset(t, 0, sizeof(*t));
-	t->ht = GBIT32(p);		p += 4;
-	t->bp.addr = GBIT64(p);		p += 8;
-	t->bp.hash = GBIT64(p);		p += 8;
-	t->bp.gen = GBIT64(p);		p += 8;
-	t->dp.addr = GBIT64(p);		p += 8;
-	t->dp.hash = GBIT64(p);		p += 8;
-	t->dp.gen = GBIT64(p);
+	if(unpacktree(t, kv.v, kv.nv) == nil)
+		return Efs;
+	return nil;
+}
+
+static char*
+modifysnap(vlong gen, char *name, int del)
+{
+	char dbuf[Keymax], sbuf[Snapsz];
+	char *p, *e;
+	int n, nm;
+	Msg m[2];
+
+	p = sbuf;
+	nm = 0;
+	p[0] = Ksnap;		p += 1;
+	PBIT64(p, gen);		p += 8;
+	m[nm].op = del ? Ounrefsnap : Orefsnap;
+	m[nm].k = sbuf;
+	m[nm].nk = p - sbuf;
+	m[nm].v = nil;
+	m[nm].nv = 0;
+	nm++;
+	if(name != nil){
+		p = dbuf;
+		n = strlen(name);
+		m[nm].op = del ? Odelete : Oinsert;
+		p[0] = Klabel;		p += 1;
+		memcpy(p, name, n);	p += n;
+		m[nm].k = dbuf;
+		m[nm].nk = p - dbuf;
+		m[nm].v = m[nm-1].k;
+		m[nm].nv = m[nm-1].nk;
+
+		nm++;
+	}
+	if((e = btupsert(&fs->snap, m, nm)) != nil)
+		return e;
 	return nil;
 }
 
 char*
-snapshot(Tree *r, char *name, int update)
+labelsnap(vlong gen, char *name)
 {
-	char dbuf[Keymax], snapbuf[Snapsz], treebuf[Treesz];
+	return modifysnap(gen, name, 0);
+}
+
+char*
+unlabelsnap(vlong gen, char *name)
+{
+	return modifysnap(gen, name, 1);
+}
+
+char*
+refsnap(vlong gen)
+{
+	return modifysnap(gen, nil, 0);
+}
+
+char*
+unrefsnap(vlong gen)
+{
+	return modifysnap(gen, nil, 1);
+}
+
+char*
+snapshot(Tree *t, vlong *genp, vlong *oldp)
+{
+	char kbuf[Snapsz], vbuf[Treesz];
 	char *p, *e;
 	uvlong gen;
-	int n;
-	Msg m[2];
+	Msg m;
+	int i;
 
-	n = strlen(name);
-	if(update)
-		gen = inc64(&fs->nextgen, 0);
-	else
-		gen = inc64(&fs->nextgen, 1);
+	gen = inc64(&fs->nextgen, 1);
+	p = kbuf;
+	p[0] = Ksnap;	p += 1;
+	PBIT64(p, gen);	p += 8;
+	m.op = Oinsert;
+	m.k = kbuf;
+	m.nk = p - kbuf;
 
-	p = dbuf;
-	m[0].op = Oinsert;
-	p[0] = Kdset;		p += 1;
-	memcpy(p, name, n);	p += n;
-	m[0].k = dbuf;
-	m[0].nk = p - dbuf;
+	for(i = 0; i < Ndead; i++){
+		if(t->dead[i].tail != nil){
+			finalize(t->dead[i].tail);
+			syncblk(t->dead[i].tail);
+			putblk(t->dead[i].tail);
+		}
+	}
 
-	p = snapbuf;
-	p[0] = Ksnap;		p += 1;
-	PBIT64(p, gen);		p += 8;
-	m[0].v = snapbuf;
-	m[0].nv = p - snapbuf;
-
-	m[1].op = Oinsert;
-	m[1].k = snapbuf;
-	m[1].nk = p - snapbuf;
-	p = treebuf;
-	PBIT32(p, r->ht);	p += 4;
-	PBIT64(p, r->bp.addr);	p += 8;
-	PBIT64(p, r->bp.hash);	p += 8;
-	PBIT64(p, r->bp.gen);	p += 8;
-	PBIT64(p, r->dp.addr);	p += 8;
-	PBIT64(p, r->dp.hash);	p += 8;
-	PBIT64(p, r->dp.gen);	p += 8;
-	m[1].v = treebuf;
-	m[1].nv = p - treebuf;
-	if((e = btupsert(&fs->snap, m, nelem(m))) != nil)
+	p = packtree(vbuf, sizeof(vbuf), t);
+	m.v = vbuf;
+	m.nv = p - vbuf;
+	if((e = btupsert(&fs->snap, &m, 1)) != nil)
 		return e;
 	if(sync() == -1)
 		return Eio;
-	return 0;
+	/* shift deadlist down */
+	if(t->dead[Ndead-1].tail != nil)
+		putblk(t->dead[Ndead-1].tail);
+	for(i = Ndead-1; i >= 0; i--){
+		t->prev[i] = i == 0 ? gen : t->prev[i-1];
+		t->dead[i].head = -1;
+		t->dead[i].hash = -1;
+		t->dead[i].tail = nil;
+	}
+	*genp = gen;
+	*oldp = t->prev[0];
+	return nil;
 }
 
+int
 sync(void)
 {
 	int i, r;
-	Arena *a;
 	Blk *b, *s;
+	Arena *a;
 
 	qlock(&fs->snaplk);
 	r = 0;

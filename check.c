@@ -122,6 +122,8 @@ badblk(int fd, Blk *b, int h, Kvp *lo, Kvp *hi)
 			case Oinsert:	/* new kvp */
 			case Odelete:	/* delete kvp */
 			case Oclearb:	/* delete kvp if exists */
+			case Orefsnap:
+			case Ounrefsnap:
 				break;
 			case Owstat:		/* kvp dirent */
 				if((my.v[0] & ~(Owsize|Owmode|Owmtime)) != 0){

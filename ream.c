@@ -43,31 +43,38 @@ initroot(Blk *r)
 static void
 initsnap(Blk *s, Blk *r)
 {
-	char kbuf[Keymax], vbuf[Treesz];
+	char *p, kbuf[Keymax], vbuf[Treesz];
+	Tree t;
 	Kvp kv;
+	int i;
 
 
 	kv.k = kbuf;
 	kv.v = vbuf;
-	kv.k[0] = Kdset;
+	kv.k[0] = Klabel;
 	kv.nk = 1 + snprint(kv.k+1, sizeof(kbuf)-1, "main");
 	kv.v[0] = Ksnap;
 	PBIT64(kv.v+1, 0);
 	kv.nv = Snapsz;
 	setval(s, 0, &kv);
-	
+
 	kv.k[0] = Ksnap;
 	PBIT64(kv.k+1, 0);
 	kv.nk = Snapsz;
 
-	kv.nv = sizeof(vbuf);
-	PBIT32(kv.v +  0, 1);
-	PBIT64(kv.v +  4, r->bp.addr);
-	PBIT64(kv.v + 12, r->bp.hash);
-	PBIT64(kv.v + 20, r->bp.gen);
-	PBIT64(kv.v + 28, -1ULL);
-	PBIT64(kv.v + 36, -1ULL);
-	PBIT64(kv.v + 42, -1ULL);
+	memset(&t, 0, sizeof(Tree));
+	t.ref = 1;
+	t.ht = 1;
+	t.bp = r->bp;
+	for(i = 0; i < Ndead; i++){
+		t.prev[i] = -1;
+		t.dead[i].head = -1;
+		t.dead[i].hash = -1;
+		t.dead[i].tail = nil;
+	}
+	p = packtree(vbuf, sizeof(vbuf), &t);
+	kv.v = vbuf;
+	kv.nv = p - vbuf;
 	setval(s, 1, &kv);
 }
 
@@ -120,7 +127,7 @@ void
 reamfs(char *dev)
 {
 	vlong sz, asz, off;
-	Blk *s, *r, *t;
+	Blk *sb, *rb, *tb;
 	Mount *mnt;
 	Dir *d;
 	int i;
@@ -131,12 +138,12 @@ reamfs(char *dev)
 		sysfatal("ream: %r");
 	if(d->length < 64*MiB)
 		sysfatal("ream: disk too small");
-	if((s = mallocz(sizeof(Blk), 1)) == nil)
+	if((sb = mallocz(sizeof(Blk), 1)) == nil)
 		sysfatal("ream: %r");
 	if((mnt = mallocz(sizeof(Mount), 1)) == nil)
 		sysfatal("ream: alloc mount: %r");
-	fs->super = s;
-	refblk(s);
+	fs->super = sb;
+	refblk(sb);
 
 	sz = d->length;
 	sz = sz - (sz % Blksz) - Blksz;
@@ -161,48 +168,46 @@ reamfs(char *dev)
 		asz += off;
 	}
 	
-	s->type = Tsuper;
-	s->bp.addr = sz;
-	s->data = s->buf + Hdrsz;
-	s->ref = 2;
+	sb->type = Tsuper;
+	sb->bp.addr = sz;
+	sb->data = sb->buf + Hdrsz;
+	sb->ref = 2;
 
 	for(i = 0; i < fs->narena; i++)
 		if((loadarena(&fs->arenas[i], i*asz)) == -1)
 			sysfatal("ream: loadarena: %r");
 
-	if((t = newblk(Tleaf)) == nil)
+	if((tb = newblk(Tleaf)) == nil)
 		sysfatal("ream: allocate root: %r");
-	refblk(t);
-	initroot(t);
-	finalize(t);
-	syncblk(t);
+	refblk(tb);
+	initroot(tb);
+	finalize(tb);
+	syncblk(tb);
 
 	mnt->root.ht = 1;
-	mnt->root.bp = t->bp;
+	mnt->root.bp = tb->bp;
 
 	/*
 	 * Now that we have a completely empty fs, give it
 	 * a single snap block that the tree will insert
 	 * into, and take a snapshot as the initial state.
 	 */
-	if((r = newblk(Tleaf)) == nil)
+	if((rb = newblk(Tleaf)) == nil)
 		sysfatal("ream: allocate snaps: %r");
-	refblk(r);
-	initsnap(r, t);
-	finalize(r);
-	syncblk(r);
-	fs->snap.bp = r->bp;
+	refblk(rb);
+	initsnap(rb, tb);
+	finalize(rb);
+	syncblk(rb);
+
+	fs->snap.bp = rb->bp;
 	fs->snap.ht = 1;
+	fillsuper(sb);
+	finalize(sb);
+	syncblk(sb);
 
-	fillsuper(s);
-	finalize(s);
-	syncblk(s);
-
-	sync();
-
-	putblk(t);
-	putblk(s);
-	putblk(r);
+	putblk(tb);
+	putblk(sb);
+	putblk(rb);
 	free(mnt);
 	if(sync() == -1)
 		sysfatal("ream: sync: %r");

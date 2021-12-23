@@ -98,9 +98,9 @@ main(int argc, char **argv)
 	 * sanity checks -- I've tuned these to stupid
 	 * values in the past.
 	 */
-//	assert(4*Kpmax < Pivspc);
-//	assert(2*Msgmax < Bufspc);
-
+	assert(4*Kpmax < Pivspc);
+	assert(2*Msgmax < Bufspc);
+	assert(Treesz < Inlmax);
 	initfs(cachesz);
 	initshow();
 	quotefmtinstall();

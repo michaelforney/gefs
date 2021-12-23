@@ -27,8 +27,8 @@ showkey(Fmt *fmt, Key *k)
 	case Kent:	/* pqid[8] name[n] => dir[n]:	serialized Dir */
 		n = fmtprint(fmt, "ent dir:%llx, name:\"%.*s\")", GBIT64(k->k+1), k->nk-11, k->k+11);
 		break;
-	case Kdset:	/* name[n] => tree[24]:	snapshot ref */
-		n = fmtprint(fmt, "dset name:\"%.*s\"", k->nk-1, k->k+1);
+	case Klabel:	/* name[n] => tree[24]:	snapshot ref */
+		n = fmtprint(fmt, "label name:\"%.*s\"", k->nk-1, k->k+1);
 		break;
 	case Ksnap:	/* name[n] => tree[24]:	snapshot root */
 		n = fmtprint(fmt, "snap id:\"%llx\"", GBIT64(k->k+1));
@@ -46,15 +46,15 @@ showkey(Fmt *fmt, Key *k)
 static int
 showval(Fmt *fmt, Kvp *v, int op, int flg)
 {
+	int n, ws;
 	char *p;
-	Bptr bp;
+	Tree t;
 	Dir d;
-	int n, wop, ht;
 
 	n = 0;
 	if(flg){
 		assert(v->nv == Ptrsz+2);
-		n = fmtprint(fmt, "(%B,%d)", unpackbp(v->v), GBIT16(v->v+Ptrsz));
+		n = fmtprint(fmt, "(%B,%d)", unpackbp(v->v, v->nv), GBIT16(v->v+Ptrsz));
 		return n;
 	}
 	switch(v->k[0]){
@@ -66,7 +66,7 @@ showval(Fmt *fmt, Kvp *v, int op, int flg)
 			break;
 		case Onop:
 		case Oinsert:
-			n = fmtprint(fmt, "ptr:%B", unpackbp(v->v));
+			n = fmtprint(fmt, "ptr:%B", unpackbp(v->v, v->nv));
 			break;
 		}
 	case Kent:	/* pqid[8] name[n] => dir[n]:	serialized Dir */
@@ -85,18 +85,22 @@ showval(Fmt *fmt, Kvp *v, int op, int flg)
 			break;
 		case Owstat:
 			p = v->v;
-			wop = *p++;
-			if(wop & Owmtime){
-				n += fmtprint(fmt, "mtime:%llx ", GBIT64(p));
-				p += 8;
-			}
-			if(wop & Owsize){
+			ws = *p++;
+			if(ws & Owsize){
 				n += fmtprint(fmt, "size:%llx ", GBIT64(p));
 				p += 8;
 			}
-			if(wop & Owmode){
+			if(ws & Owmode){
 				n += fmtprint(fmt, "mode:%o ", GBIT32(p));
 				p += 4;
+			}
+			if(ws & Owmtime){
+				n += fmtprint(fmt, "mtime:%llx ", GBIT64(p));
+				p += 8;
+			}
+			if(ws & Owatime){
+				n += fmtprint(fmt, "mtime:%llx ", GBIT64(p));
+				p += 8;
 			}
 			if(p != v->v + v->nv)
 				abort();
@@ -104,13 +108,21 @@ showval(Fmt *fmt, Kvp *v, int op, int flg)
 		}
 		break;
 	case Ksnap:	/* name[n] => dent[16] ptr[16]:	snapshot root */
-		ht = GBIT32(v->v);
-		bp.addr = GBIT64(v->v+4);
-		bp.hash = GBIT64(v->v+12);
-		bp.gen = GBIT64(v->v+20);
-		n = fmtprint(fmt, "ht:%d, ptr:%B", ht, bp);
+		switch(op){
+		case Orefsnap:
+			n = fmtprint(fmt, "ref");
+			break;
+		case Ounrefsnap:
+			n = fmtprint(fmt, "unref");
+			break;
+		default:
+			if(unpacktree(&t, v->v, v->nv) == nil)
+				return fmtprint(fmt, "corrupt tree");
+			n = fmtprint(fmt, "ref: %d, ht: %d, bp: %B, prev=%lld", t.ref, t.ht, t.bp, t.prev[0]);
+			break;
+		}
 		break;
-	case Kdset:
+	case Klabel:
 		n = fmtprint(fmt, "snap id:\"%llx\"", GBIT64(v->v+1));
 		break;
 	case Ksuper:	/* qid[8] => pqid[8]:		parent dir */
@@ -136,11 +148,13 @@ Bconv(Fmt *fmt)
 int
 Mconv(Fmt *fmt)
 {
-	char *opname[] = {
+	char *opname[Nmsgtype] = {
 	[Oinsert]	"Oinsert",
 	[Odelete]	"Odelete",
 	[Oclearb]	"Oclearb",
 	[Owstat]	"Owstat",
+	[Orefsnap]	"Orefsnap",
+	[Ounrefsnap]	"Ounrefsnap",
 	};
 	Msg *m;
 	int f, n;
@@ -237,7 +251,7 @@ rshowblk(int fd, Blk *b, int indent, int recurse)
 		getval(b, i, &kv);
 		if(b->type == Tpivot){
 			fprint(fd, "%.*s[%03d]|%#P\n", 4*indent, spc, i, &kv);
-			bp = unpackbp(kv.v);
+			bp = unpackbp(kv.v, kv.nv);
 			if((c = getblk(bp, 0)) == nil)
 				sysfatal("failed load: %r");
 			if(recurse)
@@ -257,40 +271,85 @@ showblk(int fd, Blk *b, char *m, int recurse)
 }
 
 void
-showtree(int fd, Tree *t, char *m)
-{
-	Blk *b;
-	int h;
-
-	fprint(fd, "=== [%s] %B\n", m, fs->snap.bp);
-	fprint(fd, "\tht: %d\n", fs->snap.ht);
-	fprint(fd, "\trt: %B\n", fs->snap.bp);
-	b = getroot(t, &h);
-	rshowblk(fd, b, 0, 1);
-	putblk(b);
-}
-
-void
-showfs(int fd, char **ap, int na)
+showtree(int fd, char **ap, int na)
 {
 	char *e, *name;
 	Tree t;
+	Blk *b;
+	int h;
 
 	name = "main";
 	memset(&t, 0, sizeof(t));
 	if(na == 1)
 		name = ap[0];
-	if((e = opensnap(&t, name)) != nil){
+	if(strcmp(name, "dump") == 0)
+		t = fs->snap;
+	else if((e = opensnap(&t, name)) != nil){
 		fprint(fd, "open %s: %s\n", name, e);
 		return;
 	}
-	showtree(fd, &t, name);
+	b = getroot(&t, &h);
+	fprint(fd, "=== [%s] %B @%d\n", name, t.bp, t.ht);
+	rshowblk(fd, b, 0, 1);
+	putblk(b);
 }
 
 void
-showsnap(int fd, char **, int)
+showsnap(int fd, char **ap, int na)
 {
-	showtree(fd, &fs->snap, "snaps");
+	char *e, pfx[Snapsz];
+	int i, sz, done;
+	vlong id;
+	Scan *s;
+	Tree t;
+
+	if((s = mallocz(sizeof(Scan), 1)) == nil){
+		fprint(fd, "no memory\n");
+		return;
+	}
+	pfx[0] = Ksnap;
+	sz = 1;
+	if(na != 0){
+		sz = Snapsz;
+		id = atoll(ap[0]);
+		PBIT64(pfx+1, id);
+	}
+	if((e = btscan(&fs->snap, s, pfx, sz)) != nil){
+		fprint(fd, "scan: %s\n", e);
+		btdone(s);
+		return;
+	}
+	while(1){
+		if((e = btnext(s, &s->kv, &done)) != nil){
+			fprint(fd, "scan: %s\n", e);
+			break;
+		}
+		if(done)
+			break;
+		fprint(fd, "snap: %P\n", &s->kv);
+		if(unpacktree(&t, s->kv.v, s->kv.nv) == nil){
+			fprint(fd, "unpack: garbled tree\n");
+			break;
+		}
+		fprint(fd, "\tref:\t%d\n", t.ref);
+		fprint(fd, "\tht:\t%d\n", t.ht);
+		fprint(fd, "\taddr:\t%llx\n", t.bp.addr);
+		fprint(fd, "\thash:\t%llx\n", t.bp.hash);
+		fprint(fd, "\tgen:\t%llx\n", t.bp.gen);
+		for(i = 0; i < Ndead; i++){
+			fprint(fd, "\tdeadlist %d\n", i);
+			fprint(fd, "\t\tprev:\t%llx\n", t.prev[i]);
+			fprint(fd, "\t\tfheadp:\t%llx\n", t.dead[i].head);
+			fprint(fd, "\t\tfheadh:\t%llx\n", t.dead[i].hash);
+			if(t.dead[i].tail != nil){
+				fprint(fd, "\t\tftailp:%llx\n", t.dead[i].tail->bp.addr);
+				fprint(fd, "\t\tftailh:%llx\n", t.dead[i].tail->bp.hash);
+			}else{
+				fprint(fd, "\t\tftailp:\t-1\n");
+				fprint(fd, "\t\tftailh:\t-1\n");
+			}
+		}
+	}
 }
 
 void
@@ -340,6 +399,7 @@ showpath(int fd, Path *p, int np)
 			p[i].pullsz, p[i].npull,
 			p[i].lo, p[i].hi);
 	}
+#undef A
 }
 
 void

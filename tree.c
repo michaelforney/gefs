@@ -82,7 +82,7 @@ getptr(Kvp *kv, int *fill)
 	assert(kv->nv == Ptrsz || kv->nv == Ptrsz+2);
 	if(fill != nil)
 		*fill = GBIT16(kv->v + Ptrsz);
-	return unpackbp(kv->v);
+	return unpackbp(kv->v, kv->nv);
 }
 
 void
@@ -127,7 +127,7 @@ setptr(Blk *b, int i, Key *k, Bptr bp, int fill)
 	kv.nk = k->nk;
 	kv.v = buf;
 	kv.nv = sizeof(buf);
-	p = packbp(buf, &bp);
+	p = packbp(buf, sizeof(buf), &bp);
 	PBIT16(p, fill);
 	setval(b, i, &kv);
 }
@@ -143,7 +143,7 @@ setmsg(Blk *b, int i, Msg *m)
 	b->nbuf++;
 	b->bufsz += msgsz(m)-2;
 	assert(2*b->nbuf + b->bufsz <= Bufspc);
-	assert(m->op >= 0 && m->op <= Owstat);
+	assert(m->op >= 0 && m->op < Nmsgtype);
 
 	p = b->data + Pivspc;
 	o = Pivspc - b->bufsz;
@@ -343,19 +343,36 @@ statupdate(Kvp *kv, Msg *m)
 }
 
 int
-apply(Kvp *r, Msg *m, char *buf, int nbuf)
+apply(Kvp *kv, Msg *m, char *buf, int nbuf)
 {
+	int refs;
+
 	switch(m->op){
 	case Oclearb:
 	case Odelete:
-		assert(keycmp(r, m) == 0);
+		assert(keycmp(kv, m) == 0);
 		return 0;
 	case Oinsert:
-		cpkvp(r, m, buf, nbuf);
+		cpkvp(kv, m, buf, nbuf);
 		return 1;
 	case Owstat:
-		assert(keycmp(r, m) == 0);
-		statupdate(r, m);
+		assert(keycmp(kv, m) == 0);
+		statupdate(kv, m);
+		return 1;
+	case Orefsnap:
+		assert(keycmp(kv, m) == 0);
+		refs = GBIT32(kv->v) + 1;
+		PBIT32(kv->v, refs);
+		return 1;
+	case Ounrefsnap:
+		assert(keycmp(kv, m) == 0);
+		refs = GBIT32(kv->v) - 1;
+		if(refs == 0){
+			dprint("removing snap %P\n", kv);
+//			freesnap(&t);
+			return 0;
+		}
+		PBIT32(kv->v, refs);
 		return 1;
 	}
 	abort();
@@ -387,7 +404,7 @@ pullmsg(Path *p, int i, Kvp *v, Msg *m, int *full, int spc)
  * When pidx != -1, 
  */
 int
-updateleaf(Path *up, Path *p)
+updateleaf(Tree *t, Path *up, Path *p)
 {
 	char buf[Msgmax];
 	int i, j, o, ok, full, spc;
@@ -436,8 +453,8 @@ updateleaf(Path *up, Path *p)
 			i++;
 			while(j < up->hi){
 				if(m.op == Oclearb){
-					bp = unpackbp(v.v);
-					freebp(bp);
+					bp = unpackbp(v.v, v.nv);
+					freebp(t, bp);
 				}
 				ok = apply(&v, &m, buf, sizeof(buf));
 		Copy:
@@ -485,7 +502,7 @@ updateleaf(Path *up, Path *p)
  * When pidx != -1, 
  */
 int
-updatepiv(Path *up, Path *p, Path *pp)
+updatepiv(Tree *, Path *up, Path *p, Path *pp)
 {
 	char buf[Msgmax];
 	int i, j, o, sz, full, spc;
@@ -558,7 +575,7 @@ updatepiv(Path *up, Path *p, Path *pp)
  * grow the total height of the 
  */
 int
-splitleaf(Path *up, Path *p, Kvp *mid)
+splitleaf(Tree *t, Path *up, Path *p, Kvp *mid)
 {
 	char buf[Msgmax];
 	int full, copied, spc, ok, halfsz;
@@ -576,8 +593,8 @@ splitleaf(Path *up, Path *p, Kvp *mid)
 	l = newblk(b->type);
 	r = newblk(b->type);
 	if(l == nil || r == nil){
-		freeblk(l);
-		freeblk(r);
+		freeblk(t, l);
+		freeblk(t, r);
 		return -1;
 	}
 
@@ -658,11 +675,11 @@ splitleaf(Path *up, Path *p, Kvp *mid)
  * than one.
  */
 int
-splitpiv(Path *, Path *p, Path *pp, Kvp *mid)
+splitpiv(Tree *t, Path *, Path *p, Path *pp, Kvp *mid)
 {
 	int i, o, copied, halfsz;
 	Blk *b, *d, *l, *r;
-	Kvp t;
+	Kvp tk;
 	Msg m;
 
 	/*
@@ -674,8 +691,8 @@ splitpiv(Path *, Path *p, Path *pp, Kvp *mid)
 	l = newblk(b->type);
 	r = newblk(b->type);
 	if(l == nil || r == nil){
-		freeblk(l);
-		freeblk(r);
+		freeblk(t, l);
+		freeblk(t, r);
 		return -1;
 	}
 	o = 0;
@@ -700,9 +717,9 @@ splitpiv(Path *, Path *p, Path *pp, Kvp *mid)
 			o = copyup(d, o, pp, &copied);
 			continue;
 		}
-		getval(b, i, &t);
-		setval(d, o++, &t);
-		copied += valsz(&t);
+		getval(b, i, &tk);
+		setval(d, o++, &tk);
+		copied += valsz(&tk);
 	}
 	o = 0;
 	d = l;
@@ -807,7 +824,7 @@ spillsbuf(Blk *d, Blk *l, Blk *r, Msg *m, int *idx)
 }
 
 int
-rotate(Path *p, Path *pp, int midx, Blk *a, Blk *b, int halfpiv)
+rotate(Tree *t, Path *p, Path *pp, int midx, Blk *a, Blk *b, int halfpiv)
 {
 	int i, o, cp, sp, idx;
 	Blk *d, *l, *r;
@@ -816,8 +833,8 @@ rotate(Path *p, Path *pp, int midx, Blk *a, Blk *b, int halfpiv)
 	l = newblk(a->type);
 	r = newblk(a->type);
 	if(l == nil || r == nil){
-		freeblk(l);
-		freeblk(r);
+		freeblk(t, l);
+		freeblk(t, r);
 		return -1;
 	}
 	o = 0;
@@ -875,7 +892,7 @@ rotate(Path *p, Path *pp, int midx, Blk *a, Blk *b, int halfpiv)
 }
 
 int
-rotmerge(Path *p, Path *pp, int idx, Blk *a, Blk *b)
+rotmerge(Tree *t, Path *p, Path *pp, int idx, Blk *a, Blk *b)
 {
 	int na, nb, ma, mb, imbalance;
 
@@ -897,13 +914,13 @@ rotmerge(Path *p, Path *pp, int idx, Blk *a, Blk *b)
 	if(na + nb < (Pivspc - 4*Msgmax) && ma + mb < Bufspc)
 		return merge(p, pp, idx, a, b);
 	else if(imbalance > 4*Msgmax)
-		return rotate(p, pp, idx, a, b, (na + nb)/2);
+		return rotate(t, p, pp, idx, a, b, (na + nb)/2);
 	else
 		return 0;
 }
 
 int
-trybalance(Path *p, Path *pp, int idx)
+trybalance(Tree *t, Path *p, Path *pp, int idx)
 {
 	Blk *l, *m, *r;
 	Kvp kl, kr;
@@ -925,7 +942,7 @@ trybalance(Path *p, Path *pp, int idx)
 		if(fill + blkfill(m) < Blkspc){
 			if((l = getblk(bp, 0)) == nil)
 				goto Out;
-			if(rotmerge(p, pp, idx-1, l, m) == -1)
+			if(rotmerge(t, p, pp, idx-1, l, m) == -1)
 				goto Out;
 			goto Done;
 		}
@@ -936,7 +953,7 @@ trybalance(Path *p, Path *pp, int idx)
 		if(fill + blkfill(m) < Blkspc){
 			if((r = getblk(bp, 0)) == nil)
 				goto Out;
-			if(rotmerge(p, pp, idx, m, r) == -1)
+			if(rotmerge(t, p, pp, idx, m, r) == -1)
 				goto Out;
 			goto Done;
 		}
@@ -951,7 +968,7 @@ Out:
 }
 
 static Blk*
-flush(Path *path, int npath, int *redo)
+flush(Tree *t, Path *path, int npath, int *redo)
 {
 
 	Path *up, *p, *pp, *rp;
@@ -971,13 +988,13 @@ flush(Path *path, int npath, int *redo)
 	*redo = 0;
 	if(p->b->type == Tleaf){
 		if(!filledleaf(p->b, up->sz)){
-			if(updateleaf(p-1, p) == -1)
+			if(updateleaf(t, p-1, p) == -1)
 				goto Error;
 			enqueue(p->nl);
 			rp = p;
 		}else{
 
-			if(splitleaf(up, p, &mid) == -1)
+			if(splitleaf(t, up, p, &mid) == -1)
 				goto Error;
 			enqueue(p->nl);
 			enqueue(p->nr);
@@ -989,19 +1006,19 @@ flush(Path *path, int npath, int *redo)
 	}
 	while(p != path){
 		if(!filledpiv(p->b, 1)){
-			if(trybalance(p, pp, p->idx) == -1)
+			if(trybalance(t, p, pp, p->idx) == -1)
 				goto Error;
 			/* If we merged the root node, break out. */
 			if(up == path && pp != nil && pp->op == POmerge && p->b->nval == 2){
 				rp = pp;
 				goto Out;
 			}
-			if(updatepiv(up, p, pp) == -1)
+			if(updatepiv(t, up, p, pp) == -1)
 				goto Error;
 			enqueue(p->nl);
 			rp = p;
 		}else{
-			if(splitpiv(up, p, pp, &mid) == -1)
+			if(splitpiv(t, up, p, pp, &mid) == -1)
 				goto Error;
 			enqueue(p->nl);
 			enqueue(p->nr);
@@ -1028,15 +1045,15 @@ Error:
 }
 
 void
-freepath(Path *path, int npath)
+freepath(Tree *t, Path *path, int npath)
 {
 	Path *p;
 
 	for(p = path; p != path + npath; p++){
 		if(p->b != nil)
-			freeblk(p->b);
+			freeblk(t, p->b);
 		if(p->m != nil)
-			freeblk(p->m);
+			freeblk(t, p->m);
 		putblk(p->b);
 		putblk(p->nl);
 		putblk(p->nr);
@@ -1154,7 +1171,7 @@ Again:
 	npath++;
 
 	dh = -1;
-	rb = flush(path, npath, &redo);
+	rb = flush(t, path, npath, &redo);
 	if(rb == nil)
 		goto Error;
 
@@ -1173,18 +1190,15 @@ Again:
 	t->ht += dh;
 	t->bp = rb->bp;
 	unlock(&t->lk);
-	freepath(path, npath);
+	freepath(t, path, npath);
 	free(path);
-	if(!checkfs(2)){
-		showtree(2, t, "broken");
-		showpath(2, path, npath);
+	if(!checkfs(2))
 		abort();
-	}
 	if(redo)
 		goto Again;
 	return 0;
 Error:
-	freepath(path, npath);
+	freepath(t, path, npath);
 	free(path);
 	return Efs;
 }

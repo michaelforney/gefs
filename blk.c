@@ -176,7 +176,7 @@ logappend(Oplog *ol, Arena *a, vlong off, vlong len, int op)
 	char *p;
 
 	assert(off % Blksz == 0);
-	assert(op == LogAlloc || op == LogFree);
+	assert(op == LogAlloc || op == LogFree || op == LogDead);
 	lb = ol->tail;
 	if(lb == nil || lb->logsz > Logspc - 8){
 		pb = lb;
@@ -211,21 +211,46 @@ logappend(Oplog *ol, Arena *a, vlong off, vlong len, int op)
 		}
 	}
 
+	if(len == Blksz && op == LogAlloc)
+		op = LogAlloc1;
+	if(len == Blksz && op == LogFree)
+		op = LogFree1;
+	off |= op;
 	p = lb->data + lb->logsz;
-	if(len == Blksz){
-		off |= (op & ~Log2w);
-		PBIT64(p, off);
-		lb->logsz += 8;
-	}else{
-		off |= op;
-		PBIT64(p+0, off);
+	PBIT64(p, off);
+	lb->logsz += 8;
+	if(op >= Log2wide){
 		PBIT64(p+8, len);
-		lb->logsz += 16;
+		lb->logsz += 8;
 	}
 	/* this gets overwritten by the next append */
 	p = lb->data + lb->logsz;
 	PBIT64(p, (uvlong)LogEnd);
 	return lb;
+}
+
+int
+deadlistappend(Tree *t, Bptr bp)
+{
+	Oplog *l;
+	Blk *b;
+	int i;
+
+	dprint("deadlisted %B\n", bp);
+	l = nil;
+	for(i = 0; i < Ndead; i++){
+		if(bp.gen >= t->prev[i]){
+			l = &t->dead[i];
+			break;
+		}
+	}
+	if((b = logappend(l, nil, bp.addr, Blksz, LogDead)) == nil)
+		return -1;
+	if(l->head == -1)
+		l->head = b->bp.addr;
+	if(l->tail != b)
+		l->tail = b;
+	return 0;
 }
 
 /*
@@ -235,7 +260,7 @@ logappend(Oplog *ol, Arena *a, vlong off, vlong len, int op)
  * recursion.
  */
 int
-logop(Arena *a, vlong off, int op)
+freelistappend(Arena *a, vlong off, int op)
 {
 	Blk *b;
 
@@ -243,7 +268,7 @@ logop(Arena *a, vlong off, int op)
 		return -1;
 	if(a->log.head == -1)
 		a->log.head = b->bp.addr;
-	if(b != a->log.tail)
+	if(a->log.tail != b)
 		a->log.tail = b;
 	return 0;
 }
@@ -251,11 +276,11 @@ logop(Arena *a, vlong off, int op)
 int
 loadlog(Arena *a)
 {
-	Blk *b;
 	vlong bp, ent, off, len;
-	uvlong bh;
-	char *p, *d;
 	int op, i, n;
+	uvlong bh;
+	char *d;
+	Blk *b;
 
 
 	bp = a->log.head;
@@ -264,10 +289,9 @@ Nextblk:
 	if((b = readblk(bp, 0)) == nil)
 		return -1;
 	cacheblk(b);
-	p = b->data;
-	bh = GBIT64(p + 0);
+	bh = GBIT64(b->data);
 	/* the hash covers the log and offset */
-	if(bh != siphash(p+8, Blkspc-8)){
+	if(bh != siphash(b->data+8, Blkspc-8)){
 		werrstr("corrupt log");
 		return -1;
 	}
@@ -276,7 +300,7 @@ Nextblk:
 		ent = GBIT64(d);
 		op = ent & 0xff;
 		off = ent & ~0xff;
-		n = (op & Log2w) ? 16 : 8;
+		n = (op >= Log2wide) ? 16 : 8;
 		switch(op){
 		case LogEnd:
 			dprint("log@%d: end\n", i);
@@ -299,14 +323,14 @@ Nextblk:
 			break;
 		case LogAlloc:
 		case LogAlloc1:
-			len = (op & Log2w) ? GBIT64(d+8) : Blksz;
+			len = (op >= Log2wide) ? GBIT64(d+8) : Blksz;
 			dprint("log@%d alloc: %llx+%llx\n", i, off, len);
 			if(grabrange(a->free, off & ~0xff, len) == -1)
 				return -1;
 			break;
 		case LogFree:
 		case LogFree1:
-			len = (op & Log2w) ? GBIT64(d+8) : Blksz;
+			len = (op >= Log2wide) ? GBIT64(d+8) : Blksz;
 			dprint("log@%d free: %llx+%llx\n", i, off, len);
 			if(freerange(a->free, off & ~0xff, len) == -1)
 				return -1;
@@ -431,7 +455,7 @@ compresslog(Arena *a)
 			for(i = Loghdsz; i < Logspc; i += n){
 				p = b->data + i;
 				v = GBIT64(p);
-				n = (v & Log2w) ? 16 : 8;
+				n = ((v&0xff) >= Log2wide) ? 16 : 8;
 				if((v&0xff) == LogChain){
 					nb = v & ~0xff;
 					break;
@@ -501,7 +525,7 @@ blkdealloc_lk(vlong b)
 	a = getarena(b);
 	if(freerange(a->free, b, Blksz) == -1)
 		goto out;
-	if(logop(a, b, LogFree) == -1)
+	if(freelistappend(a, b, LogFree) == -1)
 		goto out;
 	r = 0;
 out:
@@ -540,7 +564,7 @@ Again:
 		unlock(a);
 		goto Again;
 	}
-	if(logop(a, b, LogAlloc) == -1){
+	if(freelistappend(a, b, LogAlloc) == -1){
 		unlock(a);
 		return -1;
 	}
@@ -608,7 +632,7 @@ fillsuper(Blk *b)
 	PBIT32(p, fs->snap.ht); p += 4;
 	PBIT64(p, fs->snap.bp.addr); p += 8;
 	PBIT64(p, fs->snap.bp.hash); p += 8;
-	PBIT64(p, fs->nextgen); p += 8;
+	PBIT64(p, fs->snap.bp.gen); p += 8;
 	PBIT32(p, fs->narena); p += 4;
 	PBIT64(p, fs->arenasz); p += 8;
 	PBIT64(p, fs->nextqid); p += 8;
@@ -620,7 +644,6 @@ finalize(Blk *b)
 {
 	vlong h;
 
-//	assert((b->flag & Bfinal) == 0);
 	lock(b);
 	b->flag |= Bfinal;
 	if(b->type != Traw)
@@ -645,6 +668,8 @@ finalize(Blk *b)
 	case Tlog:
 		h = siphash(b->data + 8, Blkspc-8);
 		PBIT64(b->data, h);
+		b->bp.hash = blkhash(b);
+		break;
 	case Traw:
 		b->bp.hash = blkhash(b);
 		break;
@@ -725,17 +750,16 @@ putblk(Blk *b)
 	free(b);
 }
 
-static void
-deadlist(Bptr bp)
-{
-	fprint(2, "cross-snap free: %B\n", bp);
-}
-
 void
-freebp(Bptr bp)
+freebp(Tree *t, Bptr bp)
 {
 	Bfree *f;
 
+	dprint("[%s] free blk %B\n", (t == &fs->snap) ? "snap" : "data", bp);
+	if(bp.gen <= t->prev[0]){
+		deadlistappend(t, bp);
+		return;
+	}
 	if((f = malloc(sizeof(Bfree))) == nil)
 		return;
 	f->bp = bp;
@@ -746,17 +770,13 @@ freebp(Bptr bp)
 }
 
 void
-freeblk(Blk *b)
+freeblk(Tree *t, Blk *b)
 {
 	lock(b);
 	assert((b->flag & Bqueued) == 0);
 	b->freed = getcallerpc(&b);
 	unlock(b);
-	dprint("freeing block %B @ %ld, from 0x%p\n", b->bp, b->ref, getcallerpc(&b));
-	if(b->bp.gen == fs->nextgen)
-		freebp(b->bp);
-	else
-		deadlist(b->bp);
+	freebp(t, b->bp);
 }
 
 void
@@ -768,4 +788,81 @@ reclaimblk(Bptr bp)
 	lock(a);
 	blkdealloc_lk(bp.addr);
 	unlock(a);
+}
+
+void
+quiesce(int tid)
+{
+	int i, allquiesced;
+	Bfree *p, *n;
+
+	lock(&fs->activelk);
+	allquiesced = 1;
+	fs->active[tid]++;
+	for(i = 0; i < fs->nproc; i++){
+		/*
+		 * Odd parity on quiescence implies
+		 * that we're between the exit from
+		 * and waiting for the next message
+		 * that enters us into the critical
+		 * section.
+		 */
+		if((fs->active[i] & 1) == 0)
+			continue;
+		if(fs->active[i] == fs->lastactive[i])
+			allquiesced = 0;
+	}
+	if(allquiesced)
+		for(i = 0; i < fs->nproc; i++)
+			fs->lastactive[i] = fs->active[i];
+	unlock(&fs->activelk);
+	if(!allquiesced)
+		return;
+
+	lock(&fs->freelk);
+	p = nil;
+	if(fs->freep != nil){
+		p = fs->freep->next;
+		fs->freep->next = nil;
+	}
+	unlock(&fs->freelk);
+
+	while(p != nil){
+		n = p->next;
+		reclaimblk(p->bp);
+		p = n;
+	}
+	fs->freep = fs->freehd;
+}
+
+int
+sync(void)
+{
+	int i, r;
+	Blk *b, *s;
+	Arena *a;
+
+	qlock(&fs->snaplk);
+	r = 0;
+	s = fs->super;
+	fillsuper(s);
+	enqueue(s);
+
+	for(i = 0; i < fs->narena; i++){
+		a = &fs->arenas[i];
+		finalize(a->log.tail);
+		if(syncblk(a->log.tail) == -1)
+			r = -1;
+	}
+	for(b = fs->chead; b != nil; b = b->cnext){
+		if(!(b->flag & Bdirty))
+			continue;
+		if(syncblk(b) == -1)
+			r = -1;
+	}
+	if(r != -1)
+		r = syncblk(s);
+
+	qunlock(&fs->snaplk);
+	return r;
 }

@@ -46,16 +46,18 @@ enum {
 	 */
 	Loghdsz	= 8,			/* log hash */
 	Keymax	= 128,			/* key data limit */
-	Inlmax	= 256,			/* inline data limit */
+	Inlmax	= 512,			/* inline data limit */
 	Ptrsz	= 24,			/* off, hash, gen */
 	Pptrsz	= 26,			/* off, hash, gen, fill */
 	Fillsz	= 2,			/* block fill count */
 	Offksz	= 17,			/* type, qid, off */
 	Snapsz	= 9,			/* tag, snapid */
-	Treesz	= 4+Ptrsz+Ptrsz,	/* height, root, deadlist */
-	Wstatmax = 1+4+8+8+8,		/* op, mode, len, mtime, atime */
+	Ndead	= 8,			/* number of deadlist heads */
+	Deadsz	= 8+8+8+8+8,		/* prev, head, head hash, tail, tail hash */
+	Treesz	= 8+Ptrsz+Ndead*Deadsz,	/* ref, height, root, deadlist */
 	Kvmax	= Keymax + Inlmax,	/* Key and value */
 	Kpmax	= Keymax + Ptrsz,	/* Key and pointer */
+	Wstatmax = 4+8+8+8,		/* mode, size, atime, mtime */
 	
 
 	Hdrsz	= 10,
@@ -76,7 +78,7 @@ enum {
 	 */
 	Kdat,	/* qid[8] off[8] => ptr[16]:	pointer to data page */
 	Kent,	/* pqid[8] name[n] => dir[n]:	serialized Dir */
-	Kdset,	/* name[] => snapid[]:		dataset (snapshot ref) */
+	Klabel,	/* name[] => snapid[]:		dataset (snapshot ref) */
 	Ksnap,	/* sid[8] => ref[8], tree[52]:	snapshot root */
 	Ksuper,	/* qid[8] => pqid[8]:		parent dir */
 };
@@ -243,20 +245,30 @@ enum {
 enum {
 	GBraw	= 1<<0,
 	GBwrite	= 1<<1,
+	GBunchk	= 1<<2,
 };
 
 enum {
-	Onop	= 0,	/* nothing */
-	Oinsert	= 1,	/* new kvp */
-	Odelete	= 2,	/* delete kvp */
-	Oclearb	= 3,	/* free block ptr if exists */
-	Owstat	= 4,	/* kvp dirent */
+	Onop,		/* nothing */
+	Oinsert,	/* new kvp */
+	Odelete,	/* delete kvp */
+	Oclearb,	/* free block ptr if exists */
+	Owstat,		/* kvp dirent */
+	Orefsnap,	/* increment snap refcount */
+	Ounrefsnap,	/* decrement snap refcount */
+	Nmsgtype,	/* maximum message type */
+};
 
+/*
+ * Wstat ops come with associated data, in the order
+ * of the bit flags.
+ */
+enum{
 	/* wstat flags */
-	Owsize	= 1<<4,
-	Owmode	= 1<<5,
-	Owmtime	= 1<<6,
-	Owatime	= 1<<7,
+	Owsize	= 1<<0,	/* [8]fsize: update file size */
+	Owmode	= 1<<1,	/* [4]mode: update file mode */
+	Owmtime	= 1<<2, /* [8]mtime: update mtime, in nsec */
+	Owatime	= 1<<3, /* [8]atime: update atime, in nsec */
 };
 
 /*
@@ -265,16 +277,22 @@ enum {
 enum {
 	/* 1-wide entries */
 	LogAlloc1,	/* alloc a block */
-	LogFree1,	/* alloc a block */
-	LogDead1,	/* free a block */
+	LogFree1,	/* free a block */
 	LogFlush,	/* flush log, bump gen */
 	LogChain,	/* point to next log block */
 	LogEnd,		/* last entry in log */	
 
 	/* 2-wide entries */
-	Log2w	= 1<<5,
-	LogAlloc = LogAlloc1|Log2w,	/* alloc a range */
-	LogFree	= LogFree1|Log2w,	/* free a range */
+#define	Log2wide	LogAlloc
+	LogAlloc,	/* alloc a range */
+	LogFree,	/* free a range */
+	LogDead	,	/* deadlist a block */
+};
+
+struct Oplog {
+	vlong	head;	/* log head */
+	vlong	hash;	/* log head hash */
+	Blk	*tail;	/* tail block open for writing */
 };
 
 struct Arange {
@@ -304,9 +322,11 @@ struct Bptr {
 
 struct Tree {
 	Lock	lk;
-	Bptr	bp;
-	Bptr	dp;
+	int	ref;
 	int	ht;
+	Bptr	bp;
+	vlong	prev[Ndead];
+	Oplog	dead[Ndead];
 };
 
 struct Bfree {
@@ -366,12 +386,6 @@ struct Gefs {
 	int	cmax;
 };
 
-struct Oplog {
-	vlong	head;	/* log head */
-	vlong	hash;	/* log head hash */
-	Blk	*tail;	/* tail block open for writing */
-};
-
 struct Arena {
 	Lock;
 	Avltree *free;
@@ -427,6 +441,7 @@ struct Dent {
 
 struct Mount {
 	long	ref;
+	vlong	gen;
 	char	*name;
 	Tree	root;
 };

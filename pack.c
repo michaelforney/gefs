@@ -267,21 +267,106 @@ kv2qid(Kvp *kv, Qid *q)
 }
 
 char*
-packbp(char *p, Bptr *bp)
+packbp(char *p, int sz, Bptr *bp)
 {
-	PBIT64(p + 0, bp->addr);
-	PBIT64(p + 8, bp->hash);
-	PBIT64(p + 16, bp->gen);
-	return p + 24;
+	assert(sz >= Ptrsz);
+	PBIT64(p, bp->addr);	p += 8;
+	PBIT64(p, bp->hash);	p += 8;
+	PBIT64(p, bp->gen);	p += 8;
+	return p;
 }
 
 Bptr
-unpackbp(char *p)
+unpackbp(char *p, int sz)
 {
 	Bptr bp;
 
-	bp.addr = GBIT64(p + 0);
-	bp.hash = GBIT64(p + 8);
-	bp.gen = GBIT64(p + 16);
+	assert(sz >= Ptrsz);
+	bp.addr = GBIT64(p);	p += 8;
+	bp.hash = GBIT64(p);	p += 8;
+	bp.gen = GBIT64(p);
 	return bp;
+}
+
+char*
+packdkey(char *p, int sz, vlong up, char *name)
+{
+	char *ep;
+	int err;
+
+	err = 0;
+	ep = p + sz;
+	p = pack8(&err, p, ep, Kent);
+	p = pack64(&err, p, ep, up);
+	p = packstr(&err, p, ep, name);
+	if(err)
+		return 0;
+	return p;
+}
+
+Tree*
+unpacktree(Tree *t, char *p, int sz)
+{
+	int i, j;
+	Bptr bp;
+	Blk *b;
+
+	assert(sz >= Treesz);
+	memset(t, 0, sizeof(Tree));
+	t->ref = GBIT32(p);		p += 4;
+	t->ht = GBIT32(p);		p += 4;
+	t->bp.addr = GBIT64(p);		p += 8;
+	t->bp.hash = GBIT64(p);		p += 8;
+	t->bp.gen = GBIT64(p);		p += 8;
+	for(i = 0; i < Ndead; i++){
+		t->prev[i] = GBIT64(p);		p += 8;
+		t->dead[i].head = GBIT64(p);	p += 8;
+		t->dead[i].hash = GBIT64(p);	p += 8;
+		bp.addr = GBIT64(p);		p += 8;
+		bp.hash = GBIT64(p);		p += 8;
+		bp.gen = -1;
+		if(bp.addr == -1)
+			continue;
+		if((b = getblk(bp, 0)) == nil){
+			for(j = 0; j < i; j++)
+				putblk(t->dead[j].tail);
+			return nil;
+		}
+		t->dead[i].tail	= b;
+		cacheblk(b);		
+	}
+	return t;
+}
+
+char*
+packtree(char *p, int sz, Tree *t)
+{
+	vlong tladdr, tlhash;
+	Blk *tl;
+	int i;
+
+	assert(sz >= Treesz);
+	PBIT32(p, t->ref);	p += 4;
+	PBIT32(p, t->ht);	p += 4;
+	PBIT64(p, t->bp.addr);	p += 8;
+	PBIT64(p, t->bp.hash);	p += 8;
+	PBIT64(p, t->bp.gen);	p += 8;
+	for(i = 0; i < Ndead; i++){
+		tladdr = -1;
+		tlhash = -1;
+		if(t->dead[i].tail != nil){
+			tl = t->dead[i].tail;
+			lock(tl);
+			assert(tl->flag & Bfinal);
+			unlock(tl);
+			tladdr = tl->bp.addr;
+			tlhash = tl->bp.hash;
+		}
+		PBIT64(p, t->prev[i]);		p += 8;
+		PBIT64(p, t->dead[i].head);	p += 8;
+		PBIT64(p, t->dead[i].hash);	p += 8;
+		PBIT64(p, tladdr);		p += 8;
+		PBIT64(p, tlhash);		p += 8;
+	}
+	return p;
 }

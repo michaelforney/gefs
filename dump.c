@@ -339,8 +339,7 @@ showsnap(int fd, char **ap, int na)
 		for(i = 0; i < Ndead; i++){
 			fprint(fd, "\tdeadlist %d\n", i);
 			fprint(fd, "\t\tprev:\t%llx\n", t.prev[i]);
-			fprint(fd, "\t\tfheadp:\t%llx\n", t.dead[i].head);
-			fprint(fd, "\t\tfheadh:\t%llx\n", t.dead[i].hash);
+			fprint(fd, "\t\tfhead:\t%B\n", t.dead[i].head);
 			if(t.dead[i].tail != nil){
 				fprint(fd, "\t\tftailp:%llx\n", t.dead[i].tail->bp.addr);
 				fprint(fd, "\t\tftailh:%llx\n", t.dead[i].tail->bp.hash);

@@ -308,7 +308,7 @@ Tree*
 unpacktree(Tree *t, char *p, int sz)
 {
 	int i, j;
-	Bptr bp;
+	Bptr bp, head;
 	Blk *b;
 
 	assert(sz >= Treesz);
@@ -319,11 +319,12 @@ unpacktree(Tree *t, char *p, int sz)
 	t->bp.hash = GBIT64(p);		p += 8;
 	t->bp.gen = GBIT64(p);		p += 8;
 	for(i = 0; i < Ndead; i++){
-		t->prev[i] = GBIT64(p);		p += 8;
-		t->dead[i].head = GBIT64(p);	p += 8;
-		t->dead[i].hash = GBIT64(p);	p += 8;
-		bp.addr = GBIT64(p);		p += 8;
-		bp.hash = GBIT64(p);		p += 8;
+		t->prev[i] = GBIT64(p);	p += 8;
+		head.addr = GBIT64(p);	p += 8;
+		head.hash = GBIT64(p);	p += 8;
+		head.gen = -1;
+		bp.addr = GBIT64(p);	p += 8;
+		bp.hash = GBIT64(p);	p += 8;
 		bp.gen = -1;
 		if(bp.addr == -1)
 			continue;
@@ -332,6 +333,7 @@ unpacktree(Tree *t, char *p, int sz)
 				putblk(t->dead[j].tail);
 			return nil;
 		}
+		t->dead[i].head = head;
 		t->dead[i].tail	= b;
 		cacheblk(b);		
 	}
@@ -342,6 +344,7 @@ char*
 packtree(char *p, int sz, Tree *t)
 {
 	vlong tladdr, tlhash;
+	Bptr head;
 	Blk *tl;
 	int i;
 
@@ -362,11 +365,12 @@ packtree(char *p, int sz, Tree *t)
 			tladdr = tl->bp.addr;
 			tlhash = tl->bp.hash;
 		}
-		PBIT64(p, t->prev[i]);		p += 8;
-		PBIT64(p, t->dead[i].head);	p += 8;
-		PBIT64(p, t->dead[i].hash);	p += 8;
-		PBIT64(p, tladdr);		p += 8;
-		PBIT64(p, tlhash);		p += 8;
+		head = t->dead[i].head;
+		PBIT64(p, t->prev[i]);	p += 8;
+		PBIT64(p, head.addr);	p += 8;
+		PBIT64(p, head.hash);	p += 8;
+		PBIT64(p, tladdr);	p += 8;
+		PBIT64(p, tlhash);	p += 8;
 	}
 	return p;
 }

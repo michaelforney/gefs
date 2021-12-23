@@ -169,7 +169,7 @@ grabrange(Avltree *t, vlong off, vlong len)
 }
 
 Blk*
-logappend(Oplog *ol, Arena *a, vlong off, vlong len, int op)
+logappend(Oplog *ol, Arena *a, vlong off, vlong len, vlong val, int op)
 {
 	Blk *pb, *lb;
 	vlong o;
@@ -220,7 +220,7 @@ logappend(Oplog *ol, Arena *a, vlong off, vlong len, int op)
 	PBIT64(p, off);
 	lb->logsz += 8;
 	if(op >= Log2wide){
-		PBIT64(p+8, len);
+		PBIT64(p+8, val);
 		lb->logsz += 8;
 	}
 	/* this gets overwritten by the next append */
@@ -244,10 +244,10 @@ deadlistappend(Tree *t, Bptr bp)
 			break;
 		}
 	}
-	if((b = logappend(l, nil, bp.addr, Blksz, LogDead)) == nil)
+	if((b = logappend(l, nil, bp.addr, Blksz, bp.gen, LogDead)) == nil)
 		return -1;
-	if(l->head == -1)
-		l->head = b->bp.addr;
+	if(l->head.addr == -1)
+		l->head = b->bp;
 	if(l->tail != b)
 		l->tail = b;
 	return 0;
@@ -264,31 +264,88 @@ freelistappend(Arena *a, vlong off, int op)
 {
 	Blk *b;
 
-	if((b = logappend(&a->log, a, off, Blksz, op)) == nil)
+	if((b = logappend(&a->log, a, off, Blksz, Blksz, op)) == nil)
 		return -1;
-	if(a->log.head == -1)
-		a->log.head = b->bp.addr;
+	if(a->log.head.addr == -1)
+		a->log.head = b->bp;
 	if(a->log.tail != b)
 		a->log.tail = b;
 	return 0;
 }
 
 int
-loadlog(Arena *a)
+scandead(Bptr bp, int (*fn)(Bptr))
 {
-	vlong bp, ent, off, len;
+	vlong ent, off;
 	int op, i, n;
 	uvlong bh;
+	Bptr dead;
+	char *d;
+	Blk *b;
+
+Nextblk:
+	if((b = getblk(bp, GBnochk)) == nil)
+		return -1;
+	bh = GBIT64(b->data);
+	/* the hash covers the log and offset */
+	if(bh != siphash(b->data+8, Blkspc-8)){
+		werrstr("corrupt log");
+		return -1;
+	}
+	for(i = Loghdsz; i < Logspc; i += n){
+		d = b->data + i;
+		ent = GBIT64(d);
+		op = ent & 0xff;
+		off = ent & ~0xff;
+		n = (op >= Log2wide) ? 16 : 8;
+		switch(op){
+		case LogDead:
+			dead.addr = ent;
+			dead.hash = -1;
+			dead.gen = GBIT64(d+8);
+			fn(dead);
+			break;
+		case LogEnd:
+			dprint("log@%d: end\n", i);
+			/*
+			 * since we want the next insertion to overwrite
+			 * this, don't include the size in this entry.
+			 */
+			b->logsz = i;
+			return 0;
+		case LogChain:
+			bp.addr = off & ~0xff;
+			bp.hash = -1;
+			bp.gen = -1;
+			dprint("log@%d: chain %B\n", i, bp);
+			b->logsz = i+n;
+			goto Nextblk;
+			break;
+		default:
+			n = 0;
+			dprint("log@%d: log op %d\n", i, op);
+			abort();
+			break;
+		}
+	}
+	return 0;
+}
+
+int
+loadlog(Arena *a)
+{
+	vlong ent, off, len;
+	int op, i, n;
+	uvlong bh;
+	Bptr bp;
 	char *d;
 	Blk *b;
 
 
 	bp = a->log.head;
-
 Nextblk:
-	if((b = readblk(bp, 0)) == nil)
+	if((b = getblk(bp, GBnochk)) == nil)
 		return -1;
-	cacheblk(b);
 	bh = GBIT64(b->data);
 	/* the hash covers the log and offset */
 	if(bh != siphash(b->data+8, Blkspc-8)){
@@ -311,8 +368,10 @@ Nextblk:
 			b->logsz = i;
 			return 0;
 		case LogChain:
-			bp = off & ~0xff;
-			dprint("log@%d: chain %llx\n", i, bp);
+			bp.addr = off & ~0xff;
+			bp.hash = -1;
+			bp.gen = -1;
+			dprint("log@%d: chain %B\n", i, bp);
 			b->logsz = i+n;
 			goto Nextblk;
 			break;
@@ -424,12 +483,11 @@ compresslog(Arena *a)
 		return -1;
 	}
 	hd = b;
-	ol.hash = -1;
-	ol.head = b->bp.addr;
+	ol.head = b->bp;
 	ol.tail = b;
 	b->logsz = Loghdsz;
 	for(i = 0; i < n; i++)
-		if((b = logappend(&ol, a, log[i].off, log[i].len, LogFree)) == nil)
+		if((b = logappend(&ol, a, log[i].off, log[i].len, log[i].len, LogFree)) == nil)
 			return -1;
 	p = b->data + b->logsz;
 	PBIT64(p, LogChain|graft);
@@ -438,12 +496,13 @@ compresslog(Arena *a)
 	if(syncblk(b) == -1)
 		return -1;
 
-	oldhd = a->log.head;
-	a->log.head = hd->bp.addr;
-	a->log.hash = blkhash(hd);
+	oldhd = a->log.head.addr;
+	a->log.head.addr = hd->bp.addr;
+	a->log.head.hash = blkhash(hd);
+	a->log.head.gen = -1;
 	ab = a->b;
-	PBIT64(ab->data + 0, a->log.head);
-	PBIT64(ab->data + 8, a->log.hash);
+	PBIT64(ab->data + 0, a->log.head.addr);
+	PBIT64(ab->data + 8, a->log.head.hash);
 	finalize(ab);
 	if(syncblk(ab) == -1)
 		return -1;
@@ -684,6 +743,7 @@ Blk*
 getblk(Bptr bp, int flg)
 {
 	Blk *b;
+	uvlong h;
 
 	if((b = lookupblk(bp.addr)) != nil)
 		return cacheblk(b);
@@ -698,13 +758,14 @@ getblk(Bptr bp, int flg)
 		qunlock(&blklock);
 		return nil;
 	}
-	if(blkhash(b) != bp.hash){
+	h = blkhash(b);
+	if((flg&GBnochk) == 0 && h != bp.hash){
 		fprint(2, "corrupt block %B: %llx != %llx\n", bp, blkhash(b), bp.hash);
 		qunlock(&blklock);
 		abort();
 		return nil;
 	}
-	b->bp.hash = bp.hash;
+	b->bp.hash = h;
 	b->bp.gen = bp.gen;
 	cacheblk(b);
 	qunlock(&blklock);

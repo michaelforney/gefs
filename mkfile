@@ -13,7 +13,7 @@ OFILES=\
 	main.$O\
 	pack.$O\
 	ream.$O\
-	sync.$O\
+	snap.$O\
 	tree.$O\
 
 HFILES=\

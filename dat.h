@@ -245,7 +245,7 @@ enum {
 enum {
 	GBraw	= 1<<0,
 	GBwrite	= 1<<1,
-	GBunchk	= 1<<2,
+	GBnochk	= 1<<2,
 };
 
 enum {
@@ -289,9 +289,14 @@ enum {
 	LogDead	,	/* deadlist a block */
 };
 
+struct Bptr {
+	vlong	addr;
+	vlong	hash;
+	vlong	gen;
+};
+
 struct Oplog {
-	vlong	head;	/* log head */
-	vlong	hash;	/* log head hash */
+	Bptr	head;
 	Blk	*tail;	/* tail block open for writing */
 };
 
@@ -312,12 +317,6 @@ struct Fmsg {
 	QLock	*wrlk;	/* write lock on fd */
 	int	sz;	/* the size of the message buf */
 	uchar	buf[];
-};
-
-struct Bptr {
-	vlong	addr;
-	vlong	hash;
-	vlong	gen;
 };
 
 struct Tree {

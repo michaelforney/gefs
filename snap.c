@@ -104,6 +104,35 @@ modifysnap(vlong gen, char *name, int del)
 	return nil;
 }
 
+int
+snapfreebp(Bptr)
+{
+	return 0;
+}
+
+int
+movedead(Bptr)
+{
+	return 0;
+}
+
+char*
+deletesnap(Tree *s)
+{
+	Tree p;
+	char *e;
+	int i;
+
+	scandead(s->dead[0].head, snapfreebp);
+//	for(i = 1; i < Ndead-1; i++){
+//		if((e = opensnap(&p, s->prev[i])) != nil)
+//			return e;
+//		graftdead(s, s->prev[i], &s->dead[i]);
+//	}
+	scandead(s->dead[Ndead-1].head, movedead);
+	return nil;
+}
+
 char*
 labelsnap(vlong gen, char *name)
 {
@@ -165,88 +194,12 @@ snapshot(Tree *t, vlong *genp, vlong *oldp)
 		putblk(t->dead[Ndead-1].tail);
 	for(i = Ndead-1; i >= 0; i--){
 		t->prev[i] = i == 0 ? gen : t->prev[i-1];
-		t->dead[i].head = -1;
-		t->dead[i].hash = -1;
+		t->dead[i].head.addr = -1;
+		t->dead[i].head.hash = -1;
+		t->dead[i].head.gen = -1;
 		t->dead[i].tail = nil;
 	}
 	*genp = gen;
 	*oldp = t->prev[0];
 	return nil;
-}
-
-int
-sync(void)
-{
-	int i, r;
-	Blk *b, *s;
-	Arena *a;
-
-	qlock(&fs->snaplk);
-	r = 0;
-	s = fs->super;
-	fillsuper(s);
-	enqueue(s);
-
-	for(i = 0; i < fs->narena; i++){
-		a = &fs->arenas[i];
-		finalize(a->log.tail);
-		if(syncblk(a->log.tail) == -1)
-			r = -1;
-	}
-	for(b = fs->chead; b != nil; b = b->cnext){
-		if(!(b->flag & Bdirty))
-			continue;
-		if(syncblk(b) == -1)
-			r = -1;
-	}
-	if(r != -1)
-		r = syncblk(s);
-
-	qunlock(&fs->snaplk);
-	return r;
-}
-
-void
-quiesce(int tid)
-{
-	int i, allquiesced;
-	Bfree *p, *n;
-
-	lock(&fs->activelk);
-	allquiesced = 1;
-	fs->active[tid]++;
-	for(i = 0; i < fs->nproc; i++){
-		/*
-		 * Odd parity on quiescence implies
-		 * that we're between the exit from
-		 * and waiting for the next message
-		 * that enters us into the critical
-		 * section.
-		 */
-		if((fs->active[i] & 1) == 0)
-			continue;
-		if(fs->active[i] == fs->lastactive[i])
-			allquiesced = 0;
-	}
-	if(allquiesced)
-		for(i = 0; i < fs->nproc; i++)
-			fs->lastactive[i] = fs->active[i];
-	unlock(&fs->activelk);
-	if(!allquiesced)
-		return;
-
-	lock(&fs->freelk);
-	p = nil;
-	if(fs->freep != nil){
-		p = fs->freep->next;
-		fs->freep->next = nil;
-	}
-	unlock(&fs->freelk);
-
-	while(p != nil){
-		n = p->next;
-		reclaimblk(p->bp);
-		p = n;
-	}
-	fs->freep = fs->freehd;
 }

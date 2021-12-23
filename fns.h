@@ -42,6 +42,7 @@ int	loadarena(Arena*, vlong);
 void	loadfs(char*);
 int	sync(void);
 int	loadlog(Arena*);
+int	scandead(Bptr, int (*)(Bptr));
 int	endfs(void);
 int	compresslog(Arena*);
 void	setval(Blk*, int, Kvp*);

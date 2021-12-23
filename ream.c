@@ -68,8 +68,9 @@ initsnap(Blk *s, Blk *r)
 	t.bp = r->bp;
 	for(i = 0; i < Ndead; i++){
 		t.prev[i] = -1;
-		t.dead[i].head = -1;
-		t.dead[i].hash = -1;
+		t.dead[i].head.addr = -1;
+		t.dead[i].head.hash = -1;
+		t.dead[i].head.gen = -1;
 		t.dead[i].tail = nil;
 	}
 	p = packtree(vbuf, sizeof(vbuf), &t);
@@ -90,7 +91,10 @@ reamarena(Arena *a, vlong start, vlong asz)
 		sysfatal("ream: %r");
 	addr += Blksz;	/* arena header */
 
-	a->log.head = -1;
+	a->log.head.addr = -1;
+	a->log.head.hash = -1;
+	a->log.head.gen = -1;
+
 	memset(b, 0, sizeof(Blk));
 	b->type = Tlog;
 	b->bp.addr = addr;

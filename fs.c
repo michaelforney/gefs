@@ -419,7 +419,7 @@ dupfid(int new, Fid *f)
 	unlock(&fs->fidtablk);
 
 	if(o != nil){
-		werrstr("fid in use: %d == %d", o->fid, new);
+		fprint(2, "fid in use: %d == %d", o->fid, new);
 		abort();
 		free(n);
 		return nil;
@@ -595,8 +595,7 @@ fswalk(Fmsg *m)
 	prev = o->qpath;
 	r.type = Rwalk;
 	for(i = 0; i < m->nwname; i++){
-		up = prev;
-		if((p = packdkey(kbuf, sizeof(kbuf), up, m->wname[i])) == nil){
+		if((p = packdkey(kbuf, sizeof(kbuf), prev, m->wname[i])) == nil){
 			rerror(m, Elength);
 			putfid(o);
 			return;
@@ -611,6 +610,7 @@ fswalk(Fmsg *m)
 			putfid(o);
 			return;
 		}
+		up = prev;
 		prev = d.qid.path;
 		r.wqid[i] = d.qid;
 	}
@@ -921,6 +921,34 @@ fscreate(Fmsg *m)
 	putfid(f);
 }
 
+char*
+candelete(Fid *f)
+{
+	char *e, pfx[Dpfxsz];
+	int done;
+	Scan *s;
+
+	if(f->dent->qid.type == QTFILE)
+		return nil;
+	if((s = mallocz(sizeof(Scan), 1)) == nil)
+		return Enomem;
+
+	pfx[0] = Kent;
+	PBIT64(pfx+1, f->qpath);
+	if((e = btscan(&f->mnt->root, s, pfx, sizeof(pfx))) != nil){
+		btdone(s);
+		free(s);
+		return e;
+	}
+	done = 0;
+	if((e = btnext(s, &s->kv, &done)) != nil)
+		return e;
+	btdone(s);
+	if(done)
+		return nil;
+	return Enempty;
+}
+
 void
 fsremove(Fmsg *m)
 {
@@ -935,6 +963,12 @@ fsremove(Fmsg *m)
 	}
 
 	rlock(f->dent);
+	if((e = candelete(f)) != nil){
+		runlock(f->dent);
+		rerror(m, e);
+		clunkfid(f);
+		return;
+	}
 	mb.op = Odelete;
 	mb.k = f->dent->k;
 	mb.nk = f->dent->nk;
@@ -942,26 +976,27 @@ fsremove(Fmsg *m)
 	if((e = btupsert(&f->mnt->root, &mb, 1)) != nil){
 		runlock(f->dent);
 		rerror(m, e);
-		putfid(f);
+		clunkfid(f);
 		return;
 	}
-	if((e = clearb(f, 0, f->dent->length)) != nil){
-		runlock(f->dent);
-		rerror(m, e);
-		putfid(f);
-		return;
+	if(f->dent->qid.type == QTFILE){
+		if((e = clearb(f, 0, f->dent->length)) != nil){
+			runlock(f->dent);
+			rerror(m, e);
+			clunkfid(f);
+			return;
+		}
 	}
 	runlock(f->dent);
-	clunkfid(f);
 
 	if((e = updatesnap(f)) != nil){
 		rerror(m, e);
-		putfid(f);
+		clunkfid(f);
 		return;
 	}
 	r.type = Rremove;
 	respond(m, &r);
-	putfid(f);
+	clunkfid(f);
 }
 
 int
@@ -1034,7 +1069,7 @@ fsopen(Fmsg *m)
 char*
 fsreaddir(Fmsg *m, Fid *f, Fcall *r)
 {
-	char pfx[9], *p, *e;
+	char pfx[Dpfxsz], *p, *e;
 	int n, ns, done;
 	Scan *s;
 	Dir d;

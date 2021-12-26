@@ -52,6 +52,7 @@ enum {
 	Fillsz	= 2,			/* block fill count */
 	Offksz	= 17,			/* type, qid, off */
 	Snapsz	= 9,			/* tag, snapid */
+	Dpfxsz	= 9,
 	Ndead	= 8,			/* number of deadlist heads */
 	Deadsz	= 8+8+8+8+8,		/* prev, head, head hash, tail, tail hash */
 	Treesz	= 8+Ptrsz+Ndead*Deadsz,	/* ref, height, root, deadlist */
@@ -124,6 +125,7 @@ enum {
 #define Ewstatq	"wstat -- qid.type/dir.mode mismatch"
 #define Ewstatu	"wstat -- not owner"
 #define Ewstatv	"wstat -- attempt to change qid.vers"
+#define Enempty	"remove -- directory not empty"
 
 
 //#define Echar		"bad character in directory name",
@@ -139,7 +141,6 @@ enum {
 //#define Ephase	"phase error -- cannot happen",
 //#define Eexist	"create/wstat -- file exists",
 //#define Edot		"create/wstat -- . and .. illegal names",
-//#define Eempty	"remove -- directory not empty",
 //#define Ewalk		"walk -- too many (system wide)",
 //#define Eronly	"file system read only",
 //#define Efull		"file system full",

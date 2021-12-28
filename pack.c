@@ -315,6 +315,7 @@ unpacktree(Tree *t, char *p, int sz)
 	memset(t, 0, sizeof(Tree));
 	t->ref = GBIT32(p);		p += 4;
 	t->ht = GBIT32(p);		p += 4;
+	t->gen = GBIT64(p);		p += 8;
 	t->bp.addr = GBIT64(p);		p += 8;
 	t->bp.hash = GBIT64(p);		p += 8;
 	t->bp.gen = GBIT64(p);		p += 8;
@@ -323,6 +324,7 @@ unpacktree(Tree *t, char *p, int sz)
 		head.addr = GBIT64(p);	p += 8;
 		head.hash = GBIT64(p);	p += 8;
 		head.gen = -1;
+		t->dead[i].head = head;
 		bp.addr = GBIT64(p);	p += 8;
 		bp.hash = GBIT64(p);	p += 8;
 		bp.gen = -1;
@@ -333,7 +335,6 @@ unpacktree(Tree *t, char *p, int sz)
 				putblk(t->dead[j].tail);
 			return nil;
 		}
-		t->dead[i].head = head;
 		t->dead[i].tail	= b;
 		cacheblk(b);		
 	}
@@ -341,7 +342,7 @@ unpacktree(Tree *t, char *p, int sz)
 }
 
 char*
-packtree(char *p, int sz, Tree *t)
+packtree(char *p, int sz, Tree *t, int refs)
 {
 	vlong tladdr, tlhash;
 	Bptr head;
@@ -349,8 +350,9 @@ packtree(char *p, int sz, Tree *t)
 	int i;
 
 	assert(sz >= Treesz);
-	PBIT32(p, t->ref);	p += 4;
+	PBIT32(p, refs);	p += 4;
 	PBIT32(p, t->ht);	p += 4;
+	PBIT64(p, t->gen);	p += 8;
 	PBIT64(p, t->bp.addr);	p += 8;
 	PBIT64(p, t->bp.hash);	p += 8;
 	PBIT64(p, t->bp.gen);	p += 8;

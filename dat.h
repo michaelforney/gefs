@@ -33,6 +33,7 @@ enum {
 	Nrefbuf	= 1024,			/* number of ref incs before syncing */
 	Nfidtab	= 1024,			/* number of fit hash entries */
 	Ndtab	= 1024,			/* number of dir tab entries */
+	Nttab	= 32,			/* number of tree tab entries */
 	Max9p	= 16*KiB,		/* biggest message size we're willing to negotiate */
 	Nsec	= 1000*1000*1000,	/* nanoseconds to the second */
 	Maxname	= 256,			/* maximum size of a name element */
@@ -55,7 +56,7 @@ enum {
 	Dpfxsz	= 9,
 	Ndead	= 8,			/* number of deadlist heads */
 	Deadsz	= 8+8+8+8+8,		/* prev, head, head hash, tail, tail hash */
-	Treesz	= 8+Ptrsz+Ndead*Deadsz,	/* ref, height, root, deadlist */
+	Treesz	= 4+4+8+Ptrsz+Ndead*Deadsz,	/* ref, height, gen, root, deadlist */
 	Kvmax	= Keymax + Inlmax,	/* Key and value */
 	Kpmax	= Keymax + Ptrsz,	/* Key and pointer */
 	Wstatmax = 4+8+8+8,		/* mode, size, atime, mtime */
@@ -322,9 +323,13 @@ struct Fmsg {
 
 struct Tree {
 	Lock	lk;
-	int	ref;
+	Tree	*hnext;
+
+	long	memref;	/* number of in-memory references to this */
+	int	ref;	/* number of on-disk references to this */
 	int	ht;
 	Bptr	bp;
+	vlong	gen;
 	vlong	prev[Ndead];
 	Oplog	dead[Ndead];
 };
@@ -339,12 +344,13 @@ struct Bfree {
  * Shadows the superblock contents.
  */
 struct Gefs {
-	int	blksz;
-	int	bufsz;
-	int	pivsz;
-	int	hdrsz;
+	int	blksz;	/* immutable */
+	int	bufsz;	/* immutable */
+	int	pivsz;	/* immutable */
+	int	hdrsz;	/* immutable */
 
-	QLock	snaplk;
+	QLock	snaplk;	/* snapshot lock */
+	Tree	*ttab[Nttab];
 	Blk*	super;
 
 	Chan	*wrchan;
@@ -363,7 +369,6 @@ struct Gefs {
 
 	Tree	snap;
 
-	Lock	qidlk;
 	uvlong	nextqid;
 	uvlong	nextgen; /* unlocked: only touched by mutator thread */
 
@@ -443,7 +448,7 @@ struct Mount {
 	long	ref;
 	vlong	gen;
 	char	*name;
-	Tree	root;
+	Tree	*root;
 };
 
 struct Fid {

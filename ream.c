@@ -65,6 +65,7 @@ initsnap(Blk *s, Blk *r)
 	memset(&t, 0, sizeof(Tree));
 	t.ref = 1;
 	t.ht = 1;
+	t.gen = 0;
 	t.bp = r->bp;
 	for(i = 0; i < Ndead; i++){
 		t.prev[i] = -1;
@@ -73,7 +74,7 @@ initsnap(Blk *s, Blk *r)
 		t.dead[i].head.gen = -1;
 		t.dead[i].tail = nil;
 	}
-	p = packtree(vbuf, sizeof(vbuf), &t);
+	p = packtree(vbuf, sizeof(vbuf), &t, 2);
 	kv.v = vbuf;
 	kv.nv = p - vbuf;
 	setval(s, 1, &kv);
@@ -146,6 +147,8 @@ reamfs(char *dev)
 		sysfatal("ream: %r");
 	if((mnt = mallocz(sizeof(Mount), 1)) == nil)
 		sysfatal("ream: alloc mount: %r");
+	if((mnt->root = mallocz(sizeof(Tree), 1)) == nil)
+		sysfatal("ream: alloc tree: %r");
 	fs->super = sb;
 	refblk(sb);
 
@@ -188,8 +191,8 @@ reamfs(char *dev)
 	finalize(tb);
 	syncblk(tb);
 
-	mnt->root.ht = 1;
-	mnt->root.bp = tb->bp;
+	mnt->root->ht = 1;
+	mnt->root->bp = tb->bp;
 
 	/*
 	 * Now that we have a completely empty fs, give it

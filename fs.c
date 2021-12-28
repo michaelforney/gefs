@@ -16,18 +16,21 @@ updatesnap(Fid *f)
 	vlong gen, old;
 	char *e;
 
-	if((e = snapshot(&f->mnt->root, &gen, &old)) != nil){
+	if((e = newsnap(f->mnt->root, &gen, &old)) != nil){
 		fprint(2, "snap: save %s: %s\n", f->mnt->name, e);
 		abort();
 	}
-	if((e = labelsnap(gen, f->mnt->name)) != nil){
+	if((e = labelsnap(f->mnt->name, gen)) != nil){
 		fprint(2, "snap: save %s: %s\n", f->mnt->name, e);
 		abort();
 	}
-	if((e = unrefsnap(old)) != nil){
-		fprint(2, "snap: unref old: %s\n", e);
-		abort();
+	if(old >= 0){
+		if((e = unrefsnap(old, gen)) != nil){
+			fprint(2, "snap: unref old: %s\n", e);
+			abort();
+		}
 	}
+	sync();
 	return nil;
 }
 
@@ -47,17 +50,6 @@ okname(char *name)
 			return -1;
 	}
 	return -1;
-}
-
-static vlong
-nextqid(void)
-{
-	vlong q;
-
-	lock(&fs->qidlk);
-	q = fs->nextqid++;
-	unlock(&fs->qidlk);
-	return q;
 }
 
 Chan*
@@ -166,7 +158,7 @@ lookup(Fid *f, Key *k, Kvp *kv, char *buf, int nbuf, int lk)
 		return Eattach;
 	if(lk)
 		rlock(f->dent);
-	e = btlookup(&f->mnt->root, k, kv, buf, nbuf);
+	e = btlookup(f->mnt->root, k, kv, buf, nbuf);
 	if(lk)
 		runlock(f->dent);
 	return e;
@@ -192,7 +184,7 @@ clearb(Fid *f, vlong o, vlong sz)
 		PBIT64(m.k+9, o);
 		m.v = nil;
 		m.nv = 0;
-		if((e = btupsert(&f->mnt->root, &m, 1)) != nil)
+		if((e = btupsert(f->mnt->root, &m, 1)) != nil)
 			return e;
 	}
 	return nil;
@@ -266,7 +258,7 @@ writeb(Fid *f, Msg *m, Bptr *ret, char *s, vlong o, vlong n, vlong sz)
 		if((t = getblk(bp, GBraw)) == nil)
 			return -1;
 		memcpy(b->buf, t->buf, Blksz);
-		freeblk(&f->mnt->root, t);
+		freeblk(f->mnt->root, t);
 		putblk(t);
 	}
 	if(fo+n > Blksz)
@@ -516,11 +508,9 @@ fsattach(Fmsg *m, int iounit)
 		rerror(m, Emem);
 		return;
 	}
-
-	print("attach %s\n", m->aname);
 	mnt->name = strdup(m->aname);
-	if((e = opensnap(&mnt->root, m->aname)) != nil){
-		rerror(m, e);
+	if((mnt->root = opensnap(m->aname)) == nil){
+		rerror(m, Enosnap);
 		return;
 	}
 
@@ -530,7 +520,7 @@ fsattach(Fmsg *m, int iounit)
 	}
 	dk.k = dbuf;
 	dk.nk = p - dbuf;
-	if((e = btlookup(&mnt->root, &dk, &kv, kvbuf, sizeof(kvbuf))) != nil){
+	if((e = btlookup(mnt->root, &dk, &kv, kvbuf, sizeof(kvbuf))) != nil){
 		rerror(m, e);
 		return;
 	}
@@ -660,7 +650,7 @@ fsstat(Fmsg *m)
 		rerror(m, Efid);
 		return;
 	}
-	if((err = btlookup(&f->mnt->root, f->dent, &kv, kvbuf, sizeof(kvbuf))) != nil){
+	if((err = btlookup(f->mnt->root, f->dent, &kv, kvbuf, sizeof(kvbuf))) != nil){
 		rerror(m, err);
 		putfid(f);
 		return;
@@ -735,7 +725,7 @@ fswstat(Fmsg *m)
 		mb[nm].op = Odelete;
 		mb[nm].Key = f->dent->Key;
 		nm++;
-		if((e = btlookup(&f->mnt->root, f->dent, &kv, kvbuf, sizeof(kvbuf))) != nil){
+		if((e = btlookup(f->mnt->root, f->dent, &kv, kvbuf, sizeof(kvbuf))) != nil){
 			rerror(m, e);
 			goto Out;
 		}
@@ -784,7 +774,7 @@ fswstat(Fmsg *m)
 	if(sync){
 		rerror(m, Eimpl);
 	}else{
-		if((e = btupsert(&f->mnt->root, mb, nm)) != nil){
+		if((e = btupsert(f->mnt->root, mb, nm)) != nil){
 			rerror(m, e);
 			goto Out;
 		}
@@ -856,7 +846,7 @@ fscreate(Fmsg *m)
 		d.qid.type |= QTEXCL;
 	if(m->perm & DMTMP)
 		d.qid.type |= QTTMP;
-	d.qid.path = nextqid();
+	d.qid.path = inc64(&fs->nextqid, 1);
 	d.qid.vers = 0;
 	d.mode = m->perm;
 	d.name = m->name;
@@ -872,7 +862,7 @@ fscreate(Fmsg *m)
 		putfid(f);
 		return;
 	}
-	if((e = btupsert(&f->mnt->root, &mb, 1)) != nil){
+	if((e = btupsert(f->mnt->root, &mb, 1)) != nil){
 		rerror(m, e);
 		putfid(f);
 		return;
@@ -935,7 +925,7 @@ candelete(Fid *f)
 
 	pfx[0] = Kent;
 	PBIT64(pfx+1, f->qpath);
-	if((e = btscan(&f->mnt->root, s, pfx, sizeof(pfx))) != nil){
+	if((e = btscan(f->mnt->root, s, pfx, sizeof(pfx))) != nil){
 		btdone(s);
 		free(s);
 		return e;
@@ -973,7 +963,7 @@ fsremove(Fmsg *m)
 	mb.k = f->dent->k;
 	mb.nk = f->dent->nk;
 	mb.nv = 0;
-	if((e = btupsert(&f->mnt->root, &mb, 1)) != nil){
+	if((e = btupsert(f->mnt->root, &mb, 1)) != nil){
 		runlock(f->dent);
 		rerror(m, e);
 		clunkfid(f);
@@ -1083,7 +1073,7 @@ fsreaddir(Fmsg *m, Fid *f, Fcall *r)
 
 		pfx[0] = Kent;
 		PBIT64(pfx+1, f->qpath);
-		if((e = btscan(&f->mnt->root, s, pfx, sizeof(pfx))) != nil){
+		if((e = btscan(f->mnt->root, s, pfx, sizeof(pfx))) != nil){
 			free(r->data);
 			btdone(s);
 			return e;
@@ -1238,7 +1228,7 @@ fswrite(Fmsg *m)
 		n = writeb(f, &kv[i], &bp[i], p, o, c, f->dent->length);
 		if(n == -1){
 			for(j = 0; j < i; j++)
-				freebp(&f->mnt->root, bp[i]);
+				freebp(f->mnt->root, bp[i]);
 			wunlock(f->dent);
 			rerror(m, "%r");
 			putfid(f);
@@ -1261,7 +1251,7 @@ fswrite(Fmsg *m)
 	}
 	kv[i].v = sbuf;
 	kv[i].nv = p - sbuf;
-	if((e = btupsert(&f->mnt->root, kv, i+1)) != nil){
+	if((e = btupsert(f->mnt->root, kv, i+1)) != nil){
 		rerror(m, e);
 		putfid(f);
 		abort();

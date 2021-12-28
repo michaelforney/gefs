@@ -342,6 +342,29 @@ statupdate(Kvp *kv, Msg *m)
 		fprint(2, "malformed wstat message");
 }
 
+static char*
+dropsnap(Kvp *t, Msg *m)
+{
+	char *e, buf[Msgmax];
+	Tree snap, from;
+	Kvp kv;
+	Key k;
+
+	qlock(&fs->snaplk);
+	if(unpacktree(&snap, t->v, t->nv) == nil)
+		return Efs;
+	k.k = m->v;
+	k.nk = m->nv;
+	if((e = btlookup(&fs->snap, &k, &kv, buf, sizeof(buf))) != nil)
+		return e;
+	if(unpacktree(&from, kv.v, kv.nv) == nil)
+		return Efs;
+	if((e = freesnap(&snap, &from)) != nil)
+		return e;
+	qunlock(&fs->snaplk);
+	return nil;
+}
+
 int
 apply(Kvp *kv, Msg *m, char *buf, int nbuf)
 {
@@ -368,8 +391,7 @@ apply(Kvp *kv, Msg *m, char *buf, int nbuf)
 		assert(keycmp(kv, m) == 0);
 		refs = GBIT32(kv->v) - 1;
 		if(refs == 0){
-			dprint("removing snap %P\n", kv);
-//			freesnap(&t);
+			dropsnap(kv, m);
 			return 0;
 		}
 		PBIT32(kv->v, refs);

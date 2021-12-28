@@ -273,8 +273,8 @@ showblk(int fd, Blk *b, char *m, int recurse)
 void
 showtree(int fd, char **ap, int na)
 {
-	char *e, *name;
-	Tree t;
+	char *name;
+	Tree *t;
 	Blk *b;
 	int h;
 
@@ -283,22 +283,53 @@ showtree(int fd, char **ap, int na)
 	if(na == 1)
 		name = ap[0];
 	if(strcmp(name, "dump") == 0)
-		t = fs->snap;
-	else if((e = opensnap(&t, name)) != nil){
-		fprint(fd, "open %s: %s\n", name, e);
+		t = &fs->snap;
+	else if((t = opensnap(name)) == nil){
+		fprint(fd, "open %s: %r\n", name);
 		return;
 	}
-	b = getroot(&t, &h);
-	fprint(fd, "=== [%s] %B @%d\n", name, t.bp, t.ht);
+	b = getroot(t, &h);
+	fprint(fd, "=== [%s] %B @%d\n", name, t->bp, t->ht);
 	rshowblk(fd, b, 0, 1);
 	putblk(b);
+}
+
+static void
+showdeadbp(Bptr bp, void *p)
+{
+	fprint(*(int*)p, "\t\t\t%B\n", bp);
+}
+
+void
+showtreeroot(int fd, Tree *t)
+{
+	int i;
+
+	fprint(fd, "\tref:\t%d\n", t->ref);
+	fprint(fd, "\tgen:\t%lld\n", t->gen);
+	fprint(fd, "\tht:\t%d\n", t->ht);
+	fprint(fd, "\tbp:\t%B\n", t->bp);
+	for(i = 0; i < Ndead; i++){
+		fprint(fd, "\tdeadlist %d\n", i);
+		fprint(fd, "\t\tprev:\t%llx\n", t->prev[i]);
+		fprint(fd, "\t\tfhead:\t%B\n", t->dead[i].head);
+		if(t->dead[i].tail != nil){
+			fprint(fd, "\t\tftailp:%llx\n", t->dead[i].tail->bp.addr);
+			fprint(fd, "\t\tftailh:%llx\n", t->dead[i].tail->bp.hash);
+		}else{
+			fprint(fd, "\t\tftailp:\t-1\n");
+			fprint(fd, "\t\tftailh:\t-1\n");
+		}
+		fprint(fd, "\t\tdead[%d]: (%B)\n", i, t->dead[i].head);
+		scandead(&t->dead[i], showdeadbp, &fd);
+	}
 }
 
 void
 showsnap(int fd, char **ap, int na)
 {
 	char *e, pfx[Snapsz];
-	int i, sz, done;
+	int sz, done;
 	vlong id;
 	Scan *s;
 	Tree t;
@@ -331,23 +362,7 @@ showsnap(int fd, char **ap, int na)
 			fprint(fd, "unpack: garbled tree\n");
 			break;
 		}
-		fprint(fd, "\tref:\t%d\n", t.ref);
-		fprint(fd, "\tht:\t%d\n", t.ht);
-		fprint(fd, "\taddr:\t%llx\n", t.bp.addr);
-		fprint(fd, "\thash:\t%llx\n", t.bp.hash);
-		fprint(fd, "\tgen:\t%llx\n", t.bp.gen);
-		for(i = 0; i < Ndead; i++){
-			fprint(fd, "\tdeadlist %d\n", i);
-			fprint(fd, "\t\tprev:\t%llx\n", t.prev[i]);
-			fprint(fd, "\t\tfhead:\t%B\n", t.dead[i].head);
-			if(t.dead[i].tail != nil){
-				fprint(fd, "\t\tftailp:%llx\n", t.dead[i].tail->bp.addr);
-				fprint(fd, "\t\tftailh:%llx\n", t.dead[i].tail->bp.hash);
-			}else{
-				fprint(fd, "\t\tftailp:\t-1\n");
-				fprint(fd, "\t\tftailh:\t-1\n");
-			}
-		}
+		showtreeroot(fd, &t);
 	}
 }
 

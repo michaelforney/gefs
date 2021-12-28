@@ -230,6 +230,30 @@ logappend(Oplog *ol, Arena *a, vlong off, vlong len, vlong val, int op)
 }
 
 int
+graft(Oplog *a, Oplog *b)
+{
+	char *p;
+	vlong o;
+
+	if(b->head.addr == -1)
+		return 0;
+	if(a->head.addr == -1){
+		a->head = b->head;
+		a->tail = b->tail;
+		return 0;
+	}
+	
+	o = b->head.addr|LogChain;
+	p = a->tail->data + a->tail->logsz;
+	PBIT64(p, o);
+	if(syncblk(a->tail) == -1)
+		return -1;
+	putblk(a->tail);
+	a->tail = b->tail;
+	return 0;
+}
+
+int
 deadlistappend(Tree *t, Bptr bp)
 {
 	Oplog *l;
@@ -239,10 +263,9 @@ deadlistappend(Tree *t, Bptr bp)
 	dprint("deadlisted %B\n", bp);
 	l = nil;
 	for(i = 0; i < Ndead; i++){
-		if(bp.gen >= t->prev[i]){
-			l = &t->dead[i];
+		if(bp.gen > t->prev[i])
 			break;
-		}
+		l = &t->dead[i];
 	}
 	if((b = logappend(l, nil, bp.addr, Blksz, bp.gen, LogDead)) == nil)
 		return -1;
@@ -274,15 +297,19 @@ freelistappend(Arena *a, vlong off, int op)
 }
 
 int
-scandead(Bptr bp, int (*fn)(Bptr))
+scandead(Oplog *l, void (*fn)(Bptr, void*), void *dat)
 {
 	vlong ent, off;
 	int op, i, n;
 	uvlong bh;
 	Bptr dead;
 	char *d;
+	Bptr bp;
 	Blk *b;
 
+	bp = l->head;
+	if(bp.addr == -1)
+		return 0;
 Nextblk:
 	if((b = getblk(bp, GBnochk)) == nil)
 		return -1;
@@ -303,7 +330,7 @@ Nextblk:
 			dead.addr = ent;
 			dead.hash = -1;
 			dead.gen = GBIT64(d+8);
-			fn(dead);
+			fn(dead, dat);
 			break;
 		case LogEnd:
 			dprint("log@%d: end\n", i);

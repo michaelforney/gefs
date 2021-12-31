@@ -8,8 +8,6 @@
 
 typedef struct Cmd	Cmd;
 
-Cmd cmdtab[];
-
 struct Cmd {
 	char	*name;
 	char	*sub;
@@ -119,24 +117,35 @@ showusers(int fd, char**, int)
 }		
 
 static void
-help(int fd, char **ap, int na)
+help(int fd, char**, int)
 {
-	Cmd *c;
-	int i;
-
-	for(c = cmdtab; c->name != nil; c++){
-		if(na == 0 || strcmp(ap[0], c->name) == 0){
-			if(c->sub == nil)
-				fprint(fd, "%s", c->name);
-			else
-				fprint(fd, "%s %s", c->name, c->sub);
-			for(i = 0; i < c->minarg; i++)
-				fprint(fd, " a%d", i);
-			for(i = c->minarg; i < c->maxarg; i++)
-				fprint(fd, " [a%d]", i);
-			fprint(fd, "\n");
-		}
-	}
+	char *msg =
+		"help\n"
+		"	show this help"
+		"sync\n"
+		"	flush all p[ending writes to disk\n"
+		"snap name [new]\n"
+		"	create or update a new snapshot\n"
+		"check\n"
+		"	run a consistency check on the file system\n"
+		"users\n"
+		"	reload user table from /adm/users in the main snap\n"
+		"show\n"
+		"	show debug debug information, the following dumps\n"
+		"	are supported:\n"
+		"	cache\n"
+		"		the contents of the in-memory cache\n"
+		"	tree [name]\n"
+		"		the contents of the tree associated with a\n"
+		"		snapshot. The special name 'snap' shows the\n"
+		"		snapshot tree\n"
+		"	snap\n"
+		"		the summary of the existing snapshots\n"
+		"	fid\n"
+		"		the summary of open fids\n"
+		"	users\n"
+		"		the known user file\n";
+	fprint(fd, "%s", msg);
 }
 
 Cmd cmdtab[] = {

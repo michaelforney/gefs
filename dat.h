@@ -535,8 +535,6 @@ struct Scan {
 };
 
 struct Blk {
-	Lock;
-
 	/* cache entry */
 	Blk	*cnext;
 	Blk	*cprev;
@@ -545,7 +543,7 @@ struct Blk {
 	/* Freelist entry */
 	Blk	*fnext;
 
-	short	flag;
+	long	flag;
 
 	/* serialized to disk in header */
 	short	type;	/* @0, for all */

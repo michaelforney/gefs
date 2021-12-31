@@ -23,16 +23,14 @@ int
 syncblk(Blk *b)
 {
 	assert(b->flag & Bfinal);
-	lock(b);
-	b->flag &= ~(Bqueued|Bdirty);
-	unlock(b);
+	clrflag(b, Bqueued|Bdirty);
 	return pwrite(fs->fd, b->buf, Blksz, b->bp.addr);
 }
 
 void
 enqueue(Blk *b)
 {
-	assert(b->flag&Bdirty);
+	assert(b->flag & Bdirty);
 	finalize(b);
 	if(syncblk(b) == -1){
 		ainc(&fs->broken);
@@ -199,7 +197,7 @@ unrefsnap(vlong gen, vlong next)
 void
 freedead(Bptr bp, void *)
 {
-	fprint(2, "reclaimed deadlist: %B\n", bp);
+	dprint("reclaimed deadlist: %B\n", bp);
 	reclaimblk(bp);
 }
 

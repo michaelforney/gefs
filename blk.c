@@ -19,6 +19,32 @@ static Blk*	initblk(vlong, int);
 
 QLock blklock;
 
+void
+setflag(Blk *b, int flg)
+{
+	long ov, nv;
+
+	while(1){
+		ov = b->flag;
+		nv = ov | flg;
+		if(cas(&b->flag, ov, nv))
+			break;
+	}
+}
+
+void
+clrflag(Blk *b, int flg)
+{
+	long ov, nv;
+
+	while(1){
+		ov = b->flag;
+		nv = ov & ~flg;
+		if(cas(&b->flag, ov, nv))
+			break;
+	}
+}
+
 Blk*
 readblk(vlong bp, int flg)
 {
@@ -39,7 +65,6 @@ readblk(vlong bp, int flg)
 		off += n;
 		rem -= n;
 	}
-	memset(&b->Lock, 0, sizeof(Lock));
 	b->type = (flg&GBraw) ? Traw : GBIT16(b->buf+0);
 	b->bp.addr = bp;
 	b->bp.hash = -1;
@@ -278,7 +303,7 @@ deadlistappend(Tree *t, Bptr bp)
 	Oplog *l;
 	int i;
 
-fprint(2, "deadlisted %B [%p::%B]\n", bp, t, t->bp);
+dprint("deadlisted %B [%p::%B]\n", bp, t, t->bp);
 //fprint(2, "predeadlist\n");
 //showtreeroot(2, t);
 //fprint(2, "----\n");
@@ -453,8 +478,8 @@ compresslog(Arena *a)
 		return -1;
 	if((b = mallocz(sizeof(Blk), 1)) == nil)
 		return -1;
+	setflag(b, Bdirty);
 	b->type = Tlog;
-	b->flag = Bdirty;
 	b->bp.addr = bp;
 	b->ref = 1;
 	b->data = b->buf + Hdrsz;
@@ -681,7 +706,7 @@ initblk(vlong bp, int t)
 	b->data = b->buf + Hdrsz;
 	b->fnext = nil;
 
-	b->flag = Bdirty;
+	setflag(b, Bdirty);
 	b->nval = 0;
 	b->valsz = 0;
 	b->nbuf = 0;
@@ -713,9 +738,7 @@ fillsuper(Blk *b)
 
 	assert(b->type == Tsuper);
 	p = b->data;
-	lock(b);
-	b->flag |= Bdirty;
-	unlock(b);
+	setflag(b, Bdirty);
 	memcpy(p, "gefs0001", 8); p += 8;
 	PBIT32(p, 0); p += 4; /* dirty */
 	PBIT32(p, Blksz); p += 4;
@@ -736,8 +759,7 @@ finalize(Blk *b)
 {
 	vlong h;
 
-	lock(b);
-	b->flag |= Bfinal;
+	setflag(b, Bfinal);
 	if(b->type != Traw)
 		PBIT16(b->buf, b->type);
 	switch(b->type){
@@ -769,7 +791,6 @@ finalize(Blk *b)
 	case Tarena:
 		break;
 	}
-	unlock(b);
 }
 
 Blk*
@@ -867,10 +888,8 @@ freebp(Tree *t, Bptr bp)
 void
 freeblk(Tree *t, Blk *b)
 {
-	lock(b);
-	assert((b->flag & Bqueued) == 0);
+	assert(!(b->flag & Bqueued));
 	b->freed = getcallerpc(&b);
-	unlock(b);
 	freebp(t, b->bp);
 }
 

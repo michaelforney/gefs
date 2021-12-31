@@ -362,9 +362,7 @@ packtree(char *p, int sz, Tree *t)
 		tlhash = -1;
 		if(t->dead[i].tail != nil){
 			tl = t->dead[i].tail;
-			lock(tl);
 			assert(tl->flag & Bfinal);
-			unlock(tl);
 			tladdr = tl->bp.addr;
 			tlhash = tl->bp.hash;
 		}

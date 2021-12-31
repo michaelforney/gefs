@@ -40,7 +40,7 @@ cachedel(vlong del)
 		fs->chead = b->cnext;
 	b->cnext = nil;
 	b->cprev = nil;
-	b->flag &= ~Bcached;
+	clrflag(b, Bcached);
 	fs->ccount--;
 }
 
@@ -82,10 +82,8 @@ Found:
 	b->cnext = fs->chead;
 	b->cprev = nil;
 	fs->chead = b;
-	if((b->flag&Bcached) == 0){
-		lock(b);
-		b->flag |= Bcached;
-		unlock(b);
+	if((b->flag & Bcached) == 0){
+		setflag(b, Bcached);
 		fs->ccount++;
 		refblk(b);
 	}

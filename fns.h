@@ -62,7 +62,7 @@ char*	btnext(Scan*, Kvp*, int*);
 void	btdone(Scan*);
 
 void	setflag(Blk *b, int);
-int	chkflag(Blk *b, int);
+void	clrflag(Blk *b, int);
 
 char*	estrdup(char*);
 

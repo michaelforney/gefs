@@ -101,7 +101,7 @@ reamarena(Arena *a, vlong start, vlong asz)
 	b->bp.addr = addr;
 	b->logsz = 32;
 	b->data = b->buf + Hdrsz;
-	b->flag |= Bdirty;
+	setflag(b, Bdirty);
 
 	p = b->data+Loghdsz;
 	PBIT64(p+ 0, addr|LogFree);		/* addr */

@@ -51,6 +51,10 @@ int	endfs(void);
 int	compresslog(Arena*);
 void	setval(Blk*, int, Kvp*);
 
+char*	loadusers(int, Tree*);
+User*	uid2user(User*, int, int);
+User*	name2user(User*, int, char*);
+
 char*	btupsert(Tree*, Msg*, int);
 char*	btlookup(Tree*, Key*, Kvp*, char*, int);
 char*	btscan(Tree*, Scan*, char*, int);

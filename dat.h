@@ -20,6 +20,7 @@ typedef struct Chan	Chan;
 typedef struct Tree	Tree;
 typedef struct Oplog	Oplog;
 typedef struct Mount	Mount;
+typedef struct User	User;
 
 enum {
 	KiB	= 1024ULL,
@@ -113,6 +114,9 @@ enum {
 #define Eattach	"attach required"
 #define Enosnap	"attach -- bad specifier"
 #define Edir	"invalid directory"
+#define Esyntax "syntax error"
+#define Enouser	"user does not exist"
+#define Efsize	"file too big"
 #define Ebadu	"attach -- unknown user or failed authentication"
 
 #define Ewstatb	"wstat -- unknown bits in qid.type/mode"
@@ -338,6 +342,14 @@ struct Bfree {
 	Bfree	*next;
 };
 
+struct User {
+	int	id;
+	int	lead;
+	int	*memb;
+	int	nmemb;
+	char	name[128];
+};
+
 /*
  * Overall state of the file sytem.
  * Shadows the superblock contents.
@@ -375,6 +387,10 @@ struct Gefs {
 	int	narena;
 	long	roundrobin;
 	vlong	arenasz;
+
+	RWLock	userlk;
+	User	*users;
+	int	nusers;
 
 	Lock	fidtablk;
 	Fid	*fidtab[Nfidtab];
@@ -446,6 +462,7 @@ struct Dent {
 struct Mount {
 	long	ref;
 	vlong	gen;
+	char	*user;
 	char	*name;
 	Tree	*root;
 };

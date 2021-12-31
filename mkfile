@@ -15,6 +15,7 @@ OFILES=\
 	ream.$O\
 	snap.$O\
 	tree.$O\
+	user.$O\
 
 HFILES=\
 	dat.h\

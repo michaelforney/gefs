@@ -513,7 +513,14 @@ fsattach(Fmsg *m, int iounit)
 		rerror(m, Emem);
 		return;
 	}
-	mnt->name = strdup(m->aname);
+	if((mnt->name = strdup(m->aname)) == nil){
+		rerror(m, Emem);
+		return;
+	}
+	if((mnt->user = strdup("glenda")) == nil){
+		rerror(m, Emem);
+		return;
+	}
 	if((mnt->root = openlabel(m->aname)) == nil){
 		rerror(m, Enosnap);
 		return;
@@ -995,10 +1002,55 @@ fsremove(Fmsg *m)
 }
 
 int
-fsaccess(Dir*, int)
+ingroup(char *user, char *group)
 {
-	/* all is permitted */
-	return 0;
+	User *u, *g;
+	int i, in;
+
+	rlock(&fs->userlk);
+	in = 0;
+	u = name2user(fs->users, fs->nusers, user);
+	g = name2user(fs->users, fs->nusers, group);
+	if(u != nil && g != nil)
+		for(i = 0; i < g->nmemb; i++)
+			if(u->id == g->memb[i])
+				in = 1;
+	runlock(&fs->userlk);
+	return in;
+}
+
+int
+fsaccess(Mount *mnt, Dir *d, int req)
+{
+	int m;
+
+	m = 0;
+	switch(req&0xf){
+	case OREAD:	m = DMREAD;		break;
+	case OWRITE:	m = DMWRITE;		break;
+	case ORDWR:	m = DMREAD|DMWRITE;	break;
+	}
+	if(req&OEXEC)
+		m |= DMEXEC;
+	if(req&OTRUNC)
+		m |= DMWRITE;
+
+	/* uid none gets only other permissions */
+	if(strcmp(mnt->user, "none") != 0) {
+		if(strcmp(mnt->user, d->uid) == 0)
+			if((m<<6) & d->mode)
+				return 0;
+		if(ingroup(mnt->user, d->gid))
+			if((m<<3) & d->mode)
+				return 0;
+	}
+	if(m & d->mode) {
+		if((d->mode & DMDIR) && (m == DMEXEC))
+			return 0;
+		if(!ingroup(mnt->user, "noworld"))
+			return 0;
+	}
+	return -1;
 }
 
 void
@@ -1024,7 +1076,7 @@ fsopen(Fmsg *m)
 		putfid(f);
 		return;
 	}
-	if(fsaccess(&d, m->mode) == -1){
+	if(fsaccess(f->mnt, &d, m->mode) == -1){
 		rerror(m, Eperm);
 		putfid(f);
 		return;

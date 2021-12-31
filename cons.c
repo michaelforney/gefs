@@ -72,6 +72,53 @@ fsckfs(int fd, char**, int)
 }
 
 static void
+refreshusers(int fd, char **ap, int na)
+{
+	char *l, *e;
+	Tree *t;
+
+	l = (na == 0) ? "main" : ap[0];
+	if((t = openlabel(l)) == nil){
+		fprint(fd, "load users: no label %s", l);
+		return;
+	}
+	e = loadusers(fd, t);
+	if(e != nil)
+		fprint(fd, "load users: %s\n", e);
+	else
+		fprint(fd, "refreshed users\n");
+	closesnap(t);
+}
+
+static void
+showusers(int fd, char**, int)
+{
+	User *u, *v;
+	int i, j;
+	char *sep;
+
+	rlock(&fs->userlk);
+	for(i = 0; i < fs->nusers; i++){
+		u = &fs->users[i];
+		fprint(fd, "%d:%s:", u->id, u->name);
+		if((v = uid2user(fs->users, fs->nusers, u->lead)) == nil)
+			fprint(fd, "???:");
+		else
+			fprint(fd, "%s:", v->name);
+		sep = "";
+		for(j = 0; j < u->nmemb; j++){
+			if((v = uid2user(fs->users, fs->nusers, u->memb[j])) == nil)
+				fprint(fd, "%s???", sep);
+			else
+				fprint(fd, "%s%s", sep, v->name);
+			sep = ",";
+		}
+		fprint(fd, "\n");
+	}
+	runlock(&fs->userlk);
+}		
+
+static void
 help(int fd, char **ap, int na)
 {
 	Cmd *c;
@@ -92,12 +139,12 @@ help(int fd, char **ap, int na)
 	}
 }
 
-
 Cmd cmdtab[] = {
 	{.name="sync",	.sub=nil,	.minarg=0, .maxarg=0, .fn=syncfs},
 	{.name="snap",	.sub=nil,	.minarg=1, .maxarg=2, .fn=snapfs},
 	{.name="check",	.sub=nil,	.minarg=1, .maxarg=1, .fn=fsckfs},
-	{.name="help",	.sub=nil,	.minarg=0, .maxarg=1, .fn=help},
+	{.name="help",	.sub=nil,	.minarg=0, .maxarg=0, .fn=help},
+	{.name="users",	.sub=nil,	.minarg=0, .maxarg=1, .fn=refreshusers},
 
 	/* debugging */
 	{.name="show",	.sub="cache",	.minarg=0, .maxarg=0, .fn=showcache},
@@ -105,6 +152,7 @@ Cmd cmdtab[] = {
 	{.name="show",	.sub="snap",	.minarg=0, .maxarg=1, .fn=showsnap},
 	{.name="show",	.sub="fid",	.minarg=0, .maxarg=0, .fn=showfid},
 	{.name="show",	.sub="free",	.minarg=0, .maxarg=0, .fn=showfree},
+	{.name="show",	.sub="users",	.minarg=0, .maxarg=0, .fn=showusers},
 	{.name="debug",	.sub=nil,	.minarg=1, .maxarg=1, .fn=setdbg},
 	{.name=nil, .sub=nil},
 };

@@ -35,12 +35,13 @@ loadarena(Arena *a, vlong o)
 void
 loadfs(char *dev)
 {
+	int blksz, bufspc, hdrsz;
+	int i, dirty;
 	vlong sb;
-	char *p;
+	char *p, *e;
+	Tree *t;
 	Blk *b;
 	Dir *d;
-	int i, dirty;
-	int blksz, bufspc, hdrsz;
 
 	fs->osnap = nil;
 	if((fs->fd = open(dev, ORDWR)) == -1)
@@ -71,7 +72,6 @@ loadfs(char *dev)
 	fs->nextqid = GBIT64(p);	p += 8;
 	fs->super = b;
 	fs->nextgen = fs->snap.bp.gen + 1;
-
 	for(i = 0; i < Ndead; i++){
 		fs->snap.prev[i] = -1;
 		fs->snap.dead[i].head.addr = -1;
@@ -99,4 +99,8 @@ loadfs(char *dev)
 		fprint(2, "file system was not unmounted cleanly");
 		/* TODO: start gc pass */
 	}
+	if((t = openlabel("main")) == nil)
+		sysfatal("load users: no main label");
+	if((e = loadusers(2, t)) != nil)
+		sysfatal("load users: %s\n", e);
 }

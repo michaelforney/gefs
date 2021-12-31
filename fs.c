@@ -13,23 +13,28 @@ static char*	clearb(Fid*, vlong, vlong);
 static char*
 updatesnap(Fid *f)
 {
-	vlong gen, old;
+	Tree *t, *n;
 	char *e;
 
-	if((e = newsnap(f->mnt->root, &gen, &old)) != nil){
+	t = f->mnt->root;
+	qlock(&fs->snaplk);
+	if((n = newsnap(t)) == nil){
+		fprint(2, "snap: save %s: %s\n", f->mnt->name, "create snap");
+		abort();
+	}
+	if((e = labelsnap(f->mnt->name, t->gen)) != nil){
 		fprint(2, "snap: save %s: %s\n", f->mnt->name, e);
 		abort();
 	}
-	if((e = labelsnap(f->mnt->name, gen)) != nil){
-		fprint(2, "snap: save %s: %s\n", f->mnt->name, e);
-		abort();
-	}
-	if(old >= 0){
-		if((e = unrefsnap(old, gen)) != nil){
+	if(t->prev[0] != -1){
+		if((e = unrefsnap(t->prev[0], t->gen)) != nil){
 			fprint(2, "snap: unref old: %s\n", e);
 			abort();
 		}
 	}
+	f->mnt->root = n;
+	closesnap(t);
+	qunlock(&fs->snaplk);
 	sync();
 	return nil;
 }
@@ -509,7 +514,7 @@ fsattach(Fmsg *m, int iounit)
 		return;
 	}
 	mnt->name = strdup(m->aname);
-	if((mnt->root = opensnap(m->aname)) == nil){
+	if((mnt->root = openlabel(m->aname)) == nil){
 		rerror(m, Enosnap);
 		return;
 	}
@@ -749,16 +754,16 @@ fswstat(Fmsg *m)
 	op = 0;
 	mb[nm].Key = k;
 	mb[nm].op = Owstat;
-	if(d.mode != ~0){
-		op |= Owmode;
-		PBIT32(p, d.mode);
-		p += 4;
-		sync = 0;
-	}
 	if(d.length != ~0){
 		op |= Owsize;
 		PBIT64(p, d.length);
 		p += 8;
+		sync = 0;
+	}
+	if(d.mode != ~0){
+		op |= Owmode;
+		PBIT32(p, d.mode);
+		p += 4;
 		sync = 0;
 	}
 	if(d.mtime != ~0){
@@ -1244,9 +1249,12 @@ fswrite(Fmsg *m)
 	kv[i].op = Owstat;
 	kv[i].k = f->dent->k;
 	kv[i].nk = f->dent->nk;
-	if(m->offset+m->count > f->dent->length){
-		*p++ = Owsize;
-		PBIT64(p, m->offset+m->count);	p += 8;
+	n = m->offset+m->count;
+	*p++ = 0;
+	if(n > f->dent->length){
+		sbuf[0] |= Owsize;
+		PBIT64(p, n);
+		p += 8;
 		f->dent->length = m->offset+m->count;
 	}
 	kv[i].v = sbuf;

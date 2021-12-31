@@ -314,54 +314,81 @@ copyup(Blk *n, int i, Path *pp, int *nbytes)
 void
 statupdate(Kvp *kv, Msg *m)
 {
-	vlong v;
-	char *p;
-	int op;
+	int op, err;
+	char *p, *e;
+	Dir d;
 
 	p = m->v;
 	op = *p++;
+	kv2dir(kv, &d);
 	/* bump version */
-	v = GBIT32(kv->v+8);
-	PBIT32(kv->v+8, v+1);
-	if(op & Owmtime){
-		v = GBIT64(p);
-		p += 8;
-		PBIT32(kv->v+25, v);
-	}
+	d.qid.vers++;
 	if(op & Owsize){
-		v = GBIT64(p);
+		d.length = GBIT64(p);
 		p += 8;
-		PBIT64(kv->v+33, v);
 	}
 	if(op & Owmode){
-		v = GBIT32(p);
+		d.mode = GBIT32(p);
 		p += 4;
-		PBIT32(kv->v+33, v);
 	}
-	if(p != m->v + m->nv)
-		fprint(2, "malformed wstat message");
+	if(op & Owmtime){
+		d.mtime = GBIT64(p);
+		p += 8;
+	}
+	if(op & Owatime){
+		d.atime = GBIT64(p);
+		p += 8;
+	}
+	if(p != m->v + m->nv){
+		fprint(2, "kv=%P, m=%M\n", kv, m);
+		fprint(2, "malformed stat message (op=%x, len=%lld, sz=%d)\n", op, p - m->v, m->nv);
+		abort();
+	}
+	err = 0;
+	p = kv->v;
+	e = kv->v + kv->nv;
+	p = pack64(&err, p, e, d.qid.path);
+	p = pack32(&err, p, e, d.qid.vers);
+	p = pack8(&err, p, e, d.qid.type);
+	p = pack32(&err, p, e, d.mode);
+	p = pack64(&err, p, e, (vlong)d.atime*Nsec);
+	p = pack64(&err, p, e, (vlong)d.mtime*Nsec);
+	p = pack64(&err, p, e, d.length);
+	p = packstr(&err, p, e, d.uid);
+	p = packstr(&err, p, e, d.gid);
+	p = packstr(&err, p, e, d.muid);
+	if(err){
+		fprint(2, "wstat not fixed size(%llx != %d)\n", p - kv->v, kv->nv);
+		abort();
+	}
 }
 
 static char*
 dropsnap(Kvp *t, Msg *m)
 {
 	char *e, buf[Msgmax];
-	Tree snap, from;
+	Tree snap, tmp, *from;
+	vlong id;
 	Kvp kv;
 	Key k;
 
-	qlock(&fs->snaplk);
 	if(unpacktree(&snap, t->v, t->nv) == nil)
 		return Efs;
 	k.k = m->v;
 	k.nk = m->nv;
-	if((e = btlookup(&fs->snap, &k, &kv, buf, sizeof(buf))) != nil)
+	id = GBIT64(m->v+1);
+	for(from = fs->osnap; from != nil; from = from->snext)
+		if(from->gen == id)
+			break;
+	if(from == nil){
+		if((e = btlookup(&fs->snap, &k, &kv, buf, sizeof(buf))) != nil)
+			return e;
+		if(unpacktree(&tmp, kv.v, kv.nv) == nil)
+			return Efs;
+		from = &tmp;
+	}
+	if((e = freesnap(&snap, from)) != nil)
 		return e;
-	if(unpacktree(&from, kv.v, kv.nv) == nil)
-		return Efs;
-	if((e = freesnap(&snap, &from)) != nil)
-		return e;
-	qunlock(&fs->snaplk);
 	return nil;
 }
 
@@ -396,8 +423,9 @@ apply(Kvp *kv, Msg *m, char *buf, int nbuf)
 		}
 		PBIT32(kv->v, refs);
 		return 1;
+	default:
+		abort();
 	}
-	abort();
 	return 0;
 }
 
@@ -1214,8 +1242,6 @@ Again:
 	unlock(&t->lk);
 	freepath(t, path, npath);
 	free(path);
-	if(!checkfs(2))
-		abort();
 	if(redo)
 		goto Again;
 	return 0;
@@ -1258,8 +1284,10 @@ btlookupat(Blk *b, int h, Key *k, Kvp *r, char *buf, int nbuf)
 		if(blksearch(p[i-1], k, r, nil) == -1)
 			break;
 		bp = getptr(r, nil);
-		if((p[i] = getblk(bp, 0)) == nil)
-			return Efs;
+		if((p[i] = getblk(bp, 0)) == nil){
+			err = Efs;
+			goto Out;
+		}
 	}
 	if(p[h-1] != nil)
 		blksearch(p[h-1], k, r, &ok);
@@ -1282,9 +1310,11 @@ btlookupat(Blk *b, int h, Key *k, Kvp *r, char *buf, int nbuf)
 	}
 	if(ok)
 		err = nil;
+Out:
 	for(i = 0; i < h; i++)
 		if(p[i] != nil)
 			putblk(p[i]);
+	free(p);
 	return err;
 }
 

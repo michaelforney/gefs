@@ -63,7 +63,7 @@ initsnap(Blk *s, Blk *r)
 	kv.nk = Snapsz;
 
 	memset(&t, 0, sizeof(Tree));
-	t.ref = 1;
+	t.ref = 2;
 	t.ht = 1;
 	t.gen = 0;
 	t.bp = r->bp;
@@ -74,7 +74,7 @@ initsnap(Blk *s, Blk *r)
 		t.dead[i].head.gen = -1;
 		t.dead[i].tail = nil;
 	}
-	p = packtree(vbuf, sizeof(vbuf), &t, 2);
+	p = packtree(vbuf, sizeof(vbuf), &t);
 	kv.v = vbuf;
 	kv.nv = p - vbuf;
 	setval(s, 1, &kv);

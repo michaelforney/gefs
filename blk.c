@@ -15,7 +15,7 @@ struct Range {
 static vlong	blkalloc_lk(Arena*);
 static vlong	blkalloc(void);
 static int	blkdealloc_lk(vlong);
-static void	cachedel(vlong);
+static Blk*	initblk(vlong, int);
 
 QLock blklock;
 
@@ -93,7 +93,7 @@ getarena(vlong b)
 	if(i < 0 || i >= fs->narena){
 		werrstr("out of range block %lld", b);
 		abort();
-//		return nil;
+		return nil;
 	}
 	return &fs->arenas[i];
 }
@@ -168,7 +168,7 @@ grabrange(Avltree *t, vlong off, vlong len)
 	return 0;
 }
 
-Blk*
+int
 logappend(Oplog *ol, Arena *a, vlong off, vlong len, vlong val, int op)
 {
 	Blk *pb, *lb;
@@ -185,20 +185,16 @@ logappend(Oplog *ol, Arena *a, vlong off, vlong len, vlong val, int op)
 		else
 			o = blkalloc_lk(a);
 		if(o == -1)
-			return nil;
-		if((lb = mallocz(sizeof(Blk), 1)) == nil)
-			return nil;
-		lb->data = lb->buf + Hdrsz;
-		lb->flag |= Bdirty;
-		lb->type = Tlog;
-		lb->bp.addr = o;
+			return -1;
+		if((lb = initblk(o, Tlog)) == nil)
+			return -1;
 		lb->logsz = Loghdsz;
 		p = lb->data + lb->logsz;
-		PBIT64(p + 0, (uvlong)LogEnd);
+		PBIT64(p, (uvlong)LogEnd);
 		finalize(lb);
 		if(syncblk(lb) == -1){
 			free(lb);
-			return nil;
+			return -1;
 		}
 
 		ol->tail = lb;
@@ -207,14 +203,16 @@ logappend(Oplog *ol, Arena *a, vlong off, vlong len, vlong val, int op)
 			PBIT64(p + 0, lb->bp.addr|LogChain);
 			finalize(pb);
 			if(syncblk(pb) == -1)
-				return nil;
+				return -1;
 		}
 	}
 
-	if(len == Blksz && op == LogAlloc)
-		op = LogAlloc1;
-	if(len == Blksz && op == LogFree)
-		op = LogFree1;
+	if(len == Blksz){
+		if(op == LogAlloc)
+			op = LogAlloc1;
+		else if(op == LogFree)
+			op = LogFree1;
+	}
 	off |= op;
 	p = lb->data + lb->logsz;
 	PBIT64(p, off);
@@ -226,7 +224,24 @@ logappend(Oplog *ol, Arena *a, vlong off, vlong len, vlong val, int op)
 	/* this gets overwritten by the next append */
 	p = lb->data + lb->logsz;
 	PBIT64(p, (uvlong)LogEnd);
-	return lb;
+	if(ol->head.addr == -1)
+		ol->head = lb->bp;
+	if(ol->tail != lb)
+		ol->tail = lb;
+	return 0;
+}
+
+static void
+showdeadbp(Bptr bp, void *)
+{
+	fprint(2, "\tdead: %B\n", bp);
+}
+
+void
+showlst(char *m, Oplog *l)
+{
+	fprint(2, "showlst: %s\n", m);
+	scandead(l, showdeadbp, nil);
 }
 
 int
@@ -235,6 +250,7 @@ graft(Oplog *a, Oplog *b)
 	char *p;
 	vlong o;
 
+
 	if(b->head.addr == -1)
 		return 0;
 	if(a->head.addr == -1){
@@ -242,7 +258,9 @@ graft(Oplog *a, Oplog *b)
 		a->tail = b->tail;
 		return 0;
 	}
-	
+
+showlst("a", a);
+showlst("b", b);
 	o = b->head.addr|LogChain;
 	p = a->tail->data + a->tail->logsz;
 	PBIT64(p, o);
@@ -250,6 +268,7 @@ graft(Oplog *a, Oplog *b)
 		return -1;
 	putblk(a->tail);
 	a->tail = b->tail;
+showlst("grafted", b);
 	return 0;
 }
 
@@ -257,22 +276,23 @@ int
 deadlistappend(Tree *t, Bptr bp)
 {
 	Oplog *l;
-	Blk *b;
 	int i;
 
-	dprint("deadlisted %B\n", bp);
+fprint(2, "deadlisted %B [%p::%B]\n", bp, t, t->bp);
+//fprint(2, "predeadlist\n");
+//showtreeroot(2, t);
+//fprint(2, "----\n");
 	l = nil;
 	for(i = 0; i < Ndead; i++){
+		l = &t->dead[i];
 		if(bp.gen > t->prev[i])
 			break;
-		l = &t->dead[i];
 	}
-	if((b = logappend(l, nil, bp.addr, Blksz, bp.gen, LogDead)) == nil)
+	if(logappend(l, nil, bp.addr, Blksz, bp.gen, LogDead) == -1)
 		return -1;
-	if(l->head.addr == -1)
-		l->head = b->bp;
-	if(l->tail != b)
-		l->tail = b;
+//fprint(2, "postdeadlist\n");
+//showtreeroot(2, t);
+//fprint(2, "@@@@@@@@@@@@@@@@@@\n");
 	return 0;
 }
 
@@ -285,14 +305,9 @@ deadlistappend(Tree *t, Bptr bp)
 int
 freelistappend(Arena *a, vlong off, int op)
 {
-	Blk *b;
-
-	if((b = logappend(&a->log, a, off, Blksz, Blksz, op)) == nil)
+	cachedel(off);
+	if(logappend(&a->log, a, off, Blksz, Blksz, op) == -1)
 		return -1;
-	if(a->log.head.addr == -1)
-		a->log.head = b->bp;
-	if(a->log.tail != b)
-		a->log.tail = b;
 	return 0;
 }
 
@@ -301,7 +316,6 @@ scandead(Oplog *l, void (*fn)(Bptr, void*), void *dat)
 {
 	vlong ent, off;
 	int op, i, n;
-	uvlong bh;
 	Bptr dead;
 	char *d;
 	Bptr bp;
@@ -313,12 +327,7 @@ scandead(Oplog *l, void (*fn)(Bptr, void*), void *dat)
 Nextblk:
 	if((b = getblk(bp, GBnochk)) == nil)
 		return -1;
-	bh = GBIT64(b->data);
-	/* the hash covers the log and offset */
-	if(bh != siphash(b->data+8, Blkspc-8)){
-		werrstr("corrupt log");
-		return -1;
-	}
+// TODO: hash checks for these chains
 	for(i = Loghdsz; i < Logspc; i += n){
 		d = b->data + i;
 		ent = GBIT64(d);
@@ -326,31 +335,26 @@ Nextblk:
 		off = ent & ~0xff;
 		n = (op >= Log2wide) ? 16 : 8;
 		switch(op){
-		case LogDead:
-			dead.addr = ent;
-			dead.hash = -1;
-			dead.gen = GBIT64(d+8);
-			fn(dead, dat);
-			break;
 		case LogEnd:
 			dprint("log@%d: end\n", i);
-			/*
-			 * since we want the next insertion to overwrite
-			 * this, don't include the size in this entry.
-			 */
-			b->logsz = i;
 			return 0;
+		case LogDead:
+			dead.addr = off;
+			dead.hash = -1;
+			dead.gen = GBIT64(d+8);
+			dprint("log@%d: dead %B\n", i, dead);
+			fn(dead, dat);
+			break;
 		case LogChain:
 			bp.addr = off & ~0xff;
 			bp.hash = -1;
 			bp.gen = -1;
 			dprint("log@%d: chain %B\n", i, bp);
-			b->logsz = i+n;
 			goto Nextblk;
 			break;
 		default:
 			n = 0;
-			dprint("log@%d: log op %d\n", i, op);
+			fprint(2, "log@%d: log op %d\n", i, op);
 			abort();
 			break;
 		}
@@ -388,11 +392,6 @@ Nextblk:
 		switch(op){
 		case LogEnd:
 			dprint("log@%d: end\n", i);
-			/*
-			 * since we want the next insertion to overwrite
-			 * this, don't include the size in this entry.
-			 */
-			b->logsz = i;
 			return 0;
 		case LogChain:
 			bp.addr = off & ~0xff;
@@ -403,10 +402,6 @@ Nextblk:
 			goto Nextblk;
 			break;
 
-		case LogFlush:
-			dprint("log@%d: flush: %llx\n", i, off>>8);
-			fs->nextgen = (off >> 8)+1;
-			break;
 		case LogAlloc:
 		case LogAlloc1:
 			len = (op >= Log2wide) ? GBIT64(d+8) : Blksz;
@@ -514,7 +509,7 @@ compresslog(Arena *a)
 	ol.tail = b;
 	b->logsz = Loghdsz;
 	for(i = 0; i < n; i++)
-		if((b = logappend(&ol, a, log[i].off, log[i].len, log[i].len, LogFree)) == nil)
+		if(logappend(&ol, a, log[i].off, log[i].len, log[i].len, LogFree) == -1)
 			return -1;
 	p = b->data + b->logsz;
 	PBIT64(p, LogChain|graft);
@@ -658,14 +653,11 @@ Again:
 	return b;
 }
 
-Blk*
-newblk(int t)
+static Blk*
+initblk(vlong bp, int t)
 {
 	Blk *b;
-	vlong bp;
 
-	if((bp = blkalloc()) == -1)
-		return nil;
 	if((b = lookupblk(bp)) == nil){
 		if((b = mallocz(sizeof(Blk), 1)) == nil)
 			return nil;
@@ -681,6 +673,7 @@ newblk(int t)
 		b->cprev = nil;
 		b->hnext = nil;
 	}
+
 	b->type = t;
 	b->bp.addr = bp;
 	b->bp.hash = -1;
@@ -696,8 +689,21 @@ newblk(int t)
 	b->logsz = 0;
 	b->lognxt = 0;
 
-	dprint("new block %B from %p, flag=%x\n", b->bp, getcallerpc(&t), b->flag);
 	return cacheblk(b);
+}
+
+Blk*
+newblk(int t)
+{
+	vlong bp;
+	Blk *b;
+
+	if((bp = blkalloc()) == -1)
+		return nil;
+	if((b = initblk(bp, t)) == nil)
+		return nil;
+	setmalloctag(b, getcallerpc(&t));
+	return b;
 }
 
 char*
@@ -834,6 +840,7 @@ putblk(Blk *b)
 {
 	if(b == nil || adec(&b->ref) != 0)
 		return;
+	assert(!(b->flag & Bcached));
 	assert((b->flag & Bqueued) || !(b->flag & Bdirty));
 	free(b);
 }
@@ -844,7 +851,7 @@ freebp(Tree *t, Bptr bp)
 	Bfree *f;
 
 	dprint("[%s] free blk %B\n", (t == &fs->snap) ? "snap" : "data", bp);
-	if(bp.gen <= t->prev[0]){
+	if(bp.gen <= t->gen){
 		deadlistappend(t, bp);
 		return;
 	}
@@ -875,6 +882,7 @@ reclaimblk(Bptr bp)
 	a = getarena(bp.addr);
 	lock(a);
 	blkdealloc_lk(bp.addr);
+	cachedel(bp.addr);
 	unlock(a);
 }
 
@@ -918,6 +926,7 @@ quiesce(int tid)
 	while(p != nil){
 		n = p->next;
 		reclaimblk(p->bp);
+		free(p);
 		p = n;
 	}
 	fs->freep = fs->freehd;
@@ -927,29 +936,30 @@ int
 sync(void)
 {
 	int i, r;
-	Blk *b, *s;
 	Arena *a;
+//	Blk *b;
+
+	r = 0;
 
 	qlock(&fs->snaplk);
-	r = 0;
-	s = fs->super;
-	fillsuper(s);
-	enqueue(s);
-
 	for(i = 0; i < fs->narena; i++){
 		a = &fs->arenas[i];
 		finalize(a->log.tail);
 		if(syncblk(a->log.tail) == -1)
 			r = -1;
 	}
-	for(b = fs->chead; b != nil; b = b->cnext){
-		if(!(b->flag & Bdirty))
-			continue;
-		if(syncblk(b) == -1)
-			r = -1;
-	}
+//
+//	for(b = fs->chead; b != nil; b = b->cnext){
+//		if((b->flag & Bdirty) == 0)
+//			continue;
+//		if(syncblk(b) == -1)
+//			r = -1;
+//	}
+	fillsuper(fs->super);
+	finalize(fs->super);
+	enqueue(fs->super);
 	if(r != -1)
-		r = syncblk(s);
+		r = syncblk(fs->super);
 
 	qunlock(&fs->snaplk);
 	return r;

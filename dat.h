@@ -33,7 +33,6 @@ enum {
 	Nrefbuf	= 1024,			/* number of ref incs before syncing */
 	Nfidtab	= 1024,			/* number of fit hash entries */
 	Ndtab	= 1024,			/* number of dir tab entries */
-	Nttab	= 32,			/* number of tree tab entries */
 	Max9p	= 16*KiB,		/* biggest message size we're willing to negotiate */
 	Nsec	= 1000*1000*1000,	/* nanoseconds to the second */
 	Maxname	= 256,			/* maximum size of a name element */
@@ -277,10 +276,10 @@ enum{
  * Operations for the allocation log.
  */
 enum {
+	LogNop,		/* unused */
 	/* 1-wide entries */
 	LogAlloc1,	/* alloc a block */
 	LogFree1,	/* free a block */
-	LogFlush,	/* flush log, bump gen */
 	LogChain,	/* point to next log block */
 	LogEnd,		/* last entry in log */	
 
@@ -323,7 +322,7 @@ struct Fmsg {
 
 struct Tree {
 	Lock	lk;
-	Tree	*hnext;
+	Tree	*snext;
 
 	long	memref;	/* number of in-memory references to this */
 	int	ref;	/* number of on-disk references to this */
@@ -350,8 +349,8 @@ struct Gefs {
 	int	hdrsz;	/* immutable */
 
 	QLock	snaplk;	/* snapshot lock */
-	Tree	*ttab[Nttab];
-	Blk*	super;
+	Tree	*osnap;
+	Blk	*super;
 
 	Chan	*wrchan;
 	Chan	*rdchan;

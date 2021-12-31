@@ -6,28 +6,30 @@
 #include "dat.h"
 #include "fns.h"
 
-static void
+void
 cachedel(vlong del)
 {
 	Bucket *bkt;
 	Blk *b, **p;
 	u32int h;
 
-	/* FIXME: better hash. */
 	h = ihash(del);
 	bkt = &fs->cache[h % fs->cmax];
 	lock(bkt);
 	p = &bkt->b;
 	for(b = bkt->b; b != nil; b = b->hnext){
-		if(b->bp.addr == del){
-			*p = b->hnext;
+		if(b->bp.addr == del)
 			break;
-		}
 		p = &b->hnext;
 	}
+	if(b == nil){
+		unlock(bkt);
+		return;
+	}
+	*p = b->hnext;
 	unlock(bkt);
-	assert(b != nil);
 
+	assert(b != fs->chead || b != fs->ctail);
 	if(b->cnext != nil)
 		b->cnext->cprev = b->cprev;
 	if(b->cprev != nil)
@@ -38,6 +40,8 @@ cachedel(vlong del)
 		fs->chead = b->cnext;
 	b->cnext = nil;
 	b->cprev = nil;
+	b->flag &= ~Bcached;
+	fs->ccount--;
 }
 
 Blk*
@@ -64,9 +68,9 @@ Found:
 	lock(&fs->lrulk);
 	if(b == fs->chead)
 		goto Cached;
+
 	if(b == fs->ctail)
 		fs->ctail = b->cprev;
-
 	if(b->cnext != nil)
 		b->cnext->cprev = b->cprev;
 	if(b->cprev != nil)
@@ -75,8 +79,6 @@ Found:
 		fs->ctail = b;
 	if(fs->chead != nil)
 		fs->chead->cprev = b;
-	if(fs->ctail == nil)
-		fs->ctail = b;
 	b->cnext = fs->chead;
 	b->cprev = nil;
 	fs->chead = b;
@@ -87,14 +89,11 @@ Found:
 		fs->ccount++;
 		refblk(b);
 	}
-	c=0;
-	USED(c);
-#ifdef NOTYET
 	for(c = fs->ctail; c != nil && fs->ccount >= fs->cmax; c = fs->ctail){
 		cachedel(c->bp.addr);
 		putblk(c);
 	}
-#endif
+
 Cached:
 	unlock(&fs->lrulk);
 	return b;

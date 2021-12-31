@@ -15,6 +15,7 @@ Blk*	getroot(Tree*, int*);
 Blk*	getblk(Bptr, int);
 Blk*	refblk(Blk*);
 Blk*	cacheblk(Blk*);
+void	cachedel(vlong);
 Blk*	lookupblk(vlong);
 Blk*	readblk(vlong, int);
 Arena*	getarena(vlong);
@@ -31,13 +32,14 @@ uvlong	blkhash(Blk*);
 u32int	ihash(vlong);
 void	finalize(Blk*);
 char*	fillsuper(Blk*);
-char*	newsnap(Tree*, vlong*, vlong*);
+Tree*	newsnap(Tree*);
 char*	freesnap(Tree*, Tree*);
 char*	labelsnap(char*, vlong);
 char*	unlabelsnap(vlong, char*);
 char*	refsnap(vlong);
 char*	unrefsnap(vlong, vlong);
-Tree*	opensnap(char*);
+Tree*	openlabel(char*);
+void	closesnap(Tree*);
 uvlong	siphash(void*, usize);
 void	reamfs(char*);
 int	loadarena(Arena*, vlong);
@@ -55,7 +57,6 @@ char*	btscan(Tree*, Scan*, char*, int);
 char*	btnext(Scan*, Kvp*, int*);
 void	btdone(Scan*);
 
-
 void	setflag(Blk *b, int);
 int	chkflag(Blk *b, int);
 
@@ -70,6 +71,7 @@ Bptr	getptr(Kvp*, int*);
 
 void	initshow(void);
 void	showblk(int, Blk*, char*, int);
+void	showbp(int, Bptr, int);
 void	showpath(int, Path*, int);
 void	showtreeroot(int, Tree*);
 void	showtree(int, char**, int);
@@ -103,7 +105,7 @@ int	kv2qid(Kvp*, Qid*);
 
 char*	packbp(char*, int, Bptr*);
 Bptr	unpackbp(char*, int);
-char*	packtree(char*, int, Tree*, int);
+char*	packtree(char*, int, Tree*);
 Tree*	unpacktree(Tree*, char*, int);
 char*	packdkey(char*, int, vlong, char*);
 

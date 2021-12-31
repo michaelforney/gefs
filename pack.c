@@ -328,21 +328,22 @@ unpacktree(Tree *t, char *p, int sz)
 		bp.addr = GBIT64(p);	p += 8;
 		bp.hash = GBIT64(p);	p += 8;
 		bp.gen = -1;
-		if(bp.addr == -1)
+		if(bp.addr == -1){
+			t->dead[i].tail	= nil;
 			continue;
+		}
 		if((b = getblk(bp, 0)) == nil){
 			for(j = 0; j < i; j++)
 				putblk(t->dead[j].tail);
 			return nil;
 		}
 		t->dead[i].tail	= b;
-		cacheblk(b);		
 	}
 	return t;
 }
 
 char*
-packtree(char *p, int sz, Tree *t, int refs)
+packtree(char *p, int sz, Tree *t)
 {
 	vlong tladdr, tlhash;
 	Bptr head;
@@ -350,7 +351,7 @@ packtree(char *p, int sz, Tree *t, int refs)
 	int i;
 
 	assert(sz >= Treesz);
-	PBIT32(p, refs);	p += 4;
+	PBIT32(p, t->ref);	p += 4;
 	PBIT32(p, t->ht);	p += 4;
 	PBIT64(p, t->gen);	p += 8;
 	PBIT64(p, t->bp.addr);	p += 8;

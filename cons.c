@@ -34,29 +34,31 @@ syncfs(int fd, char **, int)
 static void
 snapfs(int fd, char **ap, int na)
 {
-	vlong gen, old;
+	Tree *t, *n;
 	char *e;
-	Tree *t;
 
-	if((t = opensnap(ap[0])) == nil){
-		fprint(fd, "snap: open %s: %r\n", ap[0]);
+	if((t = openlabel(ap[0])) == nil){
+		fprint(fd, "snap: open %s: does not exist\n", ap[0]);
 		return;
 	}
-	if((e = newsnap(t, &gen, &old)) != nil){
-		fprint(fd, "snap: save %s: %s\n", ap[na-1], e);
+	if((n = newsnap(t)) == nil){
+		fprint(fd, "snap: save %s: failed\n", ap[na-1]);
 		return;
 	}
-	if((e = labelsnap(ap[na-1], gen)) != nil){
+	if((e = labelsnap(ap[na-1], n->gen)) != nil){
 		fprint(fd, "snap: save %s: %s\n", ap[na-1], e);
 		return;
 	}
 	if(na <= 1 || strcmp(ap[0], ap[1]) == 0){
 		/* the label moved */
-		if((e = unrefsnap(old, gen)) != nil){
+		if((e = unrefsnap(t->gen, n->gen)) != nil){
 			fprint(fd, "snap: unref old: %s\n", e);
 			return;
 		}
 	}
+	closesnap(n);
+	closesnap(t);
+	sync();
 	fprint(fd, "snap %s: ok\n", ap[na-1]);
 }
 

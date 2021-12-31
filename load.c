@@ -42,6 +42,7 @@ loadfs(char *dev)
 	int i, dirty;
 	int blksz, bufspc, hdrsz;
 
+	fs->osnap = nil;
 	if((fs->fd = open(dev, ORDWR)) == -1)
 		sysfatal("open %s: %r", dev);
 	if((d = dirfstat(fs->fd)) == nil)
@@ -71,6 +72,12 @@ loadfs(char *dev)
 	fs->super = b;
 	fs->nextgen = fs->snap.bp.gen + 1;
 
+	for(i = 0; i < Ndead; i++){
+		fs->snap.prev[i] = -1;
+		fs->snap.dead[i].head.addr = -1;
+		fs->snap.dead[i].head.hash = -1;
+		fs->snap.dead[i].head.gen = -1;
+	}
 	fprint(2, "load: %8s\n", p);
 	fprint(2, "\tsnaptree:\t%B\n", fs->snap.bp);
 	fprint(2, "\tarenas:\t%d\n", fs->narena);

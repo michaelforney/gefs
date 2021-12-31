@@ -1,21 +1,21 @@
-- Implement: reclaim blocks that escape snapshots
-- Snapshot forking: refcount snapshots, add ids
-- Transient exec snapshots
-- Auth
-- Users and groups:
-	- Permission checks
-	- User and group loading
-	- User and group manipulation from console
-		- (do we want this? maybe just edit /adm/users?)
-- Complete wstat: implement missing operations
-- Implement special file modes: ORCLOSE, OEXCL, etc
-- Add missing commands
-- Performance optimization:
-	- Async page writeback: currently, every write to device is sync.
-	- Bulk block frees
-	- Background block frees
-	- Root block reuse
-- Small file optimizations
-	- Inline data
-	- Block fragmentation
-- Testing, Debugging
+*** must have before usable for testing ***
+- correctly implement deadlists
+- auth against authservers
+- users and groups:
+	- permission checks
+	- user and group loading
+- complete wstat: implement missing operations
+- implement special file modes: ORCLOSE, OEXCL, etc
+- add missing management commands in console
+
+*** nice to have, can get testing without**
+- transient exec snapshots
+- performance optimization:
+	- async page writeback: currently, every write to device is sync.
+	- bulk block frees
+	- background block frees
+	- root block reuse
+- small file optimizations
+	- inline data
+	- block fragmentation
+- testing, debugging

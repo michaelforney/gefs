@@ -102,8 +102,10 @@ showval(Fmt *fmt, Kvp *v, int op, int flg)
 				n += fmtprint(fmt, "mtime:%llx ", GBIT64(p));
 				p += 8;
 			}
-			if(p != v->v + v->nv)
+			if(p != v->v + v->nv){
+				fprint(2, "v->nv: %d\n", v->nv);
 				abort();
+			}
 			break;
 		}
 		break;
@@ -284,13 +286,23 @@ showtree(int fd, char **ap, int na)
 		name = ap[0];
 	if(strcmp(name, "dump") == 0)
 		t = &fs->snap;
-	else if((t = opensnap(name)) == nil){
+	else if((t = openlabel(name)) == nil){
 		fprint(fd, "open %s: %r\n", name);
 		return;
 	}
 	b = getroot(t, &h);
 	fprint(fd, "=== [%s] %B @%d\n", name, t->bp, t->ht);
 	rshowblk(fd, b, 0, 1);
+	putblk(b);
+}
+
+void
+showbp(int fd, Bptr bp, int recurse)
+{
+	Blk *b;
+
+	b = getblk(bp, 0);
+	rshowblk(fd, b, 0, recurse);
 	putblk(b);
 }
 

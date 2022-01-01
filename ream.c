@@ -13,19 +13,19 @@ initroot(Blk *r)
 {
 	char buf[512];
 	Kvp kv;
-	Dir d;
+	Xdir d;
 
 	/* nb: values must be inserted in key order */
 	memset(&d, 0, sizeof(Dir));
 	d.qid = (Qid){fs->nextqid++, 0, QTDIR};
-	d.mode = 0755;
+	d.mode = DMDIR|0755;
 	d.atime = 0;
 	d.mtime = 0;
 	d.length = 0;
 	d.name = "";
-	d.uid = "glenda";
-	d.gid = "glenda";
-	d.muid = "glenda";
+	d.uid = 2;
+	d.gid = 2;
+	d.muid = 2;
 	if(dir2kv(-1, &d, &kv, buf, sizeof(buf)) == -1)
 		sysfatal("ream: pack root: %r");
 	setval(r, 0, &kv);
@@ -101,7 +101,7 @@ reamarena(Arena *a, vlong start, vlong asz)
 	b->bp.addr = addr;
 	b->logsz = 32;
 	b->data = b->buf + Hdrsz;
-	setflag(b, Bdirty);
+	b->flag |= Bdirty;
 
 	p = b->data+Loghdsz;
 	PBIT64(p+ 0, addr|LogFree);		/* addr */

@@ -274,6 +274,9 @@ enum{
 	Owmode	= 1<<1,	/* [4]mode: update file mode */
 	Owmtime	= 1<<2, /* [8]mtime: update mtime, in nsec */
 	Owatime	= 1<<3, /* [8]atime: update atime, in nsec */
+	Owuid	= 1<<4,	/* [4]uid: set uid */
+	Owgid	= 1<<5,	/* [4]uid: set gid */
+	Owmuid	= 1<<6,	/* [4]uid: set muid */
 };
 
 /*
@@ -439,14 +442,14 @@ struct Msg {
 struct Xdir {
 	/* file data */
 	Qid	qid;	/* unique id from server */
-	vlong	mode;	/* permissions */
-	vlong	atime;	/* last read time */
-	vlong	mtime;	/* last write time */
+	int	mode;	/* permissions */
+	vlong	atime;	/* last read time: nsec */
+	vlong	mtime;	/* last write time: nsec */
 	uvlong	length;	/* file length */
 	int	uid;	/* owner name */
 	int	gid;	/* group name */
 	int	muid;	/* last modifier name */
-	char	name[Keymax];	/* last element of path */
+	char	*name;	/* last element of path */
 };
 
 struct Dent {
@@ -462,7 +465,7 @@ struct Dent {
 struct Mount {
 	long	ref;
 	vlong	gen;
-	char	*user;
+	int	uid;
 	char	*name;
 	Tree	*root;
 };
@@ -483,6 +486,10 @@ struct Fid {
 	long	ref;
 	int	mode;
 	int	iounit;
+
+	int	duid;
+	int	dgid;
+	int	dmode;
 
 	Scan	*scan;	/* in progres scan */
 	Dent	*dent;	/* (pqid, name) ref, modified on rename */

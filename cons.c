@@ -99,13 +99,13 @@ showusers(int fd, char**, int)
 	for(i = 0; i < fs->nusers; i++){
 		u = &fs->users[i];
 		fprint(fd, "%d:%s:", u->id, u->name);
-		if((v = uid2user(fs->users, fs->nusers, u->lead)) == nil)
+		if((v = uid2user(u->lead)) == nil)
 			fprint(fd, "???:");
 		else
 			fprint(fd, "%s:", v->name);
 		sep = "";
 		for(j = 0; j < u->nmemb; j++){
-			if((v = uid2user(fs->users, fs->nusers, u->memb[j])) == nil)
+			if((v = uid2user(u->memb[j])) == nil)
 				fprint(fd, "%s???", sep);
 			else
 				fprint(fd, "%s%s", sep, v->name);

@@ -9,7 +9,7 @@
 
 static char*	clearb(Fid*, vlong, vlong);
 
-// FIXME: hack.
+// FIXME: hack. We sync way too often.
 static char*
 updatesnap(Fid *f)
 {
@@ -278,7 +278,7 @@ writeb(Fid *f, Msg *m, Bptr *ret, char *s, vlong o, vlong n, vlong sz)
 }
 
 static Dent*
-getdent(vlong pqid, Dir *d)
+getdent(vlong pqid, Xdir *d)
 {
 	Dent *de;
 	char *e;
@@ -296,6 +296,7 @@ getdent(vlong pqid, Dir *d)
 
 	if((de = mallocz(sizeof(Dent), 1)) == nil)
 		return nil;
+	de->Xdir = *d;
 	de->ref = 1;
 	de->qid = d->qid;
 	de->length = d->length;
@@ -497,17 +498,74 @@ fsauth(Fmsg *m)
 	respond(m, &r);
 }
 
+int
+ingroup(int uid, int gid)
+{
+	User *u, *g;
+	int i, in;
+
+	rlock(&fs->userlk);
+	in = 0;
+	u = uid2user(uid);
+	g = uid2user(gid);
+	if(u != nil && g != nil)
+		for(i = 0; i < g->nmemb; i++)
+			if(u->id == g->memb[i])
+				in = 1;
+	runlock(&fs->userlk);
+	return in;
+}
+
+int
+mode2bits(int req)
+{
+	int m;
+
+	m = 0;
+	switch(req&0xf){
+	case OREAD:	m = DMREAD;		break;
+	case OWRITE:	m = DMWRITE;		break;
+	case ORDWR:	m = DMREAD|DMWRITE;	break;
+	case OEXEC:	m = DMREAD|DMEXEC;	break;
+	}
+	if(req&OTRUNC)
+		m |= DMWRITE;
+	return m;
+}
+
+int
+fsaccess(Mount *mnt, int fmode, int fuid, int fgid, int m)
+{
+	/* uid none gets only other permissions */
+	if(mnt->uid != 0) {
+		if(mnt->uid == fuid)
+			if((m & (fmode>>6)) == m)
+				return 0;
+		if(ingroup(mnt->uid, fgid))
+			if((m & (fmode>>3)) == m)
+				return 0;
+	}
+	if(m & fmode) {
+		if((fmode & DMDIR) && (m == DMEXEC))
+			return 0;
+		if(!ingroup(mnt->uid, 9999))
+			return 0;
+	}
+	return -1;
+}
+
 static void
 fsattach(Fmsg *m, int iounit)
 {
 	char *e, *p, dbuf[Kvmax], kvbuf[Kvmax];
 	Mount *mnt;
 	Dent *de;
+	User *u;
 	Fcall r;
+	Xdir d;
 	Kvp kv;
 	Key dk;
 	Fid f;
-	Dir d;
 
 	if((mnt = mallocz(sizeof(Mount), 1)) == nil){
 		rerror(m, Emem);
@@ -517,10 +575,15 @@ fsattach(Fmsg *m, int iounit)
 		rerror(m, Emem);
 		return;
 	}
-	if((mnt->user = strdup("glenda")) == nil){
-		rerror(m, Emem);
+	rlock(&fs->userlk);
+	if((u = name2user("glenda")) == nil){
+		rerror(m, Enouser);
+		runlock(&fs->userlk);
 		return;
 	}
+	mnt->uid = u->id;
+	runlock(&fs->userlk);
+
 	if((mnt->root = openlabel(m->aname)) == nil){
 		rerror(m, Enosnap);
 		return;
@@ -560,6 +623,9 @@ fsattach(Fmsg *m, int iounit)
 	f.mode = -1;
 	f.iounit = iounit;
 	f.dent = de;
+	f.duid = mnt->uid;
+	f.dgid = d.gid;
+	f.dmode = d.mode;
 	if(dupfid(m->fid, &f) == nil){
 		rerror(m, Enomem);
 		return;
@@ -575,13 +641,14 @@ void
 fswalk(Fmsg *m)
 {
 	char *p, *e, kbuf[Maxent], kvbuf[Kvmax];
+	int duid, dgid, dmode;
 	vlong up, prev;
 	Fid *o, *f;
 	Dent *dent;
 	Fcall r;
+	Xdir d;
 	Kvp kv;
 	Key k;
-	Dir d;
 	int i;
 
 	if((o = getfid(m->fid)) == nil){
@@ -589,12 +656,17 @@ fswalk(Fmsg *m)
 		return;
 	}
 	if(o->mode != -1){
+print("use walk\n");
 		rerror(m, Einuse);
 		return;
 	}
 	e = nil;
 	up = o->qpath;
 	prev = o->qpath;
+	d = *o->dent;
+	duid = d.uid;
+	dgid = d.gid;
+	dmode = d.mode;
 	r.type = Rwalk;
 	for(i = 0; i < m->nwname; i++){
 		if((p = packdkey(kbuf, sizeof(kbuf), prev, m->wname[i])) == nil){
@@ -607,6 +679,9 @@ fswalk(Fmsg *m)
 		if((e = lookup(o, &k, &kv, kvbuf, sizeof(kvbuf), 0)) != nil){
 			break;
 		}
+		duid = d.uid;
+		dgid = d.gid;
+		dmode = d.mode;
 		if(kv2dir(&kv, &d) == -1){
 			rerror(m, Efs);
 			putfid(o);
@@ -643,6 +718,9 @@ fswalk(Fmsg *m)
 		if(i == m->nwname){
 			f->qpath = r.wqid[i-1].path;
 			f->dent = dent;
+			f->duid = duid;
+			f->dgid = dgid;
+			f->dmode = dmode;
 		}
 	}
 	respond(m, &r);
@@ -688,7 +766,8 @@ fswstat(Fmsg *m)
 	Fcall r;
 	Dent *de;
 	Msg mb[3];
-	Dir o, d;
+	Xdir o;
+	Dir d;
 	Fid *f;
 	Kvp kv;
 	Key k;
@@ -709,6 +788,12 @@ fswstat(Fmsg *m)
 	}
 	de = f->dent;
 	k = f->dent->Key;
+	rlock(de);
+	if(fsaccess(f->mnt, de->mode, de->uid, de->gid, DMWRITE) == -1){
+		rerror(m, Eperm);
+		runlock(de);
+		return;
+	}
 
 	/* A nop qid change is allowed. */
 	if(d.qid.path != ~0 || d.qid.vers != ~0){
@@ -737,7 +822,7 @@ fswstat(Fmsg *m)
 		mb[nm].op = Odelete;
 		mb[nm].Key = f->dent->Key;
 		nm++;
-		if((e = btlookup(f->mnt->root, f->dent, &kv, kvbuf, sizeof(kvbuf))) != nil){
+		if((e = btlookup(f->mnt->root, de, &kv, kvbuf, sizeof(kvbuf))) != nil){
 			rerror(m, e);
 			goto Out;
 		}
@@ -756,33 +841,46 @@ fswstat(Fmsg *m)
 		k = mb[nm].Key;
 		nm++;
 	}
+	runlock(de);
 
+	wlock(de);
 	p = opbuf+1;
 	op = 0;
 	mb[nm].Key = k;
 	mb[nm].op = Owstat;
+	de->qid.vers++;
 	if(d.length != ~0){
 		op |= Owsize;
+		de->length = d.length;
 		PBIT64(p, d.length);
 		p += 8;
 		sync = 0;
 	}
 	if(d.mode != ~0){
 		op |= Owmode;
+		de->mode = d.mode;
 		PBIT32(p, d.mode);
 		p += 4;
 		sync = 0;
 	}
 	if(d.mtime != ~0){
 		op |= Owmtime;
+		de->mtime = d.mtime;
 		PBIT64(p, (vlong)d.mtime*Nsec);
 		p += 8;
 		sync = 0;
 	}
+	op |= Owmuid;
+	de->muid = f->mnt->uid;
+	PBIT32(p, f->mnt->uid);
+	p += 4;
+	wunlock(de);
+
 	opbuf[0] = op;
 	mb[nm].v = opbuf;
 	mb[nm].nv = p - opbuf;
 	nm++;
+
 	if(sync){
 		rerror(m, Eimpl);
 	}else{
@@ -831,11 +929,11 @@ void
 fscreate(Fmsg *m)
 {
 	char *e, buf[Kvmax];
-	Dent *dent;
+	Dent *de;
 	Fcall r;
 	Msg mb;
 	Fid *f;
-	Dir d;
+	Xdir d;
 
 	if(okname(m->name) == -1){
 		rerror(m, Ename);
@@ -849,6 +947,15 @@ fscreate(Fmsg *m)
 		rerror(m, "unknown permission");
 		return;
 	}
+	de = f->dent;
+	rlock(de);
+	if(fsaccess(f->mnt, de->mode, de->uid, de->gid, DMWRITE) == -1){
+		rerror(m, Eperm);
+		runlock(de);
+		return;
+	}
+	runlock(de);
+
 	d.qid.type = 0;
 	if(m->perm & DMDIR)
 		d.qid.type |= QTDIR;
@@ -862,12 +969,13 @@ fscreate(Fmsg *m)
 	d.qid.vers = 0;
 	d.mode = m->perm;
 	d.name = m->name;
-	d.atime = (nsec() + Nsec/2)/Nsec;
+	d.atime = nsec();
 	d.mtime = d.atime;
 	d.length = 0;
-	d.uid = "glenda";
-	d.gid = "glenda";
-	d.muid = "glenda";
+	d.uid = f->mnt->uid;
+	d.gid = f->dgid;
+	d.muid = f->mnt->uid;
+
 	mb.op = Oinsert;
 	if(dir2kv(f->qpath, &d, &mb, buf, sizeof(buf)) == -1){
 		rerror(m, Efs);
@@ -879,8 +987,8 @@ fscreate(Fmsg *m)
 		putfid(f);
 		return;
 	}
-	dent = getdent(f->qpath, &d);
-	if(dent == nil){
+	de = getdent(f->qpath, &d);
+	if(de == nil){
 		if(m->fid != m->newfid)
 			clunkfid(f);
 		rerror(m, Enomem);
@@ -891,24 +999,25 @@ fscreate(Fmsg *m)
 	lock(f);
 	if(f->mode != -1){
 		unlock(f);
-		clunkdent(dent);
+		clunkdent(de);
+print("use create\n");
 		rerror(m, Einuse);
 		putfid(f);
 		return;
 	}
-	f->mode = m->mode;
+	f->mode = mode2bits(m->mode);
 	f->qpath = d.qid.path;
-	f->dent = dent;
-	wlock(f->dent);
-	if((e = clearb(f, 0, dent->length)) != nil){
+	f->dent = de;
+	wlock(de);
+	if((e = clearb(f, 0, de->length)) != nil){
 		unlock(f);
-		clunkdent(dent);
+		clunkdent(de);
 		rerror(m, e);
 		putfid(f);
 		return;
 	}
-	dent->length = 0;
-	wunlock(f->dent);
+	de->length = 0;
+	wunlock(de);
 	unlock(f);
 
 	r.type = Rcreate;
@@ -971,6 +1080,11 @@ fsremove(Fmsg *m)
 		clunkfid(f);
 		return;
 	}
+	if(fsaccess(f->mnt, f->dmode, f->duid, f->dgid, OWRITE) == -1){
+		rerror(m, Eperm);
+		runlock(f->dent);
+		return;
+	}
 	mb.op = Odelete;
 	mb.k = f->dent->k;
 	mb.nk = f->dent->nk;
@@ -1001,67 +1115,17 @@ fsremove(Fmsg *m)
 	clunkfid(f);
 }
 
-int
-ingroup(char *user, char *group)
-{
-	User *u, *g;
-	int i, in;
-
-	rlock(&fs->userlk);
-	in = 0;
-	u = name2user(fs->users, fs->nusers, user);
-	g = name2user(fs->users, fs->nusers, group);
-	if(u != nil && g != nil)
-		for(i = 0; i < g->nmemb; i++)
-			if(u->id == g->memb[i])
-				in = 1;
-	runlock(&fs->userlk);
-	return in;
-}
-
-int
-fsaccess(Mount *mnt, Dir *d, int req)
-{
-	int m;
-
-	m = 0;
-	switch(req&0xf){
-	case OREAD:	m = DMREAD;		break;
-	case OWRITE:	m = DMWRITE;		break;
-	case ORDWR:	m = DMREAD|DMWRITE;	break;
-	}
-	if(req&OEXEC)
-		m |= DMEXEC;
-	if(req&OTRUNC)
-		m |= DMWRITE;
-
-	/* uid none gets only other permissions */
-	if(strcmp(mnt->user, "none") != 0) {
-		if(strcmp(mnt->user, d->uid) == 0)
-			if((m<<6) & d->mode)
-				return 0;
-		if(ingroup(mnt->user, d->gid))
-			if((m<<3) & d->mode)
-				return 0;
-	}
-	if(m & d->mode) {
-		if((d->mode & DMDIR) && (m == DMEXEC))
-			return 0;
-		if(!ingroup(mnt->user, "noworld"))
-			return 0;
-	}
-	return -1;
-}
-
 void
 fsopen(Fmsg *m)
 {
 	char *e, buf[Kvmax];
 	Fcall r;
-	Dir d;
+	Xdir d;
 	Fid *f;
 	Kvp kv;
+	int mb;
 
+	mb = mode2bits(m->mode);
 	if((f = getfid(m->fid)) == nil){
 		rerror(m, Efid);
 		return;
@@ -1076,7 +1140,7 @@ fsopen(Fmsg *m)
 		putfid(f);
 		return;
 	}
-	if(fsaccess(f->mnt, &d, m->mode) == -1){
+	if(fsaccess(f->mnt, d.mode, d.uid, d.gid, mb) == -1){
 		rerror(m, Eperm);
 		putfid(f);
 		return;
@@ -1091,12 +1155,13 @@ fsopen(Fmsg *m)
 	lock(f);
 	if(f->mode != -1){
 		rerror(m, Einuse);
+print("in use open\n");
 		unlock(f);
 		putfid(f);
 		return;
 	}
-	f->mode = m->mode;
-//	if((f->mode & 0x7) == OEXEC){
+	f->mode = mode2bits(m->mode);
+//	if((f->mode & DMEXEC)){
 //		lock(&fs->root.lk);
 //		f->root = fs->root;
 //		refblk(fs->root.bp);
@@ -1119,7 +1184,6 @@ fsreaddir(Fmsg *m, Fid *f, Fcall *r)
 	char pfx[Dpfxsz], *p, *e;
 	int n, ns, done;
 	Scan *s;
-	Dir d;
 
 	s = f->scan;
 	if(s != nil && s->offset != 0 && s->offset != m->offset)
@@ -1143,15 +1207,13 @@ fsreaddir(Fmsg *m, Fid *f, Fcall *r)
 		unlock(f);
 	}
 	if(s->done){
-		fprint(2, "early done...\n");
 		r->count = 0;
 		return nil;
 	}
 	p = r->data;
 	n = m->count;
 	if(s->overflow){
-		kv2dir(&s->kv, &d);
-		if((ns = convD2M(&d, (uchar*)p, n)) <= BIT16SZ)
+		if((ns = kv2statbuf(&s->kv, p, n)) == -1)
 			return Edscan;
 		s->overflow = 0;
 		p += ns;
@@ -1162,8 +1224,7 @@ fsreaddir(Fmsg *m, Fid *f, Fcall *r)
 			return e;
 		if(done)
 			break;
-		kv2dir(&s->kv, &d);
-		if((ns = convD2M(&d, (uchar*)p, n)) <= BIT16SZ){
+		if((ns = kv2statbuf(&s->kv, p, n)) == -1){
 			s->overflow = 1;
 			break;
 		}
@@ -1265,8 +1326,8 @@ fswrite(Fmsg *m)
 		rerror(m, Efid);
 		return;
 	}
-	if((f->mode&0x7) != OWRITE){
-		dprint("f->mode: %x\n", f->mode);
+	if(!(f->mode & DMWRITE)){
+print("f->mode: %x\n", f->mode);
 		rerror(m, Einuse);
 		putfid(f);
 		return;
@@ -1309,6 +1370,10 @@ fswrite(Fmsg *m)
 		p += 8;
 		f->dent->length = m->offset+m->count;
 	}
+	sbuf[0] |= Owmuid;
+	PBIT32(p, f->mnt->uid);
+	p += 4;
+
 	kv[i].v = sbuf;
 	kv[i].nv = p - sbuf;
 	if((e = btupsert(f->mnt->root, kv, i+1)) != nil){

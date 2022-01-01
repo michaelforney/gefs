@@ -251,8 +251,10 @@ logappend(Oplog *ol, Arena *a, vlong off, vlong len, vlong val, int op)
 	PBIT64(p, (uvlong)LogEnd);
 	if(ol->head.addr == -1)
 		ol->head = lb->bp;
-	if(ol->tail != lb)
+	if(ol->tail != lb){
+		putblk(ol->tail);
 		ol->tail = lb;
+	}
 	return 0;
 }
 
@@ -476,13 +478,9 @@ compresslog(Arena *a)
 	 */
 	if((bp = blkalloc_lk(a)) == -1)
 		return -1;
-	if((b = mallocz(sizeof(Blk), 1)) == nil)
+	if((b = initblk(bp, Tlog)) == nil)
 		return -1;
 	setflag(b, Bdirty);
-	b->type = Tlog;
-	b->bp.addr = bp;
-	b->ref = 1;
-	b->data = b->buf + Hdrsz;
 	b->logsz = Loghdsz;
 
 	PBIT64(b->data+b->logsz, (uvlong)LogEnd);

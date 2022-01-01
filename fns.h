@@ -52,8 +52,8 @@ int	compresslog(Arena*);
 void	setval(Blk*, int, Kvp*);
 
 char*	loadusers(int, Tree*);
-User*	uid2user(User*, int, int);
-User*	name2user(User*, int, char*);
+User*	uid2user(int);
+User*	name2user(char*);
 
 char*	btupsert(Tree*, Msg*, int);
 char*	btlookup(Tree*, Key*, Kvp*, char*, int);
@@ -102,9 +102,10 @@ char*	unpack16(int*, char*, char*, void*);
 char*	unpack32(int*, char*, char*, void*);
 char*	unpack64(int*, char*, char*, void*);
 char*	unpackstr(int*, char*, char*, char**);
-int	dir2kv(vlong, Dir*, Kvp*, char*, int);
+int	dir2kv(vlong, Xdir*, Kvp*, char*, int);
 int	kv2statbuf(Kvp*, char*, int);
-int	kv2dir(Kvp*, Dir*);
+int	dir2statbuf(Xdir*, char*, int);
+int	kv2dir(Kvp*, Xdir*);
 int	kv2qid(Kvp*, Qid*);
 
 char*	packbp(char*, int, Bptr*);
@@ -112,6 +113,7 @@ Bptr	unpackbp(char*, int);
 char*	packtree(char*, int, Tree*);
 Tree*	unpacktree(Tree*, char*, int);
 char*	packdkey(char*, int, vlong, char*);
+char*	packdval(char*, int, Xdir*);
 
 /* fmt */
 int	Bconv(Fmt*);

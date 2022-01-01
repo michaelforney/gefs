@@ -314,9 +314,9 @@ copyup(Blk *n, int i, Path *pp, int *nbytes)
 void
 statupdate(Kvp *kv, Msg *m)
 {
-	int op, err;
-	char *p, *e;
-	Dir d;
+	int op;
+	char *p;
+	Xdir d;
 
 	p = m->v;
 	op = *p++;
@@ -339,26 +339,25 @@ statupdate(Kvp *kv, Msg *m)
 		d.atime = GBIT64(p);
 		p += 8;
 	}
+	if(op & Owuid){
+		d.uid = GBIT32(p);
+		p += 4;
+	}
+	if(op & Owgid){
+		d.gid = GBIT32(p);
+		p += 4;
+	}
+	if(op & Owmuid){
+		d.muid = GBIT32(p);
+		p += 4;
+	}
 	if(p != m->v + m->nv){
 		fprint(2, "kv=%P, m=%M\n", kv, m);
 		fprint(2, "malformed stat message (op=%x, len=%lld, sz=%d)\n", op, p - m->v, m->nv);
 		abort();
 	}
-	err = 0;
-	p = kv->v;
-	e = kv->v + kv->nv;
-	p = pack64(&err, p, e, d.qid.path);
-	p = pack32(&err, p, e, d.qid.vers);
-	p = pack8(&err, p, e, d.qid.type);
-	p = pack32(&err, p, e, d.mode);
-	p = pack64(&err, p, e, (vlong)d.atime*Nsec);
-	p = pack64(&err, p, e, (vlong)d.mtime*Nsec);
-	p = pack64(&err, p, e, d.length);
-	p = packstr(&err, p, e, d.uid);
-	p = packstr(&err, p, e, d.gid);
-	p = packstr(&err, p, e, d.muid);
-	if(err){
-		fprint(2, "wstat not fixed size(%llx != %d)\n", p - kv->v, kv->nv);
+	if(packdval(kv->v, kv->nv, &d) == nil){
+		fprint(2, "repacking dir failed");
 		abort();
 	}
 }

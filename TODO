@@ -1,14 +1,11 @@
 *** must have before usable for testing ***
 - correctly implement deadlists
 - auth against authservers
-- users and groups:
-	- permission checks
-	- user and group loading
-- complete wstat: implement missing operations
 - implement special file modes: ORCLOSE, OEXCL, etc
-- add missing management commands in console
 
 *** nice to have, can get testing without**
+- Reserve blocks for deletion
+- add missing management commands in console
 - transient exec snapshots
 - performance optimization:
 	- async page writeback: currently, every write to device is sync.

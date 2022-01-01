@@ -14,7 +14,7 @@ char *defaultusers =
 	"-1:adm::\n"
 	"0:none::\n"
 	"1:tor:tor:\n"
-	"1:glenda:glenda:\n"
+	"2:glenda:glenda:\n"
 	"10000:sys::\n"
 	"10001:map:map:\n"
 	"10002:doc::\n"
@@ -27,9 +27,9 @@ walk1(Tree *t, vlong up, char *name, Qid *qid, vlong *len)
 {
 	char *p, kbuf[Keymax], rbuf[Kvmax];
 	int err;
+	Xdir d;
 	Kvp kv;
 	Key k;
-	Dir d;
 
 	err = 0;
 	if((p = packdkey(kbuf, sizeof(kbuf), up, name)) == nil)
@@ -112,24 +112,24 @@ getfield(char **p, char delim)
 }
 
 User*
-name2user(User *users, int nusers, char *name)
+name2user(char *name)
 {
 	int i;
 
-	for(i = 0; i < nusers; i++)
-		if(strcmp(users[i].name, name) == 0)
-			return &users[i];
+	for(i = 0; i < fs->nusers; i++)
+		if(strcmp(fs->users[i].name, name) == 0)
+			return &fs->users[i];
 	return nil;
 }
 
 User*
-uid2user(User *users, int nusers, int id)
+uid2user(int id)
 {
 	int i;
 
-	for(i = 0; i < nusers; i++)
-		if(users[i].id == id)
-			return &users[i];
+	for(i = 0; i < fs->nusers; i++)
+		if(fs->users[i].id == id)
+			return &fs->users[i];
 	return nil;
 }
 
@@ -193,7 +193,11 @@ parseusers(int fd, char *udata)
 		if((f = getfield(&p, ':')) == nil)
 			return Esyntax;
 		if(f[0] != '\0'){
-			if((u = name2user(users, nusers, f)) == nil){
+			u = nil;
+			for(i = 0; i < nusers; i++)
+				if(strcmp(users[i].name, f) == 0)
+					u = &users[i];
+			if(u == nil){
 				fprint(fd, "/adm/users:%d: leader %s does not exist\n", lnum, f);
 				err = Enouser;
 				goto Error;
@@ -207,7 +211,11 @@ parseusers(int fd, char *udata)
 		while((m = getfield(&f, ',')) != nil){
 			if(m[0] == '\0')
 				continue;
-			if((u = name2user(users, nusers, m)) == nil){
+			u = nil;
+			for(i = 0; i < nusers; i++)
+				if(strcmp(users[i].name, m) == 0)
+					u = &users[i];
+			if(u == nil){
 				fprint(fd, "/adm/users:%d: user %s does not exist\n", lnum, m);
 				err = Enouser;
 				goto Error;

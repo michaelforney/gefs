@@ -7,7 +7,7 @@
 #include "fns.h"
 
 void
-cachedel(vlong del)
+cachedel_lk(vlong del)
 {
 	Bucket *bkt;
 	Blk *b, **p;
@@ -42,6 +42,7 @@ cachedel(vlong del)
 	b->cprev = nil;
 	clrflag(b, Bcached);
 	fs->ccount--;
+	putblk(b);
 }
 
 Blk*
@@ -87,14 +88,20 @@ Found:
 		fs->ccount++;
 		refblk(b);
 	}
-	for(c = fs->ctail; c != nil && fs->ccount >= fs->cmax; c = fs->ctail){
-		cachedel(c->bp.addr);
-		putblk(c);
-	}
+	for(c = fs->ctail; c != nil && fs->ccount >= fs->cmax; c = fs->ctail)
+		cachedel_lk(c->bp.addr);
 
 Cached:
 	unlock(&fs->lrulk);
 	return b;
+}
+
+void
+cachedel(vlong del)
+{
+	lock(&fs->lrulk);
+	cachedel_lk(del);
+	unlock(&fs->lrulk);
 }
 
 Blk*

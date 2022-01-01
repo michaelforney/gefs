@@ -132,69 +132,68 @@ packstr(int *err, char *p, char *e, char *s)
 }
 		
 int
-dir2kv(vlong up, Dir *d, Kvp *kv, char *buf, int nbuf)
+dir2kv(vlong up, Xdir *d, Kvp *kv, char *buf, int nbuf)
 {
-	char *k, *ek, *v, *ev, *eb;
-	int err;
+	char *ek, *ev, *eb;
 
-	err = 0;
-	k = buf;
-	ek = buf;
-	eb = buf + nbuf;
-	ek = pack8(&err, ek, eb, Kent);
-	ek = pack64(&err, ek, eb, up);
-	ek = packstr(&err, ek, eb, d->name);
-
-	v = ek;
-	ev = ek;
-	ev = pack64(&err, ev, eb, d->qid.path);
-	ev = pack32(&err, ev, eb, d->qid.vers);
-	ev = pack8(&err, ev, eb, d->qid.type);
-	ev = pack32(&err, ev, eb, d->mode);
-	ev = pack64(&err, ev, eb, (vlong)d->atime*Nsec);
-	ev = pack64(&err, ev, eb, (vlong)d->mtime*Nsec);
-	ev = pack64(&err, ev, eb, d->length);
-	ev = packstr(&err, ev, eb, d->uid);
-	ev = packstr(&err, ev, eb, d->gid);
-	ev = packstr(&err, ev, eb, d->muid);
-	if(err){
-		werrstr("stat too big: %.*s...", 32, d->name);
+	if((ek = packdkey(buf, nbuf, up, d->name)) == nil)
 		return -1;
-	}
-	kv->k = k;
-	kv->nk = ek - k;
-	kv->v = v;
-	kv->nv = ev - v;
+	kv->k = buf;
+	kv->nk = ek - buf;
+	eb = buf + nbuf;
+	if((ev = packdval(ek, eb - ek, d)) == nil)
+		return -1;
+	kv->v = ek;
+	kv->nv = ev - ek;
 	return 0;
 }
 
-int
-name2dkey(vlong up, char *name, Key *k, char *buf, int nbuf)
+char*
+packdkey(char *p, int sz, vlong up, char *name)
 {
-	char *ek, *eb;
+	char *ep;
 	int err;
 
 	err = 0;
-	ek = buf;
-	eb = buf + nbuf;
-	ek = pack8(&err, ek, eb, Kent);
-	ek = pack64(&err, ek, eb, up);
-	ek = packstr(&err, ek, eb, name);
+	ep = p + sz;
+	p = pack8(&err, p, ep, Kent);
+	p = pack64(&err, p, ep, up);
+	p = packstr(&err, p, ep, name);
 	if(err)
-		return -1;
-	k->k = buf;
-	k->nk = ek - buf;
-	return k->nk;
+		return nil;
+	return p;
+}
+
+char*
+packdval(char *p, int sz, Xdir *d)
+{
+	char *e;
+	int err;
+
+	err = 0;
+	e = p + sz;
+	p = pack64(&err, p, e, d->qid.path);
+	p = pack32(&err, p, e, d->qid.vers);
+	p = pack8(&err, p, e, d->qid.type);
+	p = pack32(&err, p, e, d->mode);
+	p = pack64(&err, p, e, d->atime);
+	p = pack64(&err, p, e, d->mtime);
+	p = pack64(&err, p, e, d->length);
+	p = pack32(&err, p, e, d->uid);
+	p = pack32(&err, p, e, d->gid);
+	p = pack32(&err, p, e, d->muid);
+	if(err)
+		abort();
+	return p;
 }
 
 int
-kv2dir(Kvp *kv, Dir *d)
+kv2dir(Kvp *kv, Xdir *d)
 {
 	char *k, *ek, *v, *ev;
-	vlong atime, mtime;
 	int err;
 
-	memset(d, 0, sizeof(Dir));
+	memset(d, 0, sizeof(Xdir));
 	err = 0;
 	k = kv->k + 9;
 	ek = kv->k + kv->nk;
@@ -210,12 +209,12 @@ kv2dir(Kvp *kv, Dir *d)
 	v = unpack32(&err, v, ev, &d->qid.vers);
 	v = unpack8(&err, v, ev, &d->qid.type);
 	v = unpack32(&err, v, ev, &d->mode);
-	v = unpack64(&err, v, ev, &atime);
-	v = unpack64(&err, v, ev, &mtime);
+	v = unpack64(&err, v, ev, &d->atime);
+	v = unpack64(&err, v, ev, &d->mtime);
 	v = unpack64(&err, v, ev, &d->length);
-	v = unpackstr(&err, v, ev, &d->uid);
-	v = unpackstr(&err, v, ev, &d->gid);
-	v = unpackstr(&err, v, ev, &d->muid);
+	v = unpack32(&err, v, ev, &d->uid);
+	v = unpack32(&err, v, ev, &d->gid);
+	v = unpack32(&err, v, ev, &d->muid);
 	if(err){
 //		print("fucked: %P\n", kv);
 		werrstr("val too small [%s]", d->name);
@@ -229,22 +228,65 @@ kv2dir(Kvp *kv, Dir *d)
 		werrstr("stat full of fuck");
 		return -1;
 	}
-	d->atime = (atime+Nsec/2)/Nsec;
-	d->mtime = (mtime+Nsec/2)/Nsec;
 	return 0;
 }
 
 int
 kv2statbuf(Kvp *kv, char *buf, int nbuf)
 {
-	Dir d;
-	int n;
+	int sz, nn, nu, ng, nm, ret;
+	vlong atime, mtime;
+	User *u, *g, *m;
+	char *p;
+	Xdir d;
 
 	if(kv2dir(kv, &d) == -1)
 		return -1;
-	if((n = convD2M(&d, (uchar*)buf, nbuf)) <= BIT16SZ)
-		return -1;
-	return n;	
+
+	ret = -1;
+	rlock(&fs->userlk);
+	if((u = uid2user(d.uid)) == nil)
+		goto Out;
+	if((g = uid2user(d.gid)) == nil)
+		goto Out;
+	if((m = uid2user(d.muid)) == nil)
+		goto Out;
+
+	p = buf;
+	nn = strlen(d.name);
+	nu = strlen(u->name);
+	ng = strlen(g->name);
+	nm = strlen(m->name);
+	atime = (d.atime+Nsec/2)/Nsec;
+	mtime = (d.mtime+Nsec/2)/Nsec;
+	sz = STATFIXLEN + nn + nu + ng + nm;
+	if(sz > nbuf)
+		goto Out;
+	
+	PBIT16(p, sz-2);		p += 2;
+	PBIT16(p, -1 /*type*/);		p += 2;
+	PBIT32(p, -1 /*dev*/);		p += 4;
+	PBIT8(p, d.qid.type);		p += 1;
+	PBIT32(p, d.qid.vers);		p += 4;
+	PBIT64(p, d.qid.path);		p += 8;
+	PBIT32(p, d.mode);		p += 4;
+	PBIT32(p, atime);		p += 4;
+	PBIT32(p, mtime);		p += 4;
+	PBIT64(p, d.length);		p += 8;
+
+	PBIT16(p, nn);			p += 2;
+	memcpy(p, d.name, nn);		p += nn;
+	PBIT16(p, nu);			p += 2;
+	memcpy(p, u->name, nu);		p += nu;
+	PBIT16(p, ng);			p += 2;
+	memcpy(p, g->name, ng);		p += ng;
+	PBIT16(p, nm);			p += 2;
+	memcpy(p, m->name, nm);		p += nm;
+	assert(p - buf == sz);
+	ret = sz;
+Out:
+	runlock(&fs->userlk);
+	return ret;	
 }
 
 int
@@ -286,22 +328,6 @@ unpackbp(char *p, int sz)
 	bp.hash = GBIT64(p);	p += 8;
 	bp.gen = GBIT64(p);
 	return bp;
-}
-
-char*
-packdkey(char *p, int sz, vlong up, char *name)
-{
-	char *ep;
-	int err;
-
-	err = 0;
-	ep = p + sz;
-	p = pack8(&err, p, ep, Kent);
-	p = pack64(&err, p, ep, up);
-	p = packstr(&err, p, ep, name);
-	if(err)
-		return 0;
-	return p;
 }
 
 Tree*

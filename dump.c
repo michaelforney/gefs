@@ -49,7 +49,7 @@ showval(Fmt *fmt, Kvp *v, int op, int flg)
 	int n, ws;
 	char *p;
 	Tree t;
-	Dir d;
+	Xdir d;
 
 	n = 0;
 	if(flg){
@@ -76,7 +76,7 @@ showval(Fmt *fmt, Kvp *v, int op, int flg)
 			if(kv2dir(v, &d) == -1)
 				n = fmtprint(fmt, "bad dir");
 			else
-				n = fmtprint(fmt, "[qid=(%lld,%lud,%d), %lo, t=%lud,%lud, l=%lld]",
+				n = fmtprint(fmt, "[qid=(%lld,%lud,%d), %o, t=%lld,%lld, l=%lld]",
 					d.qid.path, d.qid.vers, d.qid.type,
 					d.mode, d.atime, d.mtime, d.length);
 			break;
@@ -102,8 +102,20 @@ showval(Fmt *fmt, Kvp *v, int op, int flg)
 				n += fmtprint(fmt, "mtime:%llx ", GBIT64(p));
 				p += 8;
 			}
+			if(ws & Owuid){
+				n += fmtprint(fmt, "uid:%d ", GBIT32(p));
+				p += 4;
+			}
+			if(ws & Owgid){
+				n += fmtprint(fmt, "gid:%d ", GBIT32(p));
+				p += 4;
+			}
+			if(ws & Owmuid){
+				n += fmtprint(fmt, "muid:%d ", GBIT32(p));
+				p += 4;
+			}
 			if(p != v->v + v->nv){
-				fprint(2, "v->nv: %d\n", v->nv);
+				fprint(2, "v->nv: %d, sz=%d\n", v->nv, (int)(p - v->v));
 				abort();
 			}
 			break;

@@ -738,7 +738,6 @@ fillsuper(Blk *b)
 	p = b->data;
 	setflag(b, Bdirty);
 	memcpy(p, "gefs0001", 8); p += 8;
-	PBIT32(p, 0); p += 4; /* dirty */
 	PBIT32(p, Blksz); p += 4;
 	PBIT32(p, Bufspc); p += 4;
 	PBIT32(p, Hdrsz); p += 4;

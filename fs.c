@@ -39,6 +39,70 @@ updatesnap(Fid *f)
 	return nil;
 }
 
+static void
+snapfs(int fd, char *old, char *new)
+{
+	Tree *t, *u;
+	char *e;
+
+	u = openlabel(new);
+	if((t = openlabel(old)) == nil){
+		fprint(fd, "snap: open %s: does not exist\n", old);
+		return;
+	}
+	if((e = labelsnap(new, t->gen)) != nil){
+		fprint(fd, "snap: label %s: %s\n", new, e);
+		return;
+	}
+	if(u != nil){
+		if((e = unrefsnap(u->gen, -1)) != nil){
+			fprint(fd, "snap: unref %s: %s\n", new, e);
+			return;
+		}
+	}
+	if(u != nil)
+		closesnap(u);
+	closesnap(t);
+	sync();
+	fprint(fd, "snap taken: %s\n", new);
+}
+
+static Tree*
+scratchsnap(Fid *f)
+{
+	Tree *t, *n;
+	char *e;
+
+	t = f->mnt->root;
+	qlock(&fs->snaplk);
+	if((n = newsnap(t)) == nil){
+		fprint(2, "snap: save %s: %s\n", f->mnt->name, "create snap");
+		abort();
+	}
+	if((e = labelsnap(f->mnt->name, t->gen)) != nil){
+		fprint(2, "snap: save %s: %s\n", f->mnt->name, e);
+		abort();
+	}
+	if(t->prev[0] != -1){
+		if((e = unrefsnap(t->prev[0], t->gen)) != nil){
+			fprint(2, "snap: unref old: %s\n", e);
+			abort();
+		}
+	}
+	f->mnt->root = n;
+	closesnap(t);
+	qunlock(&fs->snaplk);
+	sync();
+	return nil;
+}
+
+void
+freemsg(Fmsg *m)
+{
+	free(m->a);
+	free(m);
+}
+
 static int
 okname(char *name)
 {
@@ -130,11 +194,9 @@ respond(Fmsg *m, Fcall *r)
 	dprint("→ %F\n", r);
 	if((n = convS2M(r, buf, sizeof(buf))) == 0)
 		abort();
-	qlock(m->wrlk);
 	w = write(m->fd, buf, n);
-	qunlock(m->wrlk);
 	if(w != n)
-		fshangup(m->fd, "failed write");
+		fshangup(m->fd, Eio);
 	free(m);
 }
 
@@ -466,6 +528,7 @@ readmsg(int fd, int max)
 	}
 	m->fd = fd;
 	m->sz = sz;
+	m->a = nil;
 	PBIT32(m->buf, sz);
 	return m;
 }
@@ -656,7 +719,6 @@ fswalk(Fmsg *m)
 		return;
 	}
 	if(o->mode != -1){
-print("use walk\n");
 		rerror(m, Einuse);
 		return;
 	}
@@ -1000,7 +1062,6 @@ fscreate(Fmsg *m)
 	if(f->mode != -1){
 		unlock(f);
 		clunkdent(de);
-print("use create\n");
 		rerror(m, Einuse);
 		putfid(f);
 		return;
@@ -1155,7 +1216,6 @@ fsopen(Fmsg *m)
 	lock(f);
 	if(f->mode != -1){
 		rerror(m, Einuse);
-print("in use open\n");
 		unlock(f);
 		putfid(f);
 		return;
@@ -1327,7 +1387,6 @@ fswrite(Fmsg *m)
 		return;
 	}
 	if(!(f->mode & DMWRITE)){
-print("f->mode: %x\n", f->mode);
 		rerror(m, Einuse);
 		putfid(f);
 		return;
@@ -1401,15 +1460,12 @@ runfs(int wid, void *pfd)
 {
 	int fd, msgmax, versioned;
 	char err[128];
-	QLock *wrlk;
 	Fcall r;
 	Fmsg *m;
 
 	fd = (uintptr)pfd;
 	msgmax = Max9p;
 	versioned = 0;
-	if((wrlk = mallocz(sizeof(QLock), 1)) == nil)
-		fshangup(fd, "alloc wrlk: %r");
 	while(1){
 		if((m = readmsg(fd, msgmax)) == nil){
 			fshangup(fd, "truncated message: %r");
@@ -1424,7 +1480,6 @@ runfs(int wid, void *pfd)
 			fshangup(fd, "version required");
 			return;
 		}
-		m->wrlk = wrlk;
 		versioned = 1;
 		dprint("← %F\n", &m->Fcall);
 		switch(m->type){
@@ -1436,13 +1491,13 @@ runfs(int wid, void *pfd)
 		case Tattach:	fsattach(m, msgmax);	break;
 
 		/* mutators */
-		case Tflush:	chsend(fs->wrchan, m);	break;
 		case Tcreate:	chsend(fs->wrchan, m);	break;
 		case Twrite:	chsend(fs->wrchan, m);	break;
 		case Twstat:	chsend(fs->wrchan, m);	break;
 		case Tremove:	chsend(fs->wrchan, m);	break;
 
 		/* reads */
+		case Tflush:	chsend(fs->rdchan, m);	break;
 		case Twalk:	chsend(fs->rdchan, m);	break;
 		case Tread:	chsend(fs->rdchan, m);	break;
 		case Tstat:	chsend(fs->rdchan, m);	break;
@@ -1462,16 +1517,40 @@ void
 runwrite(int wid, void *)
 {
 	Fmsg *m;
+	int ao;
 
 	while(1){
 		m = chrecv(fs->wrchan);
 		quiesce(wid);
-		switch(m->type){
-		case Tflush:	rerror(m, Eimpl);	break;
-		case Tcreate:	fscreate(m);	break;
-		case Twrite:	fswrite(m);	break;
-		case Twstat:	fswstat(m);	break;
-		case Tremove:	fsremove(m);	break;
+		ao = (m->a == nil) ? AOnone : m->a->op;
+		switch(ao){
+		case AOnone:
+			if(fs->rdonly){
+				rerror(m, Erdonly);
+				return;
+			}
+			if(fs->broken){
+				rerror(m, Efs);
+				return;
+			}
+			switch(m->type){
+			case Tcreate:	fscreate(m);	break;
+			case Twrite:	fswrite(m);	break;
+			case Twstat:	fswstat(m);	break;
+			case Tremove:	fsremove(m);	break;
+			}
+			break;
+		case AOsync:
+			fprint(m->a->fd, "syncing [readonly: %d]\n", m->a->halt);
+			if(m->a->halt)
+				ainc(&fs->rdonly);
+			sync();
+			freemsg(m);
+			break;
+		case AOsnap:
+			snapfs(m->a->fd, m->a->old, m->a->new);
+			freemsg(m);
+			break;
 		}
 		quiesce(wid);
 	}
@@ -1486,6 +1565,7 @@ runread(int wid, void *)
 		m = chrecv(fs->rdchan);
 		quiesce(wid);
 		switch(m->type){
+		case Tflush:	rerror(m, Eimpl);	break;
 		case Twalk:	fswalk(m);	break;
 		case Tread:	fsread(m);	break;
 		case Tstat:	fsstat(m);	break;

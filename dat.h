@@ -1,4 +1,5 @@
 typedef struct Blk	Blk;
+typedef struct Amsg	Amsg;
 typedef struct Gefs	Gefs;
 typedef struct Fmsg	Fmsg;
 typedef struct Fid	Fid;
@@ -76,13 +77,15 @@ enum {
 	/*
 	 * dent: pqid[8] qid[8] -- a directory entry key.
 	 * ptr:  off[8] hash[8] -- a key for an Dir block.
-	 * dir:  fixed statbuf header, user ids
+	 * dir:  serialized Xdir
 	 */
 	Kdat,	/* qid[8] off[8] => ptr[16]:	pointer to data page */
 	Kent,	/* pqid[8] name[n] => dir[n]:	serialized Dir */
-	Klabel,	/* name[] => snapid[]:		dataset (snapshot ref) */
+	Klabel,	/* name[] => snapid[]:		snapshot label */
+	Ktref,	/* tag[8] = snapid[]		scratch snapshot label */
 	Ksnap,	/* sid[8] => ref[8], tree[52]:	snapshot root */
 	Ksuper,	/* qid[8] => pqid[8]:		parent dir */
+	Kdirty,	/* [0] => [0]:			mark dirty unmount */
 };
 
 enum {
@@ -94,7 +97,7 @@ enum {
 
 //#define Efs	"i will not buy this fs, it is scratched"
 #define Eimpl	"not implemented"
-#define Efs (abort(), "nope")
+#define Efs	(abort(), "fs broke")
 #define Eio	"i/o error"
 #define Efid	"unknown fid"
 #define Etype	"invalid fid type"
@@ -118,6 +121,7 @@ enum {
 #define Enouser	"user does not exist"
 #define Efsize	"file too big"
 #define Ebadu	"attach -- unknown user or failed authentication"
+#define Erdonly	"file system read only"
 
 #define Ewstatb	"wstat -- unknown bits in qid.type/mode"
 #define Ewstatd	"wstat -- attempt to change directory"
@@ -132,34 +136,32 @@ enum {
 #define Enempty	"remove -- directory not empty"
 
 
-//#define Echar		"bad character in directory name",
-//#define Eopen		"read/write -- on non open fid",
-//#define Ecount	"read/write -- count too big",
-//#define Ealloc	"phase error -- directory entry not allocated",
-//#define Eqid		"phase error -- qid does not match",
-//#define Eaccess	"access permission denied",
-//#define Eentry	"directory entry not found",
-//#define Emode		"open/create -- unknown mode",
-//#define Edir1		"walk -- in a non-directory",
-//#define Edir2		"create -- in a non-directory",
-//#define Ephase	"phase error -- cannot happen",
-//#define Eexist	"create/wstat -- file exists",
-//#define Edot		"create/wstat -- . and .. illegal names",
-//#define Ewalk		"walk -- too many (system wide)",
-//#define Eronly	"file system read only",
-//#define Efull		"file system full",
-//#define Eoffset	"read/write -- offset negative",
-//#define Elocked	"open/create -- file is locked",
-//#define Ebroken	"read/write -- lock is broken",
-//#define Eauth		"attach -- authentication failed",
-//#define Eauth2	"read/write -- authentication unimplemented",
-//#define Etoolong	"name too long",
-//#define Efidinuse	"fid in use",
-//#define Econvert	"protocol botch",
-//#define Eversion	"version conversion",
-//#define Eauthnone	"auth -- user 'none' requires no authentication",
+//#define Echar		"bad character in directory name"
+//#define Eopen		"read/write -- on non open fid"
+//#define Ecount	"read/write -- count too big"
+//#define Ealloc	"phase error -- directory entry not allocated"
+//#define Eqid		"phase error -- qid does not match"
+//#define Eaccess	"access permission denied"
+//#define Eentry	"directory entry not found"
+//#define Emode		"open/create -- unknown mode"
+//#define Edir1		"walk -- in a non-directory"
+//#define Edir2		"create -- in a non-directory"
+//#define Ephase	"phase error -- cannot happen"
+//#define Eexist	"create/wstat -- file exists"
+//#define Edot		"create/wstat -- . and .. illegal names"
+//#define Ewalk		"walk -- too many (system wide)"
+//#define Eoffset	"read/write -- offset negative"
+//#define Elocked	"open/create -- file is locked"
+//#define Ebroken	"read/write -- lock is broken"
+//#define Eauth		"attach -- authentication failed"
+//#define Eauth2	"read/write -- authentication unimplemented"
+//#define Etoolong	"name too long"
+//#define Efidinuse	"fid in use"
+//#define Econvert	"protocol botch"
+//#define Eversion	"version conversion"
+//#define Eauthnone	"auth -- user 'none' requires no authentication"
 //#define Eauthdisabled	"auth -- authentication disabled",	/* development */
-//#define Eauthfile	"auth -- out of auth files",
+//#define Eauthfile	"auth -- out of auth files"
 
 /*
  * All metadata blocks share a common header:
@@ -171,8 +173,6 @@ enum {
  *
  * The superblock has this layout:
  *	version[8]	always "gefs0001"
- *	flags[4]	status flags:
- *				dirty=1<<0,
  *	blksz[4]	block size in bytes
  *	bufsz[4]	portion of leaf nodes
  *			allocated to buffers,
@@ -297,6 +297,12 @@ enum {
 	LogDead	,	/* deadlist a block */
 };
 
+enum {
+	AOnone,
+	AOsnap,
+	AOsync,
+};
+
 struct Bptr {
 	vlong	addr;
 	vlong	hash;
@@ -319,11 +325,25 @@ struct Bucket {
 	Blk	*b;
 };
 
+struct Amsg {
+	int	op;
+	int	fd;
+	union {
+		struct {	/* AOsnap */
+			char	old[128];
+			char	new[128];
+		};
+		struct {	/* AOsync */
+			int	halt;
+		};
+	};
+};
+
 struct Fmsg {
 	Fcall;
 	int	fd;	/* the fd to repsond on */
-	QLock	*wrlk;	/* write lock on fd */
 	int	sz;	/* the size of the message buf */
+	Amsg	*a;	/* admin messages */
 	uchar	buf[];
 };
 
@@ -358,6 +378,7 @@ struct User {
  * Shadows the superblock contents.
  */
 struct Gefs {
+	/* immutable data */
 	int	blksz;	/* immutable */
 	int	bufsz;	/* immutable */
 	int	pivsz;	/* immutable */
@@ -380,28 +401,35 @@ struct Gefs {
 
 	int	fd;
 	long	broken;
+	long	rdonly;
 
+	/* root snapshot tree */
 	Tree	snap;
 
 	uvlong	nextqid;
-	uvlong	nextgen; /* unlocked: only touched by mutator thread */
+	uvlong	nextgen;
 
+	/* arena allocation */
 	Arena	*arenas;
 	int	narena;
 	long	roundrobin;
 	vlong	arenasz;
 
+	/* user list */
 	RWLock	userlk;
 	User	*users;
 	int	nusers;
 
+	/* fid hash table */
 	Lock	fidtablk;
 	Fid	*fidtab[Nfidtab];
+
+	/* dent hash table */
 	Lock	dtablk;
 	Dent	*dtab[Ndtab];
 
-	Lock	lrulk;
 	/* protected by lrulk */
+	Lock	lrulk;
 	Bucket	*cache;
 	Blk	*chead;
 	Blk	*ctail;

@@ -35,8 +35,7 @@ loadarena(Arena *a, vlong o)
 void
 loadfs(char *dev)
 {
-	int blksz, bufspc, hdrsz;
-	int i, dirty;
+	int i, blksz, bufspc, hdrsz;
 	vlong sb;
 	char *p, *e;
 	Tree *t;
@@ -59,7 +58,6 @@ loadfs(char *dev)
 		sysfatal("corrupt superblock: bad magic");
 	p = b->data + 8;
 
-	dirty = GBIT32(p);		p += 4; /* dirty */
 	blksz = GBIT32(p);		p += 4;
 	bufspc = GBIT32(p);		p += 4;
 	hdrsz = GBIT32(p);		p += 4;
@@ -95,10 +93,6 @@ loadfs(char *dev)
 		sysfatal("fs uses different buffer size");
 	if(blksz != Blksz)
 		sysfatal("fs uses different block size");
-	if(dirty){
-		fprint(2, "file system was not unmounted cleanly");
-		/* TODO: start gc pass */
-	}
 	if((t = openlabel("main")) == nil)
 		sysfatal("load users: no main label");
 	if((e = loadusers(2, t)) != nil)

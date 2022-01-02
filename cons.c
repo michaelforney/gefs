@@ -24,40 +24,65 @@ setdbg(int fd, char **ap, int na)
 }
 
 static void
-syncfs(int fd, char **, int)
+sendsync(int fd, int halt)
 {
-	fprint(fd, "sync\n");
+	Fmsg *m;
+	Amsg *a;
+
+	m = mallocz(sizeof(Fmsg), 1);
+	a = mallocz(sizeof(Amsg), 1);
+	if(m == nil || a == nil){
+		fprint(fd, "alloc sync msg: %r\n");
+		free(m);
+		free(a);
+		return;
+	}
+	a->op = AOsync;
+	a->halt = halt;
+	a->fd = fd;
+	m->a = a;
+	chsend(fs->wrchan, m);		
 }
 
 static void
-snapfs(int fd, char **ap, int na)
+syncfs(int fd, char **, int)
 {
-	Tree *t, *n;
-	char *e;
+	sendsync(fd, 0);
+}
 
-	if((t = openlabel(ap[0])) == nil){
-		fprint(fd, "snap: open %s: does not exist\n", ap[0]);
-		return;
+static void
+haltfs(int fd, char **, int)
+{
+	sendsync(fd, 1);
+}
+
+static void
+snapfs(int fd, char **ap, int)
+{
+	Fmsg *m;
+	Amsg *a;
+
+	m = mallocz(sizeof(Fmsg), 1);
+	a = mallocz(sizeof(Amsg), 1);
+	if(m == nil || a == nil){
+		fprint(fd, "alloc sync msg: %r\n");
+		goto Error;
 	}
-	if((n = newsnap(t)) == nil){
-		fprint(fd, "snap: save %s: failed\n", ap[na-1]);
-		return;
+	if(strcmp(ap[0], ap[1]) == 0){
+		fprint(fd, "not a new snap: %s\n", ap[1]);
+		goto Error;
 	}
-	if((e = labelsnap(ap[na-1], n->gen)) != nil){
-		fprint(fd, "snap: save %s: %s\n", ap[na-1], e);
-		return;
-	}
-	if(na <= 1 || strcmp(ap[0], ap[1]) == 0){
-		/* the label moved */
-		if((e = unrefsnap(t->gen, n->gen)) != nil){
-			fprint(fd, "snap: unref old: %s\n", e);
-			return;
-		}
-	}
-	closesnap(n);
-	closesnap(t);
-	sync();
-	fprint(fd, "snap %s: ok\n", ap[na-1]);
+	strecpy(a->old, a->old+sizeof(a->old), ap[0]);
+	strecpy(a->new, a->new+sizeof(a->new), ap[1]);
+	a->op = AOsnap;
+	a->fd = fd;
+	m->a = a;
+	chsend(fs->wrchan, m);
+	return;	
+Error:
+	free(m);
+	free(a);
+	return;
 }
 
 static void
@@ -124,8 +149,8 @@ help(int fd, char**, int)
 		"	show this help"
 		"sync\n"
 		"	flush all p[ending writes to disk\n"
-		"snap name [new]\n"
-		"	create or update a new snapshot\n"
+		"snap old new\n"
+		"	create or update a new snapshot based off old\n"
 		"check\n"
 		"	run a consistency check on the file system\n"
 		"users\n"
@@ -150,7 +175,8 @@ help(int fd, char**, int)
 
 Cmd cmdtab[] = {
 	{.name="sync",	.sub=nil,	.minarg=0, .maxarg=0, .fn=syncfs},
-	{.name="snap",	.sub=nil,	.minarg=1, .maxarg=2, .fn=snapfs},
+	{.name="halt",	.sub=nil,	.minarg=0, .maxarg=0, .fn=haltfs},
+	{.name="snap",	.sub=nil,	.minarg=2, .maxarg=2, .fn=snapfs},
 	{.name="check",	.sub=nil,	.minarg=1, .maxarg=1, .fn=fsckfs},
 	{.name="help",	.sub=nil,	.minarg=0, .maxarg=0, .fn=help},
 	{.name="users",	.sub=nil,	.minarg=0, .maxarg=1, .fn=refreshusers},

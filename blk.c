@@ -286,8 +286,6 @@ graft(Oplog *a, Oplog *b)
 		return 0;
 	}
 
-showlst("a", a);
-showlst("b", b);
 	o = b->head.addr|LogChain;
 	p = a->tail->data + a->tail->logsz;
 	PBIT64(p, o);
@@ -295,20 +293,15 @@ showlst("b", b);
 		return -1;
 	putblk(a->tail);
 	a->tail = b->tail;
-showlst("grafted", b);
 	return 0;
 }
 
 int
-deadlistappend(Tree *t, Bptr bp)
+killblk(Tree *t, Bptr bp)
 {
 	Oplog *l;
 	int i;
 
-dprint("deadlisted %B [%p::%B]\n", bp, t, t->bp);
-//fprint(2, "predeadlist\n");
-//showtreeroot(2, t);
-//fprint(2, "----\n");
 	l = nil;
 	for(i = 0; i < Ndead; i++){
 		l = &t->dead[i];
@@ -317,9 +310,6 @@ dprint("deadlisted %B [%p::%B]\n", bp, t, t->bp);
 	}
 	if(logappend(l, nil, bp.addr, Blksz, bp.gen, LogDead) == -1)
 		return -1;
-//fprint(2, "postdeadlist\n");
-//showtreeroot(2, t);
-//fprint(2, "@@@@@@@@@@@@@@@@@@\n");
 	return 0;
 }
 
@@ -330,7 +320,7 @@ dprint("deadlisted %B [%p::%B]\n", bp, t, t->bp);
  * recursion.
  */
 int
-freelistappend(Arena *a, vlong off, int op)
+logop(Arena *a, vlong off, int op)
 {
 	cachedel(off);
 	if(logappend(&a->log, a, off, Blksz, Blksz, op) == -1)
@@ -629,7 +619,7 @@ blkdealloc_lk(vlong b)
 	a = getarena(b);
 	if(freerange(a->free, b, Blksz) == -1)
 		goto out;
-	if(freelistappend(a, b, LogFree) == -1)
+	if(logop(a, b, LogFree) == -1)
 		goto out;
 	r = 0;
 out:
@@ -668,7 +658,7 @@ Again:
 		unlock(a);
 		goto Again;
 	}
-	if(freelistappend(a, b, LogAlloc) == -1){
+	if(logop(a, b, LogAlloc) == -1){
 		unlock(a);
 		return -1;
 	}
@@ -870,7 +860,7 @@ freebp(Tree *t, Bptr bp)
 
 	dprint("[%s] free blk %B\n", (t == &fs->snap) ? "snap" : "data", bp);
 	if(bp.gen <= t->gen){
-		deadlistappend(t, bp);
+		killblk(t, bp);
 		return;
 	}
 	if((f = malloc(sizeof(Bfree))) == nil)

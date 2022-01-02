@@ -33,6 +33,9 @@ updatesnap(Fid *f)
 		}
 	}
 	f->mnt->root = n;
+fprint(2, "updated\n");
+showtreeroot(2, n);
+fprint(2, "==================================\n");
 	closesnap(t);
 	qunlock(&fs->snaplk);
 	sync();

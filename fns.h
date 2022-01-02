@@ -25,6 +25,7 @@ void	enqueue(Blk*);
 void	quiesce(int);
 void	freeblk(Tree*, Blk*);
 void	freebp(Tree*, Bptr);
+int	killblk(Tree*, Bptr);
 int	graft(Oplog*, Oplog*);
 void	reclaimblk(Bptr);
 ushort	blkfill(Blk*);
@@ -34,6 +35,7 @@ void	finalize(Blk*);
 char*	fillsuper(Blk*);
 Tree*	newsnap(Tree*);
 char*	freesnap(Tree*, Tree*);
+int	savesnap(Tree*);
 char*	labelsnap(char*, vlong);
 char*	unlabelsnap(vlong, char*);
 char*	refsnap(vlong);
@@ -138,5 +140,6 @@ void	runcons(int, void*);
 
 /* it's in libc... */
 extern int cas(long*, long, long);
+extern int fas32(int*, int);
 extern int cas64(u64int*, u64int, u64int);
 uvlong	inc64(uvlong*, uvlong);

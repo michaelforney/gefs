@@ -201,6 +201,12 @@ freedead(Bptr bp, void *)
 	reclaimblk(bp);
 }
 
+void
+redeadlist(Bptr bp, void *pt)
+{
+	killblk(pt, bp);
+}
+
 char*
 freesnap(Tree *snap, Tree *next)
 {
@@ -210,35 +216,38 @@ freesnap(Tree *snap, Tree *next)
 	assert(snap->gen != next->gen);
 	assert(next->prev[0] == snap->gen);
 
-//fprint(2, "next tree\n");
-//showtreeroot(2, next);
-//fprint(2, "snap tree\n");
-//showtreeroot(2, snap);
+fprint(2, "next tree\n");
+showtreeroot(2, next);
+fprint(2, "snap tree\n");
+showtreeroot(2, snap);
+
+	dl = next->dead[Ndead-1];
 	scandead(&next->dead[0], freedead, nil);
-	for(i = 0; i < Ndead-1; i++){
+	for(i = 0; i < Ndead-2; i++){
+		if(graft(&snap->dead[i], &next->dead[i+1]) == -1)
+			return Efs;
 		next->prev[i] = snap->prev[i];
-		dl = snap->dead[i];
-		if(i < Ndead-1)
-			if(graft(&dl, &next->dead[i+1]) == -1)
-				return Efs;
-		next->dead[i] = dl;
+		next->dead[i] = snap->dead[i];
 	}
-//fprint(2, "transferred\n");
-//showtreeroot(2, next);
+	for(; i < Ndead; i++){
+		next->prev[i] = snap->prev[i];
+		next->dead[i] = snap->dead[i];
+	}
+	scandead(&dl, redeadlist, next);
+
+fprint(2, "transferred\n");
+showtreeroot(2, next);
+fprint(2, "==================================\n");
 	return nil;
 }
 
-Tree*
-newsnap(Tree *t)
+int
+savesnap(Tree *t)
 {
 	char kbuf[Snapsz], vbuf[Treesz];
-	vlong gen;
 	char *p, *e;
-	Tree *r;
 	Msg m;
 	int i;
-
-	gen = inc64(&fs->nextgen, 1);
 	for(i = 0; i < Ndead; i++){
 		if(t->dead[i].tail != nil){
 			finalize(t->dead[i].tail);
@@ -256,13 +265,25 @@ newsnap(Tree *t)
 	m.nv = p - vbuf;
 	if((e = btupsert(&fs->snap, &m, 1)) != nil){
 		fprint(2, "error snapshotting: %s\n", e);
-		qunlock(&fs->snaplk);
-		return nil;
+		return -1;
 	}
+	return 0;
+}
+
+
+Tree*
+newsnap(Tree *t)
+{
+	vlong gen;
+	Tree *r;
+	int i;
+
+	if(savesnap(t) == -1)
+		return nil;
 
 	if((r = malloc(sizeof(Tree))) == nil)
 		return nil;
-
+	gen = inc64(&fs->nextgen, 1);
 	memset(&r->lk, 0, sizeof(r->lk));
 	r->snext = fs->osnap;
 	r->memref = 1;

@@ -88,6 +88,7 @@ closesnap(Tree *t)
 	for(i = Ndead-1; i >= 0; i--){
 		if(t->dead[i].tail == nil)
 			continue;
+		finalize(t->dead[i].tail);
 		syncblk(t->dead[i].tail);
 //FIXME		putblk(t->dead[i].tail);
 	}
@@ -196,10 +197,10 @@ freesnap(Tree *snap, Tree *next)
 	assert(snap->gen != next->gen);
 	assert(next->prev[0] == snap->gen);
 
-fprint(2, "next tree\n");
-showtreeroot(2, next);
-fprint(2, "snap tree\n");
-showtreeroot(2, snap);
+//fprint(2, "next tree\n");
+//showtreeroot(2, next);
+//fprint(2, "snap tree\n");
+//showtreeroot(2, snap);
 
 	dl = next->dead[Ndead-1];
 	scandead(&next->dead[0], freedead, nil);
@@ -215,9 +216,9 @@ showtreeroot(2, snap);
 	}
 	scandead(&dl, redeadlist, next);
 
-fprint(2, "transferred\n");
-showtreeroot(2, next);
-fprint(2, "==================================\n");
+//fprint(2, "transferred\n");
+//showtreeroot(2, next);
+//fprint(2, "==================================\n");
 	return nil;
 }
 

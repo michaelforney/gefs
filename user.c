@@ -137,7 +137,7 @@ char*
 parseusers(int fd, char *udata)
 {
 	char *pu, *p, *f, *m, *err, buf[8192];
-	int i, lnum, ngrp, nusers, usersz;
+	int i, j, lnum, ngrp, nusers, usersz;
 	User *u, *n, *users;
 	int *g, *grp;
 
@@ -194,9 +194,9 @@ parseusers(int fd, char *udata)
 			return Esyntax;
 		if(f[0] != '\0'){
 			u = nil;
-			for(i = 0; i < nusers; i++)
-				if(strcmp(users[i].name, f) == 0)
-					u = &users[i];
+			for(j = 0; j < nusers; j++)
+				if(strcmp(users[j].name, f) == 0)
+					u = &users[j];
 			if(u == nil){
 				fprint(fd, "/adm/users:%d: leader %s does not exist\n", lnum, f);
 				err = Enouser;

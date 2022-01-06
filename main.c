@@ -124,9 +124,8 @@ main(int argc, char **argv)
 		launch(runcons, fs->nproc++, (void*)ctlfd, "ctl");
 		launch(runwrite, fs->nproc++, nil, "writeio");
 		launch(runread, fs->nproc++, nil, "readio");
+		launch(runtasks, fs->nproc++, nil, "tasks");
 //		launch(runfs, fs->nproc++, (void*)srvfd, "fs");
-//		launch(taskproc, fs->nproc++, nil, "tasks");
-//		launch(syncproc, fs->nproc++, &fs->flushev, "sync");
 		assert(fs->nproc < Maxproc);
 		runfs(fs->nproc++, (void*)srvfd);
 		exits(nil);

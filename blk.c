@@ -45,6 +45,26 @@ clrflag(Blk *b, int flg)
 	}
 }
 
+int
+syncblk(Blk *b)
+{
+	assert(b->flag & Bfinal);
+	clrflag(b, Bqueued|Bdirty);
+	return pwrite(fs->fd, b->buf, Blksz, b->bp.addr);
+}
+
+void
+enqueue(Blk *b)
+{
+	assert(b->flag & Bdirty);
+	finalize(b);
+	if(syncblk(b) == -1){
+		ainc(&fs->broken);
+		fprint(2, "write: %r");
+		abort();
+	}
+}
+
 Blk*
 readblk(vlong bp, int flg)
 {

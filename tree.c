@@ -1238,6 +1238,7 @@ Again:
 	lock(&t->lk);
 	t->ht += dh;
 	t->bp = rb->bp;
+	t->dirty = 1;
 	unlock(&t->lk);
 	freepath(t, path, npath);
 	free(path);

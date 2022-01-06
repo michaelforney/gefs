@@ -352,6 +352,7 @@ struct Tree {
 	Tree	*snext;
 
 	long	memref;	/* number of in-memory references to this */
+	int	dirty;
 	int	ref;	/* number of on-disk references to this */
 	int	ht;
 	Bptr	bp;
@@ -385,6 +386,7 @@ struct Gefs {
 	int	hdrsz;	/* immutable */
 
 	QLock	snaplk;	/* snapshot lock */
+	Mount	*mounts;
 	Tree	*osnap;
 	Blk	*super;
 
@@ -441,6 +443,8 @@ struct Arena {
 	Lock;
 	Avltree *free;
 	Avltree *partial;
+	Blk	**queue;
+	int	nqueue;
 	Blk	*b;	/* arena block */
 	Blk	**q;	/* write queue */
 	vlong	nq;
@@ -491,6 +495,7 @@ struct Dent {
 };
 
 struct Mount {
+	Mount	*next;
 	long	ref;
 	vlong	gen;
 	int	uid;

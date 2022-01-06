@@ -120,7 +120,6 @@ reamarena(Arena *a, vlong start, vlong asz)
 	b->type = Tarena;
 	b->bp.addr = start;
 	p = b->buf + Hdrsz;
-	print("b->bp.addr: %llx\n", b->bp.addr);
 	PBIT64(p+0, bo);
 	PBIT64(p+8, bh);
 	finalize(b);
@@ -154,7 +153,7 @@ reamfs(char *dev)
 
 	sz = d->length;
 	sz = sz - (sz % Blksz) - Blksz;
-	fs->narena = sz / (128*GiB);
+	fs->narena = d->length / (64*GiB);
 	if(fs->narena < 1)
 		fs->narena = 1;
 	if(fs->narena >= 128)
@@ -170,9 +169,9 @@ reamfs(char *dev)
 	fprint(2, "reaming %d arenas:\n", fs->narena);
 
 	for(i = 0; i < fs->narena; i++){
-		print("\tarena %d: %lld blocks at %lld\n", i, asz/Blksz, off);
+		print("\tarena %d: %lld blocks at %llx\n", i, asz/Blksz, off);
 		reamarena(&fs->arenas[i], off, asz);
-		asz += off;
+		off += asz;
 	}
 	
 	sb->type = Tsuper;

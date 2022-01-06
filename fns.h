@@ -137,6 +137,7 @@ void	runfs(int, void*);
 void	runwrite(int, void*);
 void	runread(int, void*);
 void	runcons(int, void*);
+void	runtasks(int, void*);
 
 /* it's in libc... */
 extern int cas(long*, long, long);

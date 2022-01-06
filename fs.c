@@ -11,19 +11,21 @@ static char*	clearb(Fid*, vlong, vlong);
 
 // FIXME: hack. We sync way too often.
 static char*
-updatesnap(Fid *f)
+updatemount(Mount *mnt)
 {
 	Tree *t, *n;
 	char *e;
 
-	t = f->mnt->root;
+	t = mnt->root;
+	if(!t->dirty)
+		return nil;
 	qlock(&fs->snaplk);
 	if((n = newsnap(t)) == nil){
-		fprint(2, "snap: save %s: %s\n", f->mnt->name, "create snap");
+		fprint(2, "snap: save %s: %s\n", mnt->name, "create snap");
 		abort();
 	}
-	if((e = labelsnap(f->mnt->name, t->gen)) != nil){
-		fprint(2, "snap: save %s: %s\n", f->mnt->name, e);
+	if((e = labelsnap(mnt->name, t->gen)) != nil){
+		fprint(2, "snap: save %s: %s\n", mnt->name, e);
 		abort();
 	}
 	if(t->prev[0] != -1){
@@ -32,13 +34,9 @@ updatesnap(Fid *f)
 			abort();
 		}
 	}
-	f->mnt->root = n;
-fprint(2, "updated\n");
-showtreeroot(2, n);
-fprint(2, "==================================\n");
+	mnt->root = n;
 	closesnap(t);
 	qunlock(&fs->snaplk);
-	sync();
 	return nil;
 }
 
@@ -697,6 +695,8 @@ fsattach(Fmsg *m, int iounit)
 		return;
 	}
 
+	mnt->next = fs->mounts;
+	fs->mounts = mnt;
 	r.type = Rattach;
 	r.qid = d.qid;
 	respond(m, &r);
@@ -953,10 +953,6 @@ fswstat(Fmsg *m)
 			rerror(m, e);
 			goto Out;
 		}
-		if((e = updatesnap(f)) != nil){
-			rerror(m, e);
-			goto Out;
-		}
 		r.type = Rwstat;
 		respond(m, &r);
 	}
@@ -1087,11 +1083,6 @@ fscreate(Fmsg *m)
 	r.type = Rcreate;
 	r.qid = d.qid;
 	r.iounit = f->iounit;
-	if((e = updatesnap(f)) != nil){
-		rerror(m, e);
-		putfid(f);
-		return;
-	}
 	respond(m, &r);
 	putfid(f);
 }
@@ -1169,11 +1160,6 @@ fsremove(Fmsg *m)
 	}
 	runlock(f->dent);
 
-	if((e = updatesnap(f)) != nil){
-		rerror(m, e);
-		clunkfid(f);
-		return;
-	}
 	r.type = Rremove;
 	respond(m, &r);
 	clunkfid(f);
@@ -1446,12 +1432,6 @@ fswrite(Fmsg *m)
 	}
 	wunlock(f->dent);
 
-	if((e = updatesnap(f)) != nil){
-		rerror(m, e);
-		putfid(f);
-		return;
-	}
-
 	r.type = Rwrite;
 	r.count = m->count;
  	respond(m, &r);
@@ -1519,6 +1499,7 @@ runfs(int wid, void *pfd)
 void
 runwrite(int wid, void *)
 {
+	Mount *mnt;
 	Fmsg *m;
 	int ao;
 
@@ -1544,9 +1525,12 @@ runwrite(int wid, void *)
 			}
 			break;
 		case AOsync:
-			fprint(m->a->fd, "syncing [readonly: %d]\n", m->a->halt);
+			if(m->a->fd != -1)
+				fprint(m->a->fd, "syncing [readonly: %d]\n", m->a->halt);
 			if(m->a->halt)
 				ainc(&fs->rdonly);
+			for(mnt = fs->mounts; mnt != nil; mnt = mnt->next)
+				updatemount(mnt);
 			sync();
 			freemsg(m);
 			break;
@@ -1574,5 +1558,29 @@ runread(int wid, void *)
 		case Tstat:	fsstat(m);	break;
 		}
 		quiesce(wid);
+	}
+}
+
+void
+runtasks(int, void *)
+{
+	Fmsg *m;
+	Amsg *a;
+
+	while(1){
+		sleep(500);
+		m = mallocz(sizeof(Fmsg), 1);
+		a = mallocz(sizeof(Amsg), 1);
+		if(m == nil || a == nil){
+			fprint(2, "alloc sync msg: %r\n");
+			free(m);
+			free(a);
+			return;
+		}
+		a->op = AOsync;
+		a->halt = 0;
+		a->fd = -1;
+		m->a = a;
+		chsend(fs->wrchan, m);		
 	}
 }

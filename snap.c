@@ -19,26 +19,6 @@ inc64(uvlong *v, uvlong dv)
 	}
 }
 
-int
-syncblk(Blk *b)
-{
-	assert(b->flag & Bfinal);
-	clrflag(b, Bqueued|Bdirty);
-	return pwrite(fs->fd, b->buf, Blksz, b->bp.addr);
-}
-
-void
-enqueue(Blk *b)
-{
-	assert(b->flag & Bdirty);
-	finalize(b);
-	if(syncblk(b) == -1){
-		ainc(&fs->broken);
-		fprint(2, "write: %r");
-		abort();
-	}
-}
-
 Tree*
 openlabel(char *name)
 {
@@ -291,6 +271,7 @@ newsnap(Tree *t)
 	r->ht = t->ht;
 	r->bp = t->bp;
 	r->gen = gen;
+	r->dirty = 0;
 	/* shift deadlist down */
 	for(i = Ndead-1; i >= 0; i--){
 		r->prev[i] = i == 0 ? t->gen : t->prev[i-1];

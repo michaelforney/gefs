@@ -1,5 +1,6 @@
 *** must have before usable for testing ***
 - correctly implement deadlists
+- fix locking mess on snapshots
 - auth against authservers
 - implement special file modes: ORCLOSE, OEXCL, etc
 

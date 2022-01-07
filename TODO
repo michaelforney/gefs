@@ -4,10 +4,14 @@
 - auth against authservers
 - implement special file modes: ORCLOSE, OEXCL, etc
 
-*** nice to have, can get testing without**
+*** must have before full release ***
+- live alloc log recompression
 - Reserve blocks for deletion
-- add missing management commands in console
 - transient exec snapshots
+- testing, debugging
+
+*** nice to have, can get testing without ***
+- add missing management commands in console
 - performance optimization:
 	- async page writeback: currently, every write to device is sync.
 	- bulk block frees
@@ -16,4 +20,3 @@
 - small file optimizations
 	- inline data
 	- block fragmentation
-- testing, debugging

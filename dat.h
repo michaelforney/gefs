@@ -442,12 +442,13 @@ struct Gefs {
 struct Arena {
 	Lock;
 	Avltree *free;
-	Avltree *partial;
 	Blk	**queue;
 	int	nqueue;
 	Blk	*b;	/* arena block */
 	Blk	**q;	/* write queue */
 	vlong	nq;
+	vlong	size;
+	vlong	used;
 	Oplog	log;
 };
 

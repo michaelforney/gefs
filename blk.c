@@ -178,6 +178,20 @@ Again:
 }
 
 int
+syncarena(Arena *a)
+{
+	char *p;
+
+	p = a->b->data;
+	PBIT64(p, a->log.head.addr);	p += 8;	/* freelist addr */
+	PBIT64(p, a->log.head.hash);	p += 8;	/* freelist hash */
+	PBIT64(p, a->size);		p += 8;	/* arena size */
+	PBIT64(p, a->used);			/* arena used */
+	finalize(a->b);
+	return syncblk(a->b);
+}
+
+int
 grabrange(Avltree *t, vlong off, vlong len)
 {
 	Arange *r, *s, q;
@@ -470,7 +484,7 @@ compresslog(Arena *a)
 	Range *log, *nlog;
 	vlong v, bp, nb, graft, oldhd;
 	int i, n, sz;
-	Blk *hd, *ab, *b;
+	Blk *hd, *b;
 	Oplog ol;
 	char *p;
 
@@ -555,11 +569,7 @@ compresslog(Arena *a)
 	a->log.head.addr = hd->bp.addr;
 	a->log.head.hash = blkhash(hd);
 	a->log.head.gen = -1;
-	ab = a->b;
-	PBIT64(ab->data + 0, a->log.head.addr);
-	PBIT64(ab->data + 8, a->log.head.hash);
-	finalize(ab);
-	if(syncblk(ab) == -1)
+	if(syncarena(a) == -1)
 		return -1;
 	if(oldhd != -1){
 		for(bp = oldhd; bp != -1; bp = nb){
@@ -626,6 +636,7 @@ blkalloc_lk(Arena *a)
 		avldelete(t, r);
 		free(r);
 	}
+	a->used += Blksz;
 	return b;
 }
 
@@ -641,6 +652,7 @@ blkdealloc_lk(vlong b)
 		goto out;
 	if(logop(a, b, LogFree) == -1)
 		goto out;
+	a->used -= Blksz;
 	r = 0;
 out:
 	return r;
@@ -972,6 +984,8 @@ sync(void)
 		a = &fs->arenas[i];
 		finalize(a->log.tail);
 		if(syncblk(a->log.tail) == -1)
+			r = -1;
+		if(syncarena(a) == -1)
 			r = -1;
 	}
 //

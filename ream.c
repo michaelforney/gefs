@@ -81,7 +81,7 @@ initsnap(Blk *s, Blk *r)
 }
 
 static void
-reamarena(Arena *a, vlong start, vlong asz)
+initarena(Arena *a, vlong start, vlong asz)
 {
 	vlong addr, bo, bh;
 	char *p;
@@ -104,11 +104,11 @@ reamarena(Arena *a, vlong start, vlong asz)
 	b->flag |= Bdirty;
 
 	p = b->data+Loghdsz;
-	PBIT64(p+ 0, addr|LogFree);		/* addr */
-	PBIT64(p+ 8, asz);			/* len */
-	PBIT64(p+16, b->bp.addr|LogAlloc);		/* addr */
-	PBIT64(p+24, Blksz);			/* len */
-	PBIT64(p+32, (uvlong)LogEnd);		/* done */
+	PBIT64(p, addr|LogFree);	p += 8;	/* addr */
+	PBIT64(p, asz);			p += 8;	/* len */
+	PBIT64(p, b->bp.addr|LogAlloc);	p += 8;	/* addr */
+	PBIT64(p, Blksz);		p += 8;	/* len */
+	PBIT64(p, (uvlong)LogEnd);	/* done */
 	finalize(b);
 	if(syncblk(b) == -1)
 		sysfatal("ream: init log");
@@ -120,8 +120,10 @@ reamarena(Arena *a, vlong start, vlong asz)
 	b->type = Tarena;
 	b->bp.addr = start;
 	p = b->buf + Hdrsz;
-	PBIT64(p+0, bo);
-	PBIT64(p+8, bh);
+	PBIT64(p, bo);		p += 8;	/* freelist addr */
+	PBIT64(p, bh);		p += 8;	/* freelist hash */
+	PBIT64(p, asz);		p += 8;	/* arena size */
+	PBIT64(p, Blksz);	/* arena used */
 	finalize(b);
 	if(syncblk(b) == -1)
 		sysfatal("ream: write arena: %r");
@@ -153,7 +155,7 @@ reamfs(char *dev)
 
 	sz = d->length;
 	sz = sz - (sz % Blksz) - Blksz;
-	fs->narena = d->length / (64*GiB);
+	fs->narena = (d->length + 64*GiB - 1) / (64*GiB);
 	if(fs->narena < 1)
 		fs->narena = 1;
 	if(fs->narena >= 128)
@@ -170,7 +172,7 @@ reamfs(char *dev)
 
 	for(i = 0; i < fs->narena; i++){
 		print("\tarena %d: %lld blocks at %llx\n", i, asz/Blksz, off);
-		reamarena(&fs->arenas[i], off, asz);
+		initarena(&fs->arenas[i], off, asz);
 		off += asz;
 	}
 	

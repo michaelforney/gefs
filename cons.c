@@ -139,7 +139,28 @@ showusers(int fd, char**, int)
 		fprint(fd, "\n");
 	}
 	runlock(&fs->userlk);
-}		
+}
+
+static void
+showdf(int fd, char**, int)
+{
+	vlong size, used;
+	double pct;
+	Arena *a;
+	int i;
+
+	size = 0;
+	used = 0;
+	for(i = 0; i < fs->narena; i++){
+		a = &fs->arenas[i];
+		lock(a);
+		size += a->size;
+		used += a->used;
+		unlock(a);
+	}
+	pct = 100.0*(double)used/(double)size;
+	fprint(fd, "used: %lld / %lld (%.2f%%)\n", used, size, pct);
+}	
 
 static void
 help(int fd, char**, int)
@@ -179,6 +200,7 @@ Cmd cmdtab[] = {
 	{.name="snap",	.sub=nil,	.minarg=2, .maxarg=2, .fn=snapfs},
 	{.name="check",	.sub=nil,	.minarg=1, .maxarg=1, .fn=fsckfs},
 	{.name="help",	.sub=nil,	.minarg=0, .maxarg=0, .fn=help},
+	{.name="df",	.sub=nil, 	.minarg=0, .maxarg=0, .fn=showdf},
 	{.name="users",	.sub=nil,	.minarg=0, .maxarg=1, .fn=refreshusers},
 
 	/* debugging */

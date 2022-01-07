@@ -16,15 +16,19 @@ int
 loadarena(Arena *a, vlong o)
 {
 	Blk *b;
+	char *p;
 
 	if((a->free = avlcreate(rangecmp)) == nil)
 		return -1;
 	if((b = readblk(o, 0)) == nil)
 		return -1;
+	p = b->data;
 	a->b = b;
-	a->log.head.addr = GBIT64(b->data+0);
-	a->log.head.hash = GBIT64(b->data+8);
+	a->log.head.addr = GBIT64(p);	p += 8;
+	a->log.head.hash = GBIT64(p);	p += 8;
 	a->log.head.gen = -1;
+	a->size = GBIT64(p);	p += 8;
+	a->used = GBIT64(p);
 	if(loadlog(a) == -1)
 		return -1;
 	if(compresslog(a) == -1)

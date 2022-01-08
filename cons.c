@@ -160,7 +160,32 @@ showdf(int fd, char**, int)
 	}
 	pct = 100.0*(double)used/(double)size;
 	fprint(fd, "used: %lld / %lld (%.2f%%)\n", used, size, pct);
-}	
+}
+
+static void
+showent(int fd, char **ap, int)
+{
+	char *e, *p, kbuf[Keymax], kvbuf[Kvmax];
+	Tree *t;
+	Kvp kv;
+	Key k;
+
+	if((t = openlabel("main")) == nil){
+		fprint(fd, "could not open main snap\n");
+		return;
+	}
+	if((p = packdkey(kbuf, sizeof(kbuf), atoll(ap[0]), ap[1])) == nil){
+		fprint(fd, "could not pack key\n");
+		return;
+	}
+	k.k = kbuf;
+	k.nk = p - kbuf;
+	if((e = btlookup(t, &k, &kv, kvbuf, sizeof(kvbuf))) != nil)
+		fprint(fd, "not found: %s\n", e);
+	else
+		fprint(fd, "%P\n", &kv);
+	closesnap(t);
+}
 
 static void
 help(int fd, char**, int)
@@ -181,6 +206,8 @@ help(int fd, char**, int)
 		"	are supported:\n"
 		"	cache\n"
 		"		the contents of the in-memory cache\n"
+		"	ent pqid name\n"
+		"		the contents of a directory entry\n"
 		"	tree [name]\n"
 		"		the contents of the tree associated with a\n"
 		"		snapshot. The special name 'snap' shows the\n"
@@ -195,6 +222,7 @@ help(int fd, char**, int)
 }
 
 Cmd cmdtab[] = {
+	/* admin */
 	{.name="sync",	.sub=nil,	.minarg=0, .maxarg=0, .fn=syncfs},
 	{.name="halt",	.sub=nil,	.minarg=0, .maxarg=0, .fn=haltfs},
 	{.name="snap",	.sub=nil,	.minarg=2, .maxarg=2, .fn=snapfs},
@@ -205,12 +233,14 @@ Cmd cmdtab[] = {
 
 	/* debugging */
 	{.name="show",	.sub="cache",	.minarg=0, .maxarg=0, .fn=showcache},
-	{.name="show",	.sub="tree",	.minarg=0, .maxarg=1, .fn=showtree},
-	{.name="show",	.sub="snap",	.minarg=0, .maxarg=1, .fn=showsnap},
+	{.name="show",	.sub="ent",	.minarg=2, .maxarg=2, .fn=showent},
 	{.name="show",	.sub="fid",	.minarg=0, .maxarg=0, .fn=showfid},
 	{.name="show",	.sub="free",	.minarg=0, .maxarg=0, .fn=showfree},
+	{.name="show",	.sub="snap",	.minarg=0, .maxarg=1, .fn=showsnap},
+	{.name="show",	.sub="tree",	.minarg=0, .maxarg=1, .fn=showtree},
 	{.name="show",	.sub="users",	.minarg=0, .maxarg=0, .fn=showusers},
 	{.name="debug",	.sub=nil,	.minarg=1, .maxarg=1, .fn=setdbg},
+
 	{.name=nil, .sub=nil},
 };
 

@@ -69,6 +69,7 @@ showval(Fmt *fmt, Kvp *v, int op, int flg)
 			n = fmtprint(fmt, "ptr:%B", unpackbp(v->v, v->nv));
 			break;
 		}
+		break;
 	case Kent:	/* pqid[8] name[n] => dir[n]:	serialized Dir */
 		switch(op){
 		case Onop:
@@ -122,19 +123,9 @@ showval(Fmt *fmt, Kvp *v, int op, int flg)
 		}
 		break;
 	case Ksnap:	/* name[n] => dent[16] ptr[16]:	snapshot root */
-		switch(op){
-		case Orefsnap:
-			n = fmtprint(fmt, "ref");
-			break;
-		case Ounrefsnap:
-			n = fmtprint(fmt, "unref");
-			break;
-		default:
-			if(unpacktree(&t, v->v, v->nv) == nil)
-				return fmtprint(fmt, "corrupt tree");
-			n = fmtprint(fmt, "ref: %d, ht: %d, bp: %B, prev=%lld", t.ref, t.ht, t.bp, t.prev[0]);
-			break;
-		}
+		if(unpacktree(&t, v->v, v->nv) == nil)
+			return fmtprint(fmt, "corrupt tree");
+		n = fmtprint(fmt, "ref: %d, ht: %d, bp: %B, prev=%lld", t.ref, t.ht, t.bp, t.prev[0]);
 		break;
 	case Klabel:
 		n = fmtprint(fmt, "snap id:\"%llx\"", GBIT64(v->v+1));
@@ -167,8 +158,6 @@ Mconv(Fmt *fmt)
 	[Odelete]	"Odelete",
 	[Oclearb]	"Oclearb",
 	[Owstat]	"Owstat",
-	[Orefsnap]	"Orefsnap",
-	[Ounrefsnap]	"Ounrefsnap",
 	};
 	Msg *m;
 	int f, n;
@@ -330,22 +319,22 @@ showtreeroot(int fd, Tree *t)
 	int i;
 
 	fprint(fd, "\tgen:\t%lld\n", t->gen);
-//	fprint(fd, "\tref:\t%d\n", t->ref);
-//	fprint(fd, "\tht:\t%d\n", t->ht);
-//	fprint(fd, "\tbp:\t%B\n", t->bp);
+	fprint(fd, "\tref:\t%d\n", t->ref);
+	fprint(fd, "\tht:\t%d\n", t->ht);
+	fprint(fd, "\tbp:\t%B\n", t->bp);
 	for(i = 0; i < Ndead; i++){
 		fprint(fd, "\tdeadlist[%d]: prev=%llx\n", i, t->prev[i]);
-//		fprint(fd, "\t\tprev:\t%llx\n", t->prev[i]);
-//		fprint(fd, "\t\tfhead:\t%B\n", t->dead[i].head);
-//		if(t->dead[i].tail != nil){
-//			fprint(fd, "\t\tftailp:%llx\n", t->dead[i].tail->bp.addr);
-//			fprint(fd, "\t\tftailh:%llx\n", t->dead[i].tail->bp.hash);
-//		}else{
-//			fprint(fd, "\t\tftailp:\t-1\n");
-//			fprint(fd, "\t\tftailh:\t-1\n");
-//		}
-//		fprint(fd, "\t\tdead[%d]: (%B)\n", i, t->dead[i].head);
-//		scandead(&t->dead[i], showdeadbp, &fd);
+		fprint(fd, "\t\tprev:\t%llx\n", t->prev[i]);
+		fprint(fd, "\t\tfhead:\t%B\n", t->dead[i].head);
+		if(t->dead[i].tail != nil){
+			fprint(fd, "\t\tftailp:%llx\n", t->dead[i].tail->bp.addr);
+			fprint(fd, "\t\tftailh:%llx\n", t->dead[i].tail->bp.hash);
+		}else{
+			fprint(fd, "\t\tftailp:\t-1\n");
+			fprint(fd, "\t\tftailh:\t-1\n");
+		}
+		fprint(fd, "\t\tdead[%d]: (%B)\n", i, t->dead[i].head);
+		scandead(&t->dead[i], showdeadbp, &fd);
 	}
 }
 

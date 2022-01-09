@@ -17,10 +17,14 @@ loadarena(Arena *a, vlong o)
 {
 	Blk *b;
 	char *p;
+	Bptr bp;
 
 	if((a->free = avlcreate(rangecmp)) == nil)
 		return -1;
-	if((b = readblk(o, 0)) == nil)
+	bp.addr = o;
+	bp.hash = -1;
+	bp.gen = -1;
+	if((b = getblk(bp, GBnochk)) == nil)
 		return -1;
 	p = b->data;
 	a->b = b;
@@ -42,6 +46,7 @@ loadfs(char *dev)
 	int i, blksz, bufspc, hdrsz;
 	vlong sb;
 	char *p, *e;
+	Bptr bp;
 	Tree *t;
 	Blk *b;
 	Dir *d;
@@ -54,7 +59,10 @@ loadfs(char *dev)
 	sb = d->length - (d->length % Blksz) - Blksz;
 	free(d);
 
-	if((b = readblk(sb, 0)) == nil)
+	bp.addr = sb;
+	bp.hash = -1;
+	bp.gen = -1;
+	if((b = getblk(bp, GBnochk)) == nil)
 		sysfatal("read superblock: %r");
 	if(b->type != Tsuper)
 		sysfatal("corrupt superblock: bad type");

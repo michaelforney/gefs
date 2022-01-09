@@ -1,6 +1,4 @@
 *** must have before usable for testing ***
-- correctly implement deadlists
-- fix locking mess on snapshots
 - auth against authservers
 - implement special file modes: ORCLOSE, OEXCL, etc
 
@@ -8,12 +6,14 @@
 - live alloc log recompression
 - Reserve blocks for deletion
 - transient exec snapshots
-- testing, debugging
+- testing, debugging, bugfixes
+- basic performance optimization
+	- reduce io ops per update
+	- async page writeback: currently, every write to device is sync.
 
 *** nice to have, can get testing without ***
 - add missing management commands in console
 - performance optimization:
-	- async page writeback: currently, every write to device is sync.
 	- bulk block frees
 	- background block frees
 	- root block reuse

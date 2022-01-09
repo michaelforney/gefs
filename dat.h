@@ -95,15 +95,15 @@ enum {
 	Bcached	= 1 << 3,
 };
 
-//#define Efs	"i will not buy this fs, it is scratched"
+/* internal errors */
 #define Eimpl	"not implemented"
 #define Efs	(abort(), "fs broke")
+#define Ebotch	"protocol botch"
 #define Eio	"i/o error"
 #define Efid	"unknown fid"
 #define Etype	"invalid fid type"
 #define Edscan	"invalid dir scan offset"
-#define Eexist	"does not exist"
-#define Ebotch	"protocol botch"
+#define Eexist	"directory entry not found"
 #define Emode	"unknown mode"
 #define Efull	"file system full"
 #define Eauth	"authentication failed"
@@ -259,8 +259,6 @@ enum {
 	Odelete,	/* delete kvp */
 	Oclearb,	/* free block ptr if exists */
 	Owstat,		/* kvp dirent */
-	Orefsnap,	/* increment snap refcount */
-	Ounrefsnap,	/* decrement snap refcount */
 	Nmsgtype,	/* maximum message type */
 };
 
@@ -429,6 +427,9 @@ struct Gefs {
 	/* dent hash table */
 	Lock	dtablk;
 	Dent	*dtab[Ndtab];
+
+	/* slow block io */
+	QLock	blklk;
 
 	/* protected by lrulk */
 	Lock	lrulk;

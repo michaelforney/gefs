@@ -394,8 +394,6 @@ dropsnap(Kvp *t, Msg *m)
 int
 apply(Kvp *kv, Msg *m, char *buf, int nbuf)
 {
-	int refs;
-
 	switch(m->op){
 	case Oclearb:
 	case Odelete:
@@ -407,20 +405,6 @@ apply(Kvp *kv, Msg *m, char *buf, int nbuf)
 	case Owstat:
 		assert(keycmp(kv, m) == 0);
 		statupdate(kv, m);
-		return 1;
-	case Orefsnap:
-		assert(keycmp(kv, m) == 0);
-		refs = GBIT32(kv->v) + 1;
-		PBIT32(kv->v, refs);
-		return 1;
-	case Ounrefsnap:
-		assert(keycmp(kv, m) == 0);
-		refs = GBIT32(kv->v) - 1;
-		if(refs == 0){
-			dropsnap(kv, m);
-			return 0;
-		}
-		PBIT32(kv->v, refs);
 		return 1;
 	default:
 		abort();

@@ -19,7 +19,6 @@ updatemount(Mount *mnt)
 	t = mnt->root;
 	if(!t->dirty)
 		return nil;
-	qlock(&fs->snaplk);
 	if((n = newsnap(t)) == nil){
 		fprint(2, "snap: save %s: %s\n", mnt->name, "create snap");
 		abort();
@@ -36,7 +35,6 @@ updatemount(Mount *mnt)
 	}
 	mnt->root = n;
 	closesnap(t);
-	qunlock(&fs->snaplk);
 	return nil;
 }
 
@@ -64,6 +62,7 @@ snapfs(int fd, char *old, char *new)
 	if(u != nil)
 		closesnap(u);
 	closesnap(t);
+	/* we probably want explicit snapshots to be resilient */
 	sync();
 	fprint(fd, "snap taken: %s\n", new);
 }
@@ -75,7 +74,6 @@ scratchsnap(Fid *f)
 	char *e;
 
 	t = f->mnt->root;
-	qlock(&fs->snaplk);
 	if((n = newsnap(t)) == nil){
 		fprint(2, "snap: save %s: %s\n", f->mnt->name, "create snap");
 		abort();
@@ -92,7 +90,6 @@ scratchsnap(Fid *f)
 	}
 	f->mnt->root = n;
 	closesnap(t);
-	qunlock(&fs->snaplk);
 	sync();
 	return nil;
 }
@@ -480,7 +477,7 @@ dupfid(int new, Fid *f)
 	unlock(&fs->fidtablk);
 
 	if(o != nil){
-		fprint(2, "fid in use: %d == %d", o->fid, new);
+		fprint(2, "fid in use: %d == %d\n", o->fid, new);
 		abort();
 		free(n);
 		return nil;

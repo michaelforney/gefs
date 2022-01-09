@@ -22,27 +22,30 @@ inc64(uvlong *v, uvlong dv)
 Tree*
 openlabel(char *name)
 {
-	char dbuf[Keymax], buf[Kvmax];
-	char *p, *e;
-	vlong id;
-	Tree *t;
-	int n;
-	Key k;
+	char *p, buf[Keymax];
 	Kvp kv;
+	Key k;
+
+	if((p = packlabel(buf, sizeof(buf), name)) == nil)
+		return nil;
+	k.k = buf;
+	k.nk = p - buf;
+	if(btlookup(&fs->snap, &k, &kv, buf, sizeof(buf)) != nil)
+		return nil;
+	if(kv.nv != Snapsz)
+		return nil;
+	return opensnap(GBIT64(kv.v + 1));
+}
+
+Tree*
+opensnap(vlong id)
+{
+	char *p, buf[Kvmax];
+	Tree *t;
+	Kvp kv;
+	Key k;
 
 	qlock(&fs->snaplk);
-	n = strlen(name);
-	p = dbuf;
-	p[0] = Klabel;			p += 1;
-	memcpy(p, name, n);		p += n;
-	k.k = dbuf;
-	k.nk = p - dbuf;
-	if((e = btlookup(&fs->snap, &k, &kv, buf, sizeof(buf))) != nil)
-		goto Error;
-	if(kv.nv != Snapsz)
-		goto Error;
-
-	id = GBIT64(kv.v + 1);
 	for(t = fs->osnap; t != nil; t = t->snext){
 		if(t->gen == id){
 			ainc(&t->memref);
@@ -50,19 +53,16 @@ openlabel(char *name)
 			return t;
 		}
 	}
-	if((t = mallocz(sizeof(Tree), 1)) == nil){
-		fprint(2, "open %s: %s\n", name, e);
+	if((t = mallocz(sizeof(Tree), 1)) == nil)
 		goto Error;
-	}
 	memset(&t->lk, 0, sizeof(t->lk));
 
-	memmove(dbuf, kv.v, kv.nv);
-	k.k = dbuf;
-	k.nk = kv.nv;
-	if((e = btlookup(&fs->snap, &k, &kv, buf, sizeof(buf))) != nil){
-		fprint(2, "open %s: %s\n", name, e);
+	if((p = packsnap(buf, sizeof(buf), id)) == nil)
 		goto Error;
-	}
+	k.k = buf;
+	k.nk = p - buf;
+	if(btlookup(&fs->snap, &k, &kv, buf, sizeof(buf)) != nil)
+		goto Error;
 	if(unpacktree(t, kv.v, kv.nv) == nil)
 		goto Error;
 	t->memref = 1;
@@ -90,7 +90,7 @@ closesnap(Tree *t)
 			continue;
 		finalize(t->dead[i].tail);
 		syncblk(t->dead[i].tail);
-//FIXME		putblk(t->dead[i].tail);
+//FIXME: 	putblk(t->dead[i].tail);
 	}
 
 	p = &fs->osnap;
@@ -104,75 +104,118 @@ closesnap(Tree *t)
 	free(te);
 }
 
-static char*
-modifysnap(char *name, vlong gen, vlong next, int del)
+char*
+modifysnap(int op, Tree *t)
 {
-	char dbuf[Keymax], sbuf[Snapsz], nbuf[Snapsz];
+	char kbuf[Snapsz], vbuf[Treesz];
 	char *p, *e;
-	int n, nm;
-	Msg m[2];
+	Msg m;
+	int i;
 
-	nm = 0;
-
-	p = sbuf;
-	p[0] = Ksnap;		p += 1;
-	PBIT64(p, gen);		p += 8;
-	m[nm].op = del ? Ounrefsnap : Orefsnap;
-	m[nm].k = sbuf;
-	m[nm].nk = p - sbuf;
-	p = nbuf;
-	p[0] = Ksnap;		p += 1;
-	PBIT64(p, next);	p += 8;
-	m[nm].v = nbuf;
-	m[nm].nv = p - nbuf;
-	nm++;
-
-	if(name != nil){
-		p = dbuf;
-		n = strlen(name);
-		m[nm].op = del ? Odelete : Oinsert;
-		p[0] = Klabel;		p += 1;
-		memcpy(p, name, n);	p += n;
-		m[nm].k = dbuf;
-		m[nm].nk = p - dbuf;
-		m[nm].v = m[nm-1].k;
-		m[nm].nv = m[nm-1].nk;
-		nm++;
+	for(i = 0; i < Ndead; i++){
+		if(t->dead[i].tail != nil){
+			finalize(t->dead[i].tail);
+			syncblk(t->dead[i].tail);
+		}
 	}
-	if((e = btupsert(&fs->snap, m, nm)) != nil)
+	m.op = op;
+	if((p = packsnap(kbuf, sizeof(kbuf), t->gen)) == nil)
+		return Elength;
+	m.k = kbuf;
+	m.nk = p - kbuf;
+	if(op == Oinsert){
+		if((p = packtree(vbuf, sizeof(vbuf), t)) == nil)
+			return Elength;
+		m.v = vbuf;
+		m.nv = p - vbuf;
+	}else{
+		m.v = nil;
+		m.nv = 0;
+	}
+	if((e = btupsert(&fs->snap, &m, 1)) != nil)
 		return e;
 	return nil;
 }
 
-char*
-deletesnap(Tree *snap, Tree *from)
+static char*
+modifylabel(int op, char *name, vlong id)
 {
-fprint(2, "deleting snap at %B from %B\n", snap->bp, from->bp);
+	char *p, *e, kbuf[Keymax], vbuf[Snapsz];
+	Msg m;
+
+	if(op == Oinsert)
+		e = refsnap(id);
+	else
+		e = unrefsnap(id, -1);
+	if(e != nil)
+		return e;
+
+	m.op = op;
+	if((p = packlabel(kbuf, sizeof(kbuf), name)) == nil)
+		return Elength;
+	m.k = kbuf;
+	m.nk = p - kbuf;
+	if((p = packsnap(vbuf, sizeof(vbuf), id)) == nil)
+		return Elength;
+	m.v = vbuf;
+	m.nv = p - vbuf;
+
+	if((e = btupsert(&fs->snap, &m, 1)) != nil)
+		return e;
 	return nil;
 }
 
 char*
 labelsnap(char *name, vlong gen)
 {
-	return modifysnap(name, gen, -1, 0);
+	return modifylabel(Oinsert, name, gen);
 }
 
 char*
 unlabelsnap(vlong gen, char *name)
 {
-	return modifysnap(name, gen, -1, 1);
+	return modifylabel(Odelete, name, gen);
 }
 
 char*
-refsnap(vlong gen)
+refsnap(vlong id)
 {
-	return modifysnap(nil, gen, -1, 0);
+	Tree *t;
+	char *e;
+
+	t = opensnap(id);
+	t->ref++;
+	if((e = modifysnap(Oinsert, t)) != nil)
+		return e;
+	closesnap(t);
+	return nil;
 }
 
 char*
-unrefsnap(vlong gen, vlong next)
+unrefsnap(vlong id, vlong succ)
 {
-	return modifysnap(nil, gen, next, 1);
+	Tree *t, *u;
+	char *e;
+
+	if((t = opensnap(id)) == nil)
+		return Eexist;
+	if(--t->ref == 0){
+		if((u = opensnap(succ)) == nil)
+			return Eexist;
+		if((e = freesnap(t, u)) != nil)
+			return e;
+		if((e = modifysnap(Odelete, t)) != nil)
+			return e;
+		if((e = modifysnap(Oinsert, u)) != nil)
+			return e;
+		closesnap(u);
+		closesnap(t);
+	}else{
+		if((e = modifysnap(Oinsert, t)) != nil)
+			return e;
+		closesnap(t);
+	}
+	return nil;
 }
 
 void
@@ -197,11 +240,6 @@ freesnap(Tree *snap, Tree *next)
 	assert(snap->gen != next->gen);
 	assert(next->prev[0] == snap->gen);
 
-//fprint(2, "next tree\n");
-//showtreeroot(2, next);
-//fprint(2, "snap tree\n");
-//showtreeroot(2, snap);
-
 	dl = next->dead[Ndead-1];
 	scandead(&next->dead[0], freedead, nil);
 	for(i = 0; i < Ndead-2; i++){
@@ -216,41 +254,8 @@ freesnap(Tree *snap, Tree *next)
 	}
 	scandead(&dl, redeadlist, next);
 
-//fprint(2, "transferred\n");
-//showtreeroot(2, next);
-//fprint(2, "==================================\n");
 	return nil;
 }
-
-int
-savesnap(Tree *t)
-{
-	char kbuf[Snapsz], vbuf[Treesz];
-	char *p, *e;
-	Msg m;
-	int i;
-	for(i = 0; i < Ndead; i++){
-		if(t->dead[i].tail != nil){
-			finalize(t->dead[i].tail);
-			syncblk(t->dead[i].tail);
-		}
-	}
-	p = kbuf;
-	p[0] = Ksnap;		p += 1;
-	PBIT64(p, t->gen);	p += 8;
-	m.op = Oinsert;
-	m.k = kbuf;
-	m.nk = p - kbuf;
-	p = packtree(vbuf, sizeof(vbuf), t);
-	m.v = vbuf;
-	m.nv = p - vbuf;
-	if((e = btupsert(&fs->snap, &m, 1)) != nil){
-		fprint(2, "error snapshotting: %s\n", e);
-		return -1;
-	}
-	return 0;
-}
-
 
 Tree*
 newsnap(Tree *t)
@@ -259,7 +264,7 @@ newsnap(Tree *t)
 	Tree *r;
 	int i;
 
-	if(savesnap(t) == -1)
+	if(modifysnap(Oinsert, t) != nil)
 		return nil;
 
 	if((r = malloc(sizeof(Tree))) == nil)

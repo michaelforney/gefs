@@ -52,7 +52,6 @@ cacheblk(Blk *b)
 	Blk *e, *c;
 	u32int h;
 
-	assert(b->bp.addr != 0);
 	h = ihash(b->bp.addr);
 	bkt = &fs->cache[h % fs->cmax];
 	lock(bkt);

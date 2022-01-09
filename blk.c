@@ -17,8 +17,6 @@ static vlong	blkalloc(void);
 static int	blkdealloc_lk(vlong);
 static Blk*	initblk(vlong, int);
 
-QLock blklock;
-
 void
 setflag(Blk *b, int flg)
 {
@@ -323,6 +321,7 @@ graft(Oplog *a, Oplog *b)
 	o = b->head.addr|LogChain;
 	p = a->tail->data + a->tail->logsz;
 	PBIT64(p, o);
+	finalize(a->tail);
 	if(syncblk(a->tail) == -1)
 		return -1;
 	putblk(a->tail);
@@ -482,11 +481,12 @@ compresslog(Arena *a)
 {
 	Arange *r;
 	Range *log, *nlog;
-	vlong v, bp, nb, graft, oldhd;
+	vlong v, ba, na, graft, oldhd;
 	int i, n, sz;
 	Blk *hd, *b;
 	Oplog ol;
 	char *p;
+	Bptr bp;
 
 	/*
 	 * Sync the current log to disk, and
@@ -500,9 +500,9 @@ compresslog(Arena *a)
 	 * because otherwise we have a deadlock
 	 * allocating the block.
 	 */
-	if((bp = blkalloc_lk(a)) == -1)
+	if((ba = blkalloc_lk(a)) == -1)
 		return -1;
-	if((b = initblk(bp, Tlog)) == nil)
+	if((b = initblk(ba, Tlog)) == nil)
 		return -1;
 	setflag(b, Bdirty);
 	b->logsz = Loghdsz;
@@ -572,24 +572,27 @@ compresslog(Arena *a)
 	if(syncarena(a) == -1)
 		return -1;
 	if(oldhd != -1){
-		for(bp = oldhd; bp != -1; bp = nb){
-			nb = -1;
-			if((b = readblk(bp, 0)) == nil)
+		for(ba = oldhd; ba != -1; ba = na){
+			na = -1;
+			bp.addr = ba;
+			bp.hash = -1;
+			bp.gen = -1;
+			if((b = getblk(bp, GBnochk)) == nil)
 				return -1;
 			for(i = Loghdsz; i < Logspc; i += n){
 				p = b->data + i;
 				v = GBIT64(p);
 				n = ((v&0xff) >= Log2wide) ? 16 : 8;
 				if((v&0xff) == LogChain){
-					nb = v & ~0xff;
+					na = v & ~0xff;
 					break;
 				}else if((v&0xff) == LogEnd){
-					nb = -1;
+					na = -1;
 					break;
 				}
 			}
 			lock(a);
-			if(blkdealloc_lk(bp) == -1){
+			if(blkdealloc_lk(ba) == -1){
 				unlock(a);
 				return -1;
 			}
@@ -821,27 +824,27 @@ getblk(Bptr bp, int flg)
 	if((b = lookupblk(bp.addr)) != nil)
 		return cacheblk(b);
 
-	qlock(&blklock);
+	qlock(&fs->blklk);
 	if((b = lookupblk(bp.addr)) != nil){
 		cacheblk(b);
-		qunlock(&blklock);
+		qunlock(&fs->blklk);
 		return b;
 	}
 	if((b = readblk(bp.addr, flg)) == nil){
-		qunlock(&blklock);
+		qunlock(&fs->blklk);
 		return nil;
 	}
 	h = blkhash(b);
 	if((flg&GBnochk) == 0 && h != bp.hash){
 		fprint(2, "corrupt block %B: %llx != %llx\n", bp, blkhash(b), bp.hash);
-		qunlock(&blklock);
+		qunlock(&fs->blklk);
 		abort();
 		return nil;
 	}
 	b->bp.hash = h;
 	b->bp.gen = bp.gen;
 	cacheblk(b);
-	qunlock(&blklock);
+	qunlock(&fs->blklk);
 
 	return b;
 }
@@ -1000,7 +1003,6 @@ sync(void)
 	enqueue(fs->super);
 	if(r != -1)
 		r = syncblk(fs->super);
-
 	qunlock(&fs->snaplk);
 	return r;
 }

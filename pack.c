@@ -309,6 +309,27 @@ kv2qid(Kvp *kv, Qid *q)
 }
 
 char*
+packlabel(char *p, int sz, char *name)
+{
+	int n;
+
+	n = strlen(name);
+	assert(sz >= n+1);
+	p[0] = Klabel;		p += 1;
+	memcpy(p, name, n);	p += n;
+	return p;
+}
+
+char*
+packsnap(char *p, int sz, vlong id)
+{
+	assert(sz >= Snapsz);
+	p[0] = Ksnap;		p += 1;
+	PBIT64(p, id);		p += 8;
+	return p;
+}
+
+char*
 packbp(char *p, int sz, Bptr *bp)
 {
 	assert(sz >= Ptrsz);

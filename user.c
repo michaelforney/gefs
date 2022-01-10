@@ -233,10 +233,12 @@ parseusers(int fd, char *udata)
 
 	wlock(&fs->userlk);
 	n = fs->users;
+	i = fs->nusers;
 	fs->users = users;
 	fs->nusers = nusers;
-	users = n;
 	wunlock(&fs->userlk);
+	users = n;
+	nusers = i;
 
 Error:
 	if(users != nil)

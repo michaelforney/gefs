@@ -67,33 +67,6 @@ snapfs(int fd, char *old, char *new)
 	fprint(fd, "snap taken: %s\n", new);
 }
 
-static Tree*
-scratchsnap(Fid *f)
-{
-	Tree *t, *n;
-	char *e;
-
-	t = f->mnt->root;
-	if((n = newsnap(t)) == nil){
-		fprint(2, "snap: save %s: %s\n", f->mnt->name, "create snap");
-		abort();
-	}
-	if((e = labelsnap(f->mnt->name, t->gen)) != nil){
-		fprint(2, "snap: save %s: %s\n", f->mnt->name, e);
-		abort();
-	}
-	if(t->prev[0] != -1){
-		if((e = unrefsnap(t->prev[0], t->gen)) != nil){
-			fprint(2, "snap: unref old: %s\n", e);
-			abort();
-		}
-	}
-	f->mnt->root = n;
-	closesnap(t);
-	sync();
-	return nil;
-}
-
 void
 freemsg(Fmsg *m)
 {
@@ -433,7 +406,8 @@ getfid(u32int fid)
 		if(f->fid == fid)
 			break;
 	unlock(&fs->fidtablk);
-	ainc(&f->ref);
+	if(f != nil)
+		ainc(&f->ref);
 	return f;
 }
 
@@ -477,7 +451,7 @@ dupfid(int new, Fid *f)
 	unlock(&fs->fidtablk);
 
 	if(o != nil){
-		fprint(2, "fid in use: %d == %d\n", o->fid, new);
+		fprint(2, "fid in use: %d == %d", o->fid, new);
 		abort();
 		free(n);
 		return nil;
@@ -681,6 +655,7 @@ fsattach(Fmsg *m, int iounit)
 	f.fid = NOFID;
 	f.mnt = mnt;
 	f.qpath = d.qid.path;
+	f.pqpath = d.qid.path;
 	f.mode = -1;
 	f.iounit = iounit;
 	f.dent = de;
@@ -700,10 +675,28 @@ fsattach(Fmsg *m, int iounit)
 	return;
 }
 
+static char*
+findparent(Fid *f, vlong *qpath, char **name, char *buf, int nbuf)
+{
+	char *p, *e, kbuf[Keymax];
+	Kvp kv;
+	Key k;
+
+	if((p = packsuper(kbuf, sizeof(kbuf), f->pqpath)) == nil)
+		return Elength;
+	k.k = kbuf;
+	k.nk = p - kbuf;
+	if((e = lookup(f, &k, &kv, buf, nbuf, 0)) != nil)
+		return e;
+	if((*name = unpackdkey(kv.v, kv.nv, qpath)) == nil)
+		return Efs;
+	return nil;
+}
+
 void
 fswalk(Fmsg *m)
 {
-	char *p, *e, kbuf[Maxent], kvbuf[Kvmax];
+	char *p, *e, *name, kbuf[Maxent], kvbuf[Kvmax];
 	int duid, dgid, dmode;
 	vlong up, prev;
 	Fid *o, *f;
@@ -731,16 +724,23 @@ fswalk(Fmsg *m)
 	dmode = d.mode;
 	r.type = Rwalk;
 	for(i = 0; i < m->nwname; i++){
-		if((p = packdkey(kbuf, sizeof(kbuf), prev, m->wname[i])) == nil){
+		name = m->wname[i];
+		if(strcmp(m->wname[i], "..") == 0){
+			if((e = findparent(o, &prev, &name, kbuf, sizeof(kbuf))) != nil){
+				rerror(m, e);
+				putfid(o);
+				return;
+			}
+		}
+		if((p = packdkey(kbuf, sizeof(kbuf), prev, name)) == nil){
 			rerror(m, Elength);
 			putfid(o);
 			return;
 		}
 		k.k = kbuf;
 		k.nk = p - kbuf;
-		if((e = lookup(o, &k, &kv, kvbuf, sizeof(kvbuf), 0)) != nil){
+		if((e = lookup(o, &k, &kv, kvbuf, sizeof(kvbuf), 0)) != nil)
 			break;
-		}
 		duid = d.uid;
 		dgid = d.gid;
 		dmode = d.mode;
@@ -779,6 +779,7 @@ fswalk(Fmsg *m)
 		}
 		if(i == m->nwname){
 			f->qpath = r.wqid[i-1].path;
+			f->pqpath = up;
 			f->dent = dent;
 			f->duid = duid;
 			f->dgid = dgid;
@@ -986,12 +987,13 @@ fsclunk(Fmsg *m)
 void
 fscreate(Fmsg *m)
 {
-	char *e, buf[Kvmax];
+	char *p, *e, buf[Kvmax], upkbuf[Keymax], upvbuf[Inlmax];
 	Dent *de;
 	Fcall r;
-	Msg mb;
+	Msg mb[2];
 	Fid *f;
 	Xdir d;
+	int nm;
 
 	if(okname(m->name) == -1){
 		rerror(m, Ename);
@@ -1014,6 +1016,7 @@ fscreate(Fmsg *m)
 	}
 	runlock(de);
 
+	nm = 0;
 	d.qid.type = 0;
 	if(m->perm & DMDIR)
 		d.qid.type |= QTDIR;
@@ -1034,13 +1037,27 @@ fscreate(Fmsg *m)
 	d.gid = f->dgid;
 	d.muid = f->mnt->uid;
 
-	mb.op = Oinsert;
-	if(dir2kv(f->qpath, &d, &mb, buf, sizeof(buf)) == -1){
+	mb[nm].op = Oinsert;
+	if(dir2kv(f->qpath, &d, &mb[nm], buf, sizeof(buf)) == -1){
 		rerror(m, Efs);
 		putfid(f);
 		return;
 	}
-	if((e = btupsert(f->mnt->root, &mb, 1)) != nil){
+	nm++;
+
+	if(m->perm & DMDIR){
+		mb[nm].op = Oinsert;
+		if((p = packsuper(upkbuf, sizeof(upkbuf), d.qid.path)) == nil)
+			sysfatal("ream: pack super");
+		mb[nm].k = upkbuf;
+		mb[nm].nk = p - upkbuf;
+		if((p = packdkey(upvbuf, sizeof(upvbuf), f->qpath, d.name)) == nil)
+			sysfatal("ream: pack super");
+		mb[nm].v = upvbuf;
+		mb[nm].nv = p - upvbuf;
+		nm++;
+	}
+	if((e = btupsert(f->mnt->root, mb, nm)) != nil){
 		rerror(m, e);
 		putfid(f);
 		return;
@@ -1215,7 +1232,7 @@ fsopen(Fmsg *m)
 //	}
 	if(f->mode & OTRUNC){
 		wlock(f->dent);
-//		freeb(f->dent, 0, dent->length);
+		clearb(f, 0, f->dent->length);
 		f->dent->length = 0;
 		wunlock(f->dent);
 	}
@@ -1565,7 +1582,7 @@ runtasks(int, void *)
 	Amsg *a;
 
 	while(1){
-		sleep(500);
+		sleep(5000);
 		m = mallocz(sizeof(Fmsg), 1);
 		a = mallocz(sizeof(Amsg), 1);
 		if(m == nil || a == nil){

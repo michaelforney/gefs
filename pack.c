@@ -165,6 +165,37 @@ packdkey(char *p, int sz, vlong up, char *name)
 }
 
 char*
+unpackdkey(char *p, int sz, vlong *up)
+{
+	char t, *ep, *name;
+	int err;
+
+	err = 0;
+	ep = p + sz;
+	p = unpack8(&err, p, ep, &t);
+	p = unpack64(&err, p, ep, up);
+	p = unpackstr(&err, p, ep, &name);
+	if(err || t != Kent || p != ep)
+		return nil;
+	return name;
+}
+
+char*
+packsuper(char *p, int sz, vlong up)
+{
+	char *ep;
+	int err;
+
+	err = 0;
+	ep = p + sz;
+	p = pack8(&err, p, ep, Ksuper);
+	p = pack64(&err, p, ep, up);
+	if(err)
+		return nil;
+	return p;
+}
+
+char*
 packdval(char *p, int sz, Xdir *d)
 {
 	char *e;

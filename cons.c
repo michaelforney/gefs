@@ -142,6 +142,18 @@ showusers(int fd, char**, int)
 }
 
 static void
+stats(int fd, char**, int)
+{
+	Stats *s;
+
+	s = &fs->stats;
+	fprint(fd, "stats:\n");
+	fprint(fd, "	cache hits:	%lld\n", s->cachehit);
+	fprint(fd, "	cache lookups:	%lld\n", s->cachelook);
+	fprint(fd, "	cache ratio:	%f\n", (double)s->cachehit/(double)s->cachelook);
+}
+
+static void
 showdf(int fd, char**, int)
 {
 	vlong size, used;
@@ -188,6 +200,17 @@ showent(int fd, char **ap, int)
 }
 
 static void
+showblkdump(int fd, char **ap, int)
+{
+	Bptr bp;
+
+	bp.addr = atoll(ap[0]);
+	bp.hash = -1;
+	bp.gen = -1;
+	showbp(fd, bp, 0);
+}
+
+static void
 help(int fd, char**, int)
 {
 	char *msg =
@@ -230,6 +253,7 @@ Cmd cmdtab[] = {
 	{.name="help",	.sub=nil,	.minarg=0, .maxarg=0, .fn=help},
 	{.name="df",	.sub=nil, 	.minarg=0, .maxarg=0, .fn=showdf},
 	{.name="users",	.sub=nil,	.minarg=0, .maxarg=1, .fn=refreshusers},
+	{.name="stats", .sub=nil,	.minarg=0, .maxarg=0, .fn=stats},
 
 	/* debugging */
 	{.name="show",	.sub="cache",	.minarg=0, .maxarg=0, .fn=showcache},
@@ -239,6 +263,7 @@ Cmd cmdtab[] = {
 	{.name="show",	.sub="snap",	.minarg=0, .maxarg=1, .fn=showsnap},
 	{.name="show",	.sub="tree",	.minarg=0, .maxarg=1, .fn=showtree},
 	{.name="show",	.sub="users",	.minarg=0, .maxarg=0, .fn=showusers},
+	{.name="show",	.sub="blk",	.minarg=1, .maxarg=1, .fn=showblkdump},
 	{.name="debug",	.sub=nil,	.minarg=1, .maxarg=1, .fn=setdbg},
 
 	{.name=nil, .sub=nil},

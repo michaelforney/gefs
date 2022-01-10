@@ -7,6 +7,23 @@
 #include "fns.h"
 
 void
+stablesort(Msg *m, int nm)
+{
+	int i, j;
+	Msg t;
+
+	for(i = 1; i < nm; i++){
+		for(j = i; j > 0; j--){
+			if(keycmp(&m[j-1], &m[j]) <= 0)
+				break;
+			t = m[j-1];
+			m[j-1] = m[j];
+			m[j] = t;
+		}
+	}
+}
+
+void
 cpkey(Key *dst, Key *src, char *buf, int nbuf)
 {
 	assert(src->nk <= nbuf);
@@ -1169,12 +1186,9 @@ btupsert(Tree *t, Msg *msg, int nmsg)
 	Bptr bp;
 
 	sz = 0;
-	qsort(msg, nmsg, sizeof(Msg), msgcmp);
-	for(i = 0; i < nmsg; i++){
-		if(msg[i].nk + 2 > Keymax)
-			return Efs;
+	stablesort(msg, nmsg);
+	for(i = 0; i < nmsg; i++)
 		sz += msgsz(&msg[i]);
-	}
 
 Again:
 	if((b = getroot(t, &height)) == nil)
@@ -1298,7 +1312,15 @@ btlookupat(Blk *b, int h, Key *k, Kvp *r, char *buf, int nbuf)
 		j = bufsearch(p[i], k, &m, &same);
 		if(j < 0 || !same)
 			continue;
-		assert(ok || m.op == Oinsert);
+		if(!(ok || m.op == Oinsert)){
+			fprint(2, "lookup %K << %M missing insert\n", k, &m);
+			for(int j = 0; j < h; j++){
+				print("busted %d\n",j);
+				if(p[j] != nil)
+					showblk(2, p[j], "busted insert", 0);
+			}
+			abort();
+		}
 		ok = apply(r, &m, buf, nbuf);
 		for(j++; j < p[i]->nbuf; j++){
 			getmsg(p[i], j, &m);

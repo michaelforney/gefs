@@ -22,6 +22,7 @@ typedef struct Tree	Tree;
 typedef struct Oplog	Oplog;
 typedef struct Mount	Mount;
 typedef struct User	User;
+typedef struct Stats	Stats;
 
 enum {
 	KiB	= 1024ULL,
@@ -84,7 +85,7 @@ enum {
 	Klabel,	/* name[] => snapid[]:		snapshot label */
 	Ktref,	/* tag[8] = snapid[]		scratch snapshot label */
 	Ksnap,	/* sid[8] => ref[8], tree[52]:	snapshot root */
-	Ksuper,	/* qid[8] => pqid[8]:		parent dir */
+	Ksuper,	/* qid[8] => Kent:		parent dir */
 	Kdirty,	/* [0] => [0]:			mark dirty unmount */
 };
 
@@ -92,7 +93,8 @@ enum {
 	Bdirty	= 1 << 0,
 	Bqueued	= 1 << 1,
 	Bfinal	= 1 << 2,
-	Bcached	= 1 << 3,
+	Bfreed	= 1 << 3,
+	Bcached	= 1 << 4,
 };
 
 /* internal errors */
@@ -122,6 +124,7 @@ enum {
 #define Efsize	"file too big"
 #define Ebadu	"attach -- unknown user or failed authentication"
 #define Erdonly	"file system read only"
+#define Elocked	"open/create -- file is locked"
 
 #define Ewstatb	"wstat -- unknown bits in qid.type/mode"
 #define Ewstatd	"wstat -- attempt to change directory"
@@ -151,7 +154,6 @@ enum {
 //#define Edot		"create/wstat -- . and .. illegal names"
 //#define Ewalk		"walk -- too many (system wide)"
 //#define Eoffset	"read/write -- offset negative"
-//#define Elocked	"open/create -- file is locked"
 //#define Ebroken	"read/write -- lock is broken"
 //#define Eauth		"attach -- authentication failed"
 //#define Eauth2	"read/write -- authentication unimplemented"
@@ -372,6 +374,11 @@ struct User {
 	char	name[128];
 };
 
+struct Stats {
+	vlong	cachehit;
+	vlong	cachelook;
+};
+
 /*
  * Overall state of the file sytem.
  * Shadows the superblock contents.
@@ -438,6 +445,8 @@ struct Gefs {
 	Blk	*ctail;
 	int	ccount;
 	int	cmax;
+
+	Stats	stats;
 };
 
 struct Arena {
@@ -513,11 +522,13 @@ struct Fid {
 	 * instead of the most recent root, to prevent
 	 * paging in the wrong executable.
 	 */
-	char	snap[64];
 	Mount	*mnt;
+	Scan	*scan;	/* in progres scan */
+	Dent	*dent;	/* (pqid, name) ref, modified on rename */
 
 	u32int	fid;
 	vlong	qpath;
+	vlong	pqpath;
 	long	ref;
 	int	mode;
 	int	iounit;
@@ -525,9 +536,6 @@ struct Fid {
 	int	duid;
 	int	dgid;
 	int	dmode;
-
-	Scan	*scan;	/* in progres scan */
-	Dent	*dent;	/* (pqid, name) ref, modified on rename */
 };
 
 enum {

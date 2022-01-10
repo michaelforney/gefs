@@ -11,7 +11,7 @@
 static void
 initroot(Blk *r)
 {
-	char buf[512];
+	char *p, kbuf[Keymax], vbuf[Inlmax];
 	Kvp kv;
 	Xdir d;
 
@@ -26,17 +26,18 @@ initroot(Blk *r)
 	d.uid = 2;
 	d.gid = 2;
 	d.muid = 2;
-	if(dir2kv(-1, &d, &kv, buf, sizeof(buf)) == -1)
+	if(dir2kv(-1, &d, &kv, vbuf, sizeof(vbuf)) == -1)
 		sysfatal("ream: pack root: %r");
 	setval(r, 0, &kv);
 
-	kv.k = buf;
-	kv.nk = 9;
-	kv.v = buf+9;
-	kv.nv = 8;
-	buf[0] = Ksuper;
-	PBIT64(buf+1, 0ULL);
-	PBIT64(buf+9, 0ULL);
+	if((p = packsuper(kbuf, sizeof(kbuf), 0)) == nil)
+		sysfatal("ream: pack super");
+	kv.k = kbuf;
+	kv.nk = p - kbuf;
+	if((p = packdkey(vbuf, sizeof(vbuf), -1, "")) == nil)
+		sysfatal("ream: pack super");
+	kv.v = vbuf;
+	kv.nv = p - vbuf;
 	setval(r, 1, &kv);
 }
 
@@ -105,7 +106,7 @@ initarena(Arena *a, vlong start, vlong asz)
 
 	p = b->data+Loghdsz;
 	PBIT64(p, addr|LogFree);	p += 8;	/* addr */
-	PBIT64(p, asz);			p += 8;	/* len */
+	PBIT64(p, asz-Blksz);		p += 8;	/* len */
 	PBIT64(p, b->bp.addr|LogAlloc);	p += 8;	/* addr */
 	PBIT64(p, Blksz);		p += 8;	/* len */
 	PBIT64(p, (uvlong)LogEnd);	/* done */

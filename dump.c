@@ -34,7 +34,7 @@ showkey(Fmt *fmt, Key *k)
 		n = fmtprint(fmt, "snap id:\"%llx\"", GBIT64(k->k+1));
 		break;
 	case Ksuper:	/* qid[8] => pqid[8]:		parent dir */
-		n = fmtprint(fmt, "up parent:%llx ptr:%llx", GBIT64(k->k+1), GBIT64(k->k+9));
+		n = fmtprint(fmt, "up dir:%llx", GBIT64(k->k+1));
 		break;
 	default:
 		n = fmtprint(fmt, "%.*H", k->nk, k->k);
@@ -69,7 +69,6 @@ showval(Fmt *fmt, Kvp *v, int op, int flg)
 			n = fmtprint(fmt, "ptr:%B", unpackbp(v->v, v->nv));
 			break;
 		}
-		break;
 	case Kent:	/* pqid[8] name[n] => dir[n]:	serialized Dir */
 		switch(op){
 		case Onop:
@@ -131,7 +130,7 @@ showval(Fmt *fmt, Kvp *v, int op, int flg)
 		n = fmtprint(fmt, "snap id:\"%llx\"", GBIT64(v->v+1));
 		break;
 	case Ksuper:	/* qid[8] => pqid[8]:		parent dir */
-		n = fmtprint(fmt, "parent: %llx", GBIT64(v->v));
+		n = fmtprint(fmt, "super dir:%llx, name:\"%.*s\")", GBIT64(v->v+1), v->nv-11, v->v+11);
 		break;
 	default:
 		n = fmtprint(fmt, "%.*H", v->nk, v->k);
@@ -302,7 +301,7 @@ showbp(int fd, Bptr bp, int recurse)
 {
 	Blk *b;
 
-	b = getblk(bp, 0);
+	b = getblk(bp, GBnochk);
 	rshowblk(fd, b, 0, recurse);
 	putblk(b);
 }

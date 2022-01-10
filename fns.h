@@ -114,9 +114,11 @@ Bptr	unpackbp(char*, int);
 char*	packtree(char*, int, Tree*);
 Tree*	unpacktree(Tree*, char*, int);
 char*	packdkey(char*, int, vlong, char*);
+char*	unpackdkey(char*, int, vlong*);
 char*	packdval(char*, int, Xdir*);
 char*	packsnap(char*, int, vlong);
 char*	packlabel(char*, int, char*);
+char*	packsuper(char*, int, vlong);
 
 /* fmt */
 int	Bconv(Fmt*);

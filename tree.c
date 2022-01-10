@@ -178,67 +178,82 @@ getmsg(Blk *b, int i, Msg *m)
 static int
 bufsearch(Blk *b, Key *k, Msg *m, int *same)
 {
-	int lo, hi, mid, r;
+	int lo, hi, ri, mid, r;
 	Msg cmp;
 
-	r = -1;
+	ri = -1;
 	lo = 0;
-	hi = b->nbuf;
-	while(lo < hi){
+	hi = b->nbuf-1;
+	while(lo <= hi){
 		mid = (hi + lo) / 2;
 		getmsg(b, mid, &cmp);
 		r = keycmp(k, &cmp);
-		if(r < 0)
-			hi = mid;
-		else
-			lo = mid + 1;
+		switch(r){
+		case -1:
+			hi = mid-1;
+			break;
+		case 0:
+			if(same != nil)
+				*same = 1;
+			ri = mid;
+			hi = mid-1;
+			break;
+		case 1:
+			lo = mid+1;
+			break;
+		}
 	}
 	/*
 	 * we can have duplicate messages, and we
 	 * want to point to the first of them:
 	 * scan backwards.
 	 */
-	lo--;
-	for(; lo > 0; lo--){
-		getmsg(b, lo-1, &cmp);
-		if(keycmp(k, &cmp) != 0)
-			break;
-	}
-	if(lo >= 0){
-		getmsg(b, lo, m);
-		r = keycmp(k, m);
-	}
-	if(same != nil)
-		*same = (r == 0);
-	return lo;
+	*same = 0;
+	if(ri == -1)
+		ri = lo-1;
+	else
+		*same = 1;
+	if(ri >= 0)
+		getmsg(b, ri, m);
+	return ri;
 }
 
 int
 blksearch(Blk *b, Key *k, Kvp *rp, int *same)
 {
-	int lo, hi, mid, r;
+	int lo, hi, ri, mid, r;
 	Kvp cmp;
 
-	r = -1;
+	ri = -1;
 	lo = 0;
-	hi = b->nval;
-	while(lo < hi){
+	hi = b->nval-1;
+	while(lo <= hi){
 		mid = (hi + lo) / 2;
 		getval(b, mid, &cmp);
 		r = keycmp(k, &cmp);
-		if(r < 0)
-			hi = mid;
-		else
-			lo = mid + 1;
+		switch(r){
+		case -1:
+			hi = mid-1;
+			break;
+		case 0:
+			if(same != nil)
+				*same = 1;
+			ri = mid;
+			hi = mid-1;
+			break;
+		case 1:
+			lo = mid+1;
+			break;
+		}
 	}
-	lo--;
-	if(lo >= 0){
-		getval(b, lo, rp);
-		r = keycmp(k, rp);
-	}
-	if(same != nil)
-		*same = (r == 0);
-	return lo;
+	*same = 0;
+	if(ri == -1)
+		ri = lo-1;
+	else
+		*same = 1;
+	if(ri >= 0)
+		getval(b, ri, rp);
+	return ri;
 }
 
 int
@@ -1265,7 +1280,7 @@ btlookupat(Blk *b, int h, Key *k, Kvp *r, char *buf, int nbuf)
 	ok = 0;
 	p[0] = refblk(b);
 	for(i = 1; i < h; i++){
-		if(blksearch(p[i-1], k, r, nil) == -1)
+		if(blksearch(p[i-1], k, r, &same) == -1)
 			break;
 		bp = getptr(r, nil);
 		if((p[i] = getblk(bp, 0)) == nil){
@@ -1351,9 +1366,6 @@ btscan(Tree *t, Scan *s, char *pfx, int npfx)
 	p[0].b = b;
 	for(i = 0; i < s->root.ht; i++){
 		p[i].vi = blksearch(b, &s->kv, &v, &same);
-		if(p[i].vi == -1 || (p[i].vi+1 < b->nval && !same && b->type == Tleaf)){
-			getval(b, ++p[i].vi, &v);
-		}
 		if(b->type == Tpivot){
 			p[i].bi = bufsearch(b, &s->kv, &m, &same);
 			if(p[i].bi == -1 || !same)
@@ -1362,9 +1374,9 @@ btscan(Tree *t, Scan *s, char *pfx, int npfx)
 			if((b = getblk(bp, 0)) == nil)
 				return Eio;
 			p[i+1].b = b;
-		}
+		}else if(p[i].vi == -1 || !same)
+			p[i].vi++;
 	}
-	assert(i == s->root.ht);
 	return nil;
 }
 

@@ -322,6 +322,8 @@ graft(Oplog *a, Oplog *b)
 	p = a->tail->data + a->tail->logsz;
 	PBIT64(p, o);
 	finalize(a->tail);
+	if(a->tail->bp.addr == a->head.addr)
+		a->head = a->tail->bp;
 	if(syncblk(a->tail) == -1)
 		return -1;
 	putblk(a->tail);

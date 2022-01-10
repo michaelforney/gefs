@@ -189,8 +189,10 @@ parseusers(int fd, char *udata)
 			continue;
 		getfield(&p, ':');	/* skip id */
 		getfield(&p, ':');	/* skip name */
-		if((f = getfield(&p, ':')) == nil)
-			return Esyntax;
+		if((f = getfield(&p, ':')) == nil){
+			err = Esyntax;
+			goto Error;
+		}
 		if(f[0] != '\0'){
 			u = nil;
 			for(j = 0; j < nusers; j++)
@@ -203,8 +205,10 @@ parseusers(int fd, char *udata)
 			}
 			users[i].lead = u->id;
 		}
-		if((f = getfield(&p, ':')) == nil)
-			return Esyntax;
+		if((f = getfield(&p, ':')) == nil){
+			err = Esyntax;
+			goto Error;
+		}
 		grp = nil;
 		ngrp = 0;
 		while((m = getfield(&f, ',')) != nil){
@@ -216,10 +220,12 @@ parseusers(int fd, char *udata)
 					u = &users[j];
 			if(u == nil){
 				fprint(fd, "/adm/users:%d: user %s does not exist\n", lnum, m);
+				free(grp);
 				err = Enouser;
 				goto Error;
 			}
 			if((g = realloc(grp, (ngrp+1)*sizeof(int))) == nil){
+				free(grp);
 				err = Enomem;
 				goto Error;
 			}

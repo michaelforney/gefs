@@ -151,6 +151,7 @@ freerange(Avltree *t, vlong off, vlong len)
 		return -1;
 	r->off = off;
 	r->len = len;
+	assert(avllookup(t, r, 0) == nil);
 	avlinsert(t, r);
 
 Again:
@@ -231,6 +232,7 @@ logappend(Oplog *ol, Arena *a, vlong off, vlong len, vlong val, int op)
 	Blk *pb, *lb;
 	vlong o;
 	char *p;
+	int r;
 
 	assert(off % Blksz == 0);
 	assert(op == LogAlloc || op == LogFree || op == LogDead);
@@ -245,21 +247,24 @@ logappend(Oplog *ol, Arena *a, vlong off, vlong len, vlong val, int op)
 			return -1;
 		if((lb = initblk(o, Tlog)) == nil)
 			return -1;
+		cacheblk(lb);
 		lb->logsz = Loghdsz;
 		p = lb->data + lb->logsz;
 		PBIT64(p, (uvlong)LogEnd);
 		finalize(lb);
 		if(syncblk(lb) == -1){
-			free(lb);
+			putblk(lb);
 			return -1;
 		}
-
 		ol->tail = lb;
+
 		if(pb != nil){
 			p = pb->data + pb->logsz;
 			PBIT64(p + 0, lb->bp.addr|LogChain);
 			finalize(pb);
-			if(syncblk(pb) == -1)
+			r = syncblk(pb);
+			putblk(pb);
+			if(r == -1)
 				return -1;
 		}
 	}
@@ -711,6 +716,7 @@ initblk(vlong bp, int t)
 	if((b = lookupblk(bp)) == nil){
 		if((b = mallocz(sizeof(Blk), 1)) == nil)
 			return nil;
+		setmalloctag(b, getcallerpc(&bp));
 		/*
 		 * If the block is cached,
 		 * then the cache holds a ref
@@ -835,7 +841,8 @@ getblk(Bptr bp, int flg)
 	if((b = readblk(bp.addr, flg)) == nil){
 		qunlock(&fs->blklk);
 		return nil;
-	}
+	}else
+		setmalloctag(b, getcallerpc(&bp));
 	h = blkhash(b);
 	if((flg&GBnochk) == 0 && h != bp.hash){
 		fprint(2, "corrupt block %B: %llx != %llx\n", bp, blkhash(b), bp.hash);

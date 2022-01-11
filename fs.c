@@ -1069,6 +1069,10 @@ fscreate(Fmsg *m)
 		rerror(m, Enomem);
 		putfid(f);
 		return;
+	}else{
+		wlock(de);
+		de->length = 0;
+		wunlock(de);
 	}
 
 	lock(f);
@@ -1182,14 +1186,15 @@ fsremove(Fmsg *m)
 void
 fsopen(Fmsg *m)
 {
-	char *e, buf[Kvmax];
+	char *p, *e, buf[Kvmax];
+	int mbits;
 	Fcall r;
 	Xdir d;
 	Fid *f;
 	Kvp kv;
-	int mb;
+	Msg mb;
 
-	mb = mode2bits(m->mode);
+	mbits = mode2bits(m->mode);
 	if((f = getfid(m->fid)) == nil){
 		rerror(m, Efid);
 		return;
@@ -1204,7 +1209,7 @@ fsopen(Fmsg *m)
 		putfid(f);
 		return;
 	}
-	if(fsaccess(f->mnt, d.mode, d.uid, d.gid, mb) == -1){
+	if(fsaccess(f->mnt, d.mode, d.uid, d.gid, mbits) == -1){
 		rerror(m, Eperm);
 		putfid(f);
 		return;
@@ -1224,16 +1229,33 @@ fsopen(Fmsg *m)
 		return;
 	}
 	f->mode = mode2bits(m->mode);
-//	if((f->mode & DMEXEC)){
+//	if(!fs->rdonly && (m->mode == OEXEC)){
 //		lock(&fs->root.lk);
 //		f->root = fs->root;
 //		refblk(fs->root.bp);
 //		unlock(&fs->root.lk);
 //	}
-	if(f->mode & OTRUNC){
+	if(m->mode & OTRUNC){
 		wlock(f->dent);
-		clearb(f, 0, f->dent->length);
+		f->dent->muid = f->mnt->uid;
+		f->dent->qid.vers++;
 		f->dent->length = 0;
+
+		mb.op = Owstat;
+		p = buf;
+		p[0] = Owsize|Owmuid;	p += 1;
+		PBIT64(p, 0);		p += 8;
+		PBIT32(p, f->mnt->uid);	p += 4;
+		mb.k = f->dent->k;
+		mb.nk = f->dent->nk;
+		mb.v = buf;
+		mb.nv = p - buf;
+		clearb(f, 0, f->dent->length);
+		if((e = btupsert(f->mnt->root, &mb, 1)) != nil){
+			wunlock(f->dent);
+			rerror(m, e);
+			return;
+		}
 		wunlock(f->dent);
 	}
 	unlock(f);
@@ -1251,6 +1273,8 @@ fsreaddir(Fmsg *m, Fid *f, Fcall *r)
 	s = f->scan;
 	if(s != nil && s->offset != 0 && s->offset != m->offset)
 		return Edscan;
+	if((r->data = malloc(m->count)) == nil)
+		return Enomem;
 	if(s == nil || m->offset == 0){
 		if((s = mallocz(sizeof(Scan), 1)) == nil)
 			return Enomem;
@@ -1258,7 +1282,6 @@ fsreaddir(Fmsg *m, Fid *f, Fcall *r)
 		pfx[0] = Kent;
 		PBIT64(pfx+1, f->qpath);
 		if((e = btscan(f->mnt->root, s, pfx, sizeof(pfx))) != nil){
-			free(r->data);
 			btdone(s);
 			return e;
 		}
@@ -1305,17 +1328,11 @@ fsreadfile(Fmsg *m, Fid *f, Fcall *r)
 	char *p;
 	Dent *e;
 
-	r->type = Rread;
-	r->count = 0;
 	e = f->dent;
 	rlock(e);
 	if(m->offset > e->length){
 		runlock(e);
 		return nil;
-	}
-	if((r->data = malloc(m->count)) == nil){
-		runlock(e);
-		return Enomem;
 	}
 	p = r->data;
 	c = m->count;
@@ -1362,12 +1379,10 @@ fsread(Fmsg *m)
 		e = fsreaddir(m, f, &r);
 	else
 		e = fsreadfile(m, f, &r);
-	if(e != nil){
+	if(e != nil)
 		rerror(m, e);
-		putfid(f);
-		return;
-	}
-	respond(m, &r);
+	else
+		respond(m, &r);
 	free(r.data);
 	putfid(f);
 }
@@ -1484,7 +1499,6 @@ runfs(int wid, void *pfd)
 		case Tversion:	fsversion(m, &msgmax);	break;
 		case Tauth:	fsauth(m);		break;
 		case Tclunk:	fsclunk(m);		break;
-		case Topen:	fsopen(m);		break;
 		case Tattach:	fsattach(m, msgmax);	break;
 
 		/* mutators */
@@ -1498,6 +1512,16 @@ runfs(int wid, void *pfd)
 		case Twalk:	chsend(fs->rdchan, m);	break;
 		case Tread:	chsend(fs->rdchan, m);	break;
 		case Tstat:	chsend(fs->rdchan, m);	break;
+
+		/* both */
+		case Topen:
+			if(m->mode & OTRUNC)
+				chsend(fs->wrchan, m);
+			else
+
+				chsend(fs->rdchan, m);
+			break;
+
 		default:
 			fprint(2, "unknown message %F\n", &m->Fcall);
 			snprint(err, sizeof(err), "unknown message: %F", &m->Fcall);
@@ -1536,6 +1560,7 @@ runwrite(int wid, void *)
 			case Twrite:	fswrite(m);	break;
 			case Twstat:	fswstat(m);	break;
 			case Tremove:	fsremove(m);	break;
+			case Topen:	fsopen(m);	break;
 			}
 			break;
 		case AOsync:
@@ -1570,6 +1595,7 @@ runread(int wid, void *)
 		case Twalk:	fswalk(m);	break;
 		case Tread:	fsread(m);	break;
 		case Tstat:	fsstat(m);	break;
+		case Topen:	fsopen(m);	break;
 		}
 		quiesce(wid);
 	}

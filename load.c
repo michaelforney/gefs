@@ -90,10 +90,11 @@ loadfs(char *dev)
 	}
 	fprint(2, "load: %8s\n", p);
 	fprint(2, "\tsnaptree:\t%B\n", fs->snap.bp);
-	fprint(2, "\tarenas:\t%d\n", fs->narena);
+	fprint(2, "\tnarenas:\t%d\n", fs->narena);
 	fprint(2, "\tarenasz:\t%lld\n", fs->arenasz);
 	fprint(2, "\tnextqid:\t%lld\n", fs->nextqid);
 	fprint(2, "\tnextgen:\t%lld\n", fs->nextgen);
+	fprint(2, "\tcachesz:\t%lld MiB\n", fs->cmax*Blksz/MiB);
 	if((fs->arenas = calloc(fs->narena, sizeof(Arena))) == nil)
 		sysfatal("malloc: %r");
 	for(i = 0; i < fs->narena; i++)

@@ -6,7 +6,7 @@
 #include "dat.h"
 #include "fns.h"
 
-void
+static void
 cachedel_lk(vlong del)
 {
 	Bucket *bkt;
@@ -112,10 +112,12 @@ lookupblk(vlong off)
 
 	h = ihash(off);
 
+	inc64(&fs->stats.cachelook, 1);
 	bkt = &fs->cache[h % fs->cmax];
 	lock(bkt);
 	for(b = bkt->b; b != nil; b = b->hnext)
 		if(b->bp.addr == off){
+			inc64(&fs->stats.cachehit, 1);
  			refblk(b);
 			break;
 		}

@@ -25,7 +25,6 @@ void	quiesce(int);
 void	freeblk(Tree*, Blk*);
 void	freebp(Tree*, Bptr);
 int	killblk(Tree*, Bptr);
-int	graft(Oplog*, Oplog*);
 void	reclaimblk(Bptr);
 ushort	blkfill(Blk*);
 uvlong	blkhash(Blk*);
@@ -47,7 +46,7 @@ int	loadarena(Arena*, vlong);
 void	loadfs(char*);
 int	sync(void);
 int	loadlog(Arena*);
-int	scandead(Oplog*, void(*)(Bptr, void*), void*);
+int	scandead(Dlist*, int, void(*)(Bptr, void*), void*);
 int	endfs(void);
 int	compresslog(Arena*);
 void	setval(Blk*, int, Kvp*);
@@ -68,6 +67,8 @@ void	clrflag(Blk *b, int);
 char*	estrdup(char*);
 
 int	keycmp(Key *, Key *);
+void	cpkey(Key*, Key*, char*, int);
+void	cpkvp(Kvp*, Kvp*, char*, int);
 
 /* for dumping */
 void	getval(Blk*, int, Kvp*);
@@ -128,11 +129,6 @@ int	Rconv(Fmt*);
 int	Kconv(Fmt*);
 int	Qconv(Fmt*);
 
-/* scratch */
-void	setmsg(Blk *, int, Msg *);
-void	bufinsert(Blk *, Msg *);
-void	victim(Blk *b, Path *p);
-
 Chan*	mkchan(int);
 Fmsg*	chrecv(Chan*);
 void	chsend(Chan*, Fmsg*);
@@ -144,6 +140,6 @@ void	runtasks(int, void*);
 
 /* it's in libc... */
 extern int cas(long*, long, long);
-extern int fas32(int*, int);
+extern int fasp(void***, void*);
 extern int cas64(u64int*, u64int, u64int);
-uvlong	inc64(uvlong*, uvlong);
+vlong	inc64(vlong*, vlong);

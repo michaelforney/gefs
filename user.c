@@ -79,7 +79,7 @@ slurp(Tree *t, vlong path, vlong len)
 	return ret;
 }
 
-char*
+static char*
 readline(char **p, char *buf, int nbuf)
 {
 	char *e;
@@ -95,7 +95,7 @@ readline(char **p, char *buf, int nbuf)
 	return buf;
 }
 
-char*
+static char*
 getfield(char **p, char delim)
 {
 	char *r;
@@ -133,7 +133,7 @@ uid2user(int id)
 	return nil;
 }
 
-char*
+static char*
 parseusers(int fd, char *udata)
 {
 	char *pu, *p, *f, *m, *err, buf[8192];

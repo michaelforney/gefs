@@ -19,7 +19,7 @@ typedef struct Arange	Arange;
 typedef struct Bucket	Bucket;
 typedef struct Chan	Chan;
 typedef struct Tree	Tree;
-typedef struct Oplog	Oplog;
+typedef struct Dlist	Dlist;
 typedef struct Mount	Mount;
 typedef struct User	User;
 typedef struct Stats	Stats;
@@ -57,7 +57,7 @@ enum {
 	Snapsz	= 9,			/* tag, snapid */
 	Dpfxsz	= 9,
 	Ndead	= 8,			/* number of deadlist heads */
-	Deadsz	= 8+8+8+8+8,		/* prev, head, head hash, tail, tail hash */
+	Deadsz	= 8+8+8,		/* prev, head, hash */
 	Treesz	= 4+4+8+Ptrsz+Ndead*Deadsz,	/* ref, height, gen, root, deadlist */
 	Kvmax	= Keymax + Inlmax,	/* Key and value */
 	Kpmax	= Keymax + Ptrsz,	/* Key and pointer */
@@ -237,11 +237,12 @@ enum {
 enum {
 	Tnone,
 	Traw,
+	Tpivot,
+	Tleaf,
 	Tsuper,
 	Tarena,
 	Tlog,
-	Tpivot,
-	Tleaf,
+	Tdead,
 };
 
 enum {
@@ -294,7 +295,16 @@ enum {
 #define	Log2wide	LogAlloc
 	LogAlloc,	/* alloc a range */
 	LogFree,	/* free a range */
-	LogDead	,	/* deadlist a block */
+};
+
+/*
+ * Operations for the deadlist log
+ */
+enum {
+	DlEnd,		/* no data */
+	DlChain,	/* [8]addr, [8]hash */
+	DlGraft,	/* [8]addr, [8]hash */
+	DlKill,		/* [8]addr, [8]gen */
 };
 
 enum {
@@ -309,9 +319,10 @@ struct Bptr {
 	vlong	gen;
 };
 
-struct Oplog {
-	Bptr	head;
-	Blk	*tail;	/* tail block open for writing */
+struct Dlist {
+	vlong	prev;	/* previous generation */
+	Bptr	head;	/* first flushed block */
+	Blk	*ins;	/* inserted block */
 };
 
 struct Arange {
@@ -357,8 +368,7 @@ struct Tree {
 	int	ht;
 	Bptr	bp;
 	vlong	gen;
-	vlong	prev[Ndead];
-	Oplog	dead[Ndead];
+	Dlist	dead[Ndead];
 };
 
 struct Bfree {
@@ -413,8 +423,8 @@ struct Gefs {
 	/* root snapshot tree */
 	Tree	snap;
 
-	uvlong	nextqid;
-	uvlong	nextgen;
+	vlong	nextqid;
+	vlong	nextgen;
 
 	/* arena allocation */
 	Arena	*arenas;
@@ -459,7 +469,9 @@ struct Arena {
 	vlong	nq;
 	vlong	size;
 	vlong	used;
-	Oplog	log;
+	/* freelist */
+	Bptr	head;
+	Blk	*tail;	/* tail held open for writing */
 };
 
 struct Key{
@@ -506,6 +518,7 @@ struct Dent {
 };
 
 struct Mount {
+	Lock;
 	Mount	*next;
 	long	ref;
 	vlong	gen;

@@ -69,11 +69,11 @@ initsnap(Blk *s, Blk *r)
 	t.gen = 0;
 	t.bp = r->bp;
 	for(i = 0; i < Ndead; i++){
-		t.prev[i] = -1;
+		t.dead[i].prev = -1;
 		t.dead[i].head.addr = -1;
 		t.dead[i].head.hash = -1;
 		t.dead[i].head.gen = -1;
-		t.dead[i].tail = nil;
+		t.dead[i].ins = nil;
 	}
 	p = packtree(vbuf, sizeof(vbuf), &t);
 	kv.v = vbuf;
@@ -93,9 +93,9 @@ initarena(Arena *a, vlong start, vlong asz)
 		sysfatal("ream: %r");
 	addr += Blksz;	/* arena header */
 
-	a->log.head.addr = -1;
-	a->log.head.hash = -1;
-	a->log.head.gen = -1;
+	a->head.addr = -1;
+	a->head.hash = -1;
+	a->head.gen = -1;
 
 	memset(b, 0, sizeof(Blk));
 	b->type = Tlog;
@@ -156,9 +156,9 @@ reamfs(char *dev)
 
 	sz = d->length;
 	sz = sz - (sz % Blksz) - Blksz;
-	fs->narena = (d->length + 64*GiB - 1) / (64*GiB);
-	if(fs->narena < 1)
-		fs->narena = 1;
+	fs->narena = (d->length + 64ULL*GiB - 1) / (64ULL*GiB);
+	if(fs->narena < 8)
+		fs->narena = 8;
 	if(fs->narena >= 128)
 		fs->narena = 128;
 	if((fs->arenas = calloc(fs->narena, sizeof(Arena))) == nil)
@@ -167,6 +167,8 @@ reamfs(char *dev)
 
 	asz = sz/fs->narena;
 	asz = asz - (asz % Blksz) - Blksz;
+	if(asz < 512*MiB)
+		sysfatal("disk too small");
 	fs->arenasz = asz;
 	off = 0;
 	fprint(2, "reaming %d arenas:\n", fs->narena);

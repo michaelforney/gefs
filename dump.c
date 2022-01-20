@@ -57,6 +57,10 @@ showval(Fmt *fmt, Kvp *v, int op, int flg)
 		n = fmtprint(fmt, "(%B,%d)", unpackbp(v->v, v->nv), GBIT16(v->v+Ptrsz));
 		return n;
 	}
+	if(op == Odelete || op == Oclearb){
+		n = fmtprint(fmt, "delete");
+		return n;
+	}
 	switch(v->k[0]){
 	case Kdat:	/* qid[8] off[8] => ptr[16]:	pointer to data page */
 		switch(op){
@@ -69,6 +73,7 @@ showval(Fmt *fmt, Kvp *v, int op, int flg)
 			n = fmtprint(fmt, "ptr:%B", unpackbp(v->v, v->nv));
 			break;
 		}
+		break;
 	case Kent:	/* pqid[8] name[n] => dir[n]:	serialized Dir */
 		switch(op){
 		case Onop:
@@ -124,7 +129,7 @@ showval(Fmt *fmt, Kvp *v, int op, int flg)
 	case Ksnap:	/* name[n] => dent[16] ptr[16]:	snapshot root */
 		if(unpacktree(&t, v->v, v->nv) == nil)
 			return fmtprint(fmt, "corrupt tree");
-		n = fmtprint(fmt, "ref: %d, ht: %d, bp: %B, prev=%lld", t.ref, t.ht, t.bp, t.prev[0]);
+		n = fmtprint(fmt, "ref: %d, ht: %d, bp: %B, prev=%lld", t.ref, t.ht, t.bp, t.dead[0].prev);
 		break;
 	case Klabel:
 		n = fmtprint(fmt, "snap id:\"%llx\"", GBIT64(v->v+1));
@@ -227,7 +232,7 @@ Qconv(Fmt *fmt)
 	return fmtprint(fmt, "(%llx %ld %d)", q.path, q.vers, q.type);
 }
 
-void
+static void
 rshowblk(int fd, Blk *b, int indent, int recurse)
 {
 	Blk *c;
@@ -315,6 +320,7 @@ showdeadbp(Bptr bp, void *p)
 void
 showtreeroot(int fd, Tree *t)
 {
+	Dlist *dl;
 	int i;
 
 	fprint(fd, "\tgen:\t%lld\n", t->gen);
@@ -322,18 +328,14 @@ showtreeroot(int fd, Tree *t)
 	fprint(fd, "\tht:\t%d\n", t->ht);
 	fprint(fd, "\tbp:\t%B\n", t->bp);
 	for(i = 0; i < Ndead; i++){
-		fprint(fd, "\tdeadlist[%d]: prev=%llx\n", i, t->prev[i]);
-		fprint(fd, "\t\tprev:\t%llx\n", t->prev[i]);
-		fprint(fd, "\t\tfhead:\t%B\n", t->dead[i].head);
-		if(t->dead[i].tail != nil){
-			fprint(fd, "\t\tftailp:%llx\n", t->dead[i].tail->bp.addr);
-			fprint(fd, "\t\tftailh:%llx\n", t->dead[i].tail->bp.hash);
-		}else{
-			fprint(fd, "\t\tftailp:\t-1\n");
-			fprint(fd, "\t\tftailh:\t-1\n");
-		}
-		fprint(fd, "\t\tdead[%d]: (%B)\n", i, t->dead[i].head);
-		scandead(&t->dead[i], showdeadbp, &fd);
+		dl = &t->dead[i];
+		fprint(fd, "	deadlist[%d]:\n", i);
+		fprint(fd, "		prev:	%llx\n", dl->prev);
+		fprint(fd, "		fhead:	%B\n", dl->head);
+		if(dl->ins != nil)
+			fprint(fd, "		open:	%B\n", dl->ins->bp);
+		fprint(fd, "		dead[%d]: (%B)\n", i, dl->head);
+		scandead(&t->dead[i], 0, showdeadbp, &fd);
 	}
 }
 
@@ -342,6 +344,7 @@ showsnap(int fd, char **ap, int na)
 {
 	char *e, pfx[Snapsz];
 	int sz, done;
+	Mount *mnt;
 	vlong id;
 	Scan *s;
 	Tree t;
@@ -376,6 +379,12 @@ showsnap(int fd, char **ap, int na)
 		}
 		showtreeroot(fd, &t);
 	}
+	qlock(&fs->snaplk);
+	for(mnt = fs->mounts; mnt != nil; mnt = mnt->next){
+		fprint(fd, "open: %s\n", mnt->name);
+		showtreeroot(fd, mnt->root);
+	}
+	qunlock(&fs->snaplk);
 }
 
 void

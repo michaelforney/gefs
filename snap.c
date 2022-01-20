@@ -6,17 +6,143 @@
 #include "dat.h"
 #include "fns.h"
 
-uvlong
-inc64(uvlong *v, uvlong dv)
+int
+scandead(Dlist *l, int lblk, void (*fn)(Bptr, void*), void *dat)
 {
-	vlong ov, nv;
+	char *p;
+	int i, op;
+	Dlist t;
+	Bptr bp;
+	Blk *b;
 
-	while(1){
-		ov = *v;
-		nv = ov + dv;
-		if(cas64((u64int*)v, ov, nv))
-			return ov;
+	if(l->ins != nil)
+		b = l->ins;
+	else if(l->head.addr != -1)
+		b = getblk(l->head, 0);
+	else
+		return 0;
+	if(b == nil)
+		return -1;
+	p = b->data + Loghdsz;
+	for(i = Loghdsz; i < Logspc; i += 16){
+		op = GBIT64(p) & 0xff;
+		switch(op){
+		case DlEnd:
+			return 0;
+		case DlChain:
+			bp.addr = GBIT64(p);	p += 8;
+			bp.addr &= ~0xffULL;
+			bp.hash = GBIT64(p);
+			bp.gen = -1;
+			if(lblk)
+				fn(b->bp, dat);
+			if((b = getblk(bp, 0)) == nil)
+				return -1;
+			p = b->data + Loghdsz;
+			break;
+		case DlGraft:
+			t.head.addr = GBIT64(p);	p += 8;
+			t.head.addr &= ~0xffULL;
+			t.head.hash = GBIT64(p);	p += 8;
+			t.head.gen = -1;
+			t.ins = nil;
+			scandead(&t, lblk, fn, dat);
+			break;
+		case DlKill:
+			bp.addr = GBIT64(p);	p += 8;
+			bp.hash = -1;
+			bp.gen = GBIT64(p);	p += 8;
+			bp.addr &= ~0xffULL;
+			fn(bp, dat);
+			break;
+		default:
+			fprint(2, "bad op=%d\n", op);
+			abort();
+		}
 	}
+	return 0;
+}
+
+/*
+ * Insert into a deadlist. Because the only
+ * operations are chaining deadlist pages
+ * and killing blocks, we don't preserve the
+ * order of kills.
+ */
+static int
+dlinsert(Dlist *dl, vlong v1, vlong v2)
+{
+	Blk *lb, *pb;
+	vlong end, hash;
+	char *p;
+
+	lb = dl->ins;
+	if(lb == nil && dl->head.addr != -1)
+		lb = getblk(dl->head, 0);
+	/*
+	 * move to the next block when we have
+	 * 32 bytes in the log:
+	 * We're appending up to 16 bytes as
+	 * part of the operation, followed by
+	 * 16 bytes of chaining.
+	 */
+	if(lb == nil || lb->logsz >= Logspc - 40){
+		pb = lb;
+		if((lb = newblk(Tdead)) == nil)
+			return -1;
+		if(pb != nil){
+			finalize(pb);
+			if(syncblk(pb) == -1)
+				return -1;
+			dl->head = pb->bp;
+		}
+		lb->logsz = Loghdsz;
+		dl->ins = lb;
+		putblk(pb);
+	}
+	p = lb->data + lb->logsz;
+	PBIT64(p, v1);	p += 8;
+	PBIT64(p, v2);	p += 8;
+	if(dl->head.addr == -1){
+		end = DlEnd;
+		hash = -1;
+	}else{
+		end = dl->head.addr|DlChain;
+		hash = dl->head.hash;
+	}
+	PBIT64(p+0, end);
+	PBIT64(p+8, hash);
+	lb->logsz = (p - lb->data);
+	return 0;
+}
+
+static int
+graft(Dlist *dst, Dlist *src)
+{
+	if(src->ins != nil){
+		finalize(src->ins);
+		if(syncblk(src->ins) == -1)
+			return -1;
+		src->head = src->ins->bp;
+		src->ins = nil;
+	}
+	return dlinsert(dst, src->head.addr|DlGraft, src->head.hash);
+}
+
+int
+killblk(Tree *t, Bptr bp)
+{
+	Dlist *dl;
+	int i;
+
+	dl = &t->dead[0];
+	for(i = 0; i < Ndead; i++){
+		if(t->dead[i].prev <= bp.gen)
+			break;
+		dl = &t->dead[i];
+	}
+	dlinsert(dl, bp.addr|DlKill, bp.gen);
+	return 0;
 }
 
 Tree*
@@ -80,17 +206,20 @@ void
 closesnap(Tree *t)
 {
 	Tree *te, **p;
+	Blk *ins;
 	int i;
 
 	if(adec(&t->memref) != 0)
 		return;
 
 	for(i = Ndead-1; i >= 0; i--){
-		if(t->dead[i].tail == nil)
+		ins = t->dead[i].ins;
+		if(ins == nil)
 			continue;
-		finalize(t->dead[i].tail);
-		syncblk(t->dead[i].tail);
-//FIXME: 	putblk(t->dead[i].tail);
+		finalize(ins);
+		syncblk(ins);
+		t->dead[i].head = ins->bp;
+//FIXME: 	putblk(ins);
 	}
 
 	p = &fs->osnap;
@@ -104,7 +233,7 @@ closesnap(Tree *t)
 	free(te);
 }
 
-char*
+static char*
 modifysnap(int op, Tree *t)
 {
 	char kbuf[Snapsz], vbuf[Treesz];
@@ -113,9 +242,9 @@ modifysnap(int op, Tree *t)
 	int i;
 
 	for(i = 0; i < Ndead; i++){
-		if(t->dead[i].tail != nil){
-			finalize(t->dead[i].tail);
-			syncblk(t->dead[i].tail);
+		if(t->dead[i].ins != nil){
+			finalize(t->dead[i].ins);
+			syncblk(t->dead[i].ins);
 		}
 	}
 	m.op = op;
@@ -218,14 +347,13 @@ unrefsnap(vlong id, vlong succ)
 	return nil;
 }
 
-void
+static void
 freedead(Bptr bp, void *)
 {
-	dprint("reclaimed deadlist: %B\n", bp);
-	reclaimblk(bp);
+	freebp(nil, bp);
 }
 
-void
+static void
 redeadlist(Bptr bp, void *pt)
 {
 	killblk(pt, bp);
@@ -234,25 +362,22 @@ redeadlist(Bptr bp, void *pt)
 char*
 freesnap(Tree *snap, Tree *next)
 {
-	Oplog dl;
+	Dlist dl;
 	int i;
 
 	assert(snap->gen != next->gen);
-	assert(next->prev[0] == snap->gen);
+	assert(next->dead[0].prev == snap->gen);
 
 	dl = next->dead[Ndead-1];
-	scandead(&next->dead[0], freedead, nil);
+	scandead(&next->dead[0], 1, freedead, nil);
 	for(i = 0; i < Ndead-2; i++){
 		if(graft(&snap->dead[i], &next->dead[i+1]) == -1)
 			return Efs;
-		next->prev[i] = snap->prev[i];
 		next->dead[i] = snap->dead[i];
 	}
-	for(; i < Ndead; i++){
-		next->prev[i] = snap->prev[i];
+	for(; i < Ndead; i++)
 		next->dead[i] = snap->dead[i];
-	}
-	scandead(&dl, redeadlist, next);
+	scandead(&dl, 0, redeadlist, next);
 
 	return nil;
 }
@@ -280,11 +405,11 @@ newsnap(Tree *t)
 	r->dirty = 0;
 	/* shift deadlist down */
 	for(i = Ndead-1; i >= 0; i--){
-		r->prev[i] = i == 0 ? t->gen : t->prev[i-1];
+		r->dead[i].prev = (i == 0) ? t->gen : t->dead[i-1].prev;
 		r->dead[i].head.addr = -1;
 		r->dead[i].head.hash = -1;
 		r->dead[i].head.gen = -1;
-		r->dead[i].tail = nil;
+		r->dead[i].ins = nil;
 	}
 	fs->osnap = r;
 

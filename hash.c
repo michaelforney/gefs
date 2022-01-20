@@ -54,7 +54,7 @@
 	HALF_ROUND(v2,v1,v0,v3,17,21);
 
 
-u64int
+static u64int
 siphash24(const void *src, unsigned long src_sz, const char key[16]) {
 	const u64int *_key = (u64int *)key;
 	u64int k0 = _le64toh(_key[0]);

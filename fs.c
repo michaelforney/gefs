@@ -27,13 +27,15 @@ updatemount(Mount *mnt)
 		fprint(2, "snap: save %s: %s\n", mnt->name, e);
 		abort();
 	}
-	if(t->prev[0] != -1){
-		if((e = unrefsnap(t->prev[0], t->gen)) != nil){
+	if(t->dead[0].prev != -1){
+		if((e = unrefsnap(t->dead[0].prev, t->gen)) != nil){
 			fprint(2, "snap: unref old: %s\n", e);
 			abort();
 		}
 	}
+	lock(mnt);
 	mnt->root = n;
+	unlock(mnt);
 	closesnap(t);
 	return nil;
 }
@@ -67,7 +69,7 @@ snapfs(int fd, char *old, char *new)
 	fprint(fd, "snap taken: %s\n", new);
 }
 
-void
+static void
 freemsg(Fmsg *m)
 {
 	free(m->a);
@@ -143,7 +145,7 @@ chsend(Chan *c, Fmsg *m)
 
 }
 
-void
+static void
 fshangup(int fd, char *fmt, ...)
 {
 	va_list ap;
@@ -191,12 +193,16 @@ static char*
 lookup(Fid *f, Key *k, Kvp *kv, char *buf, int nbuf, int lk)
 {
 	char *e;
+	Tree *r;
 
 	if(f->mnt == nil)
 		return Eattach;
 	if(lk)
 		rlock(f->dent);
-	e = btlookup(f->mnt->root, k, kv, buf, nbuf);
+	lock(f->mnt);
+	r = f->mnt->root;
+	unlock(f->mnt);
+	e = btlookup(r, k, kv, buf, nbuf);
 	if(lk)
 		runlock(f->dent);
 	return e;
@@ -533,7 +539,7 @@ fsauth(Fmsg *m)
 	respond(m, &r);
 }
 
-int
+static int
 ingroup(int uid, int gid)
 {
 	User *u, *g;
@@ -551,7 +557,7 @@ ingroup(int uid, int gid)
 	return in;
 }
 
-int
+static int
 mode2bits(int req)
 {
 	int m;
@@ -568,7 +574,7 @@ mode2bits(int req)
 	return m;
 }
 
-int
+static int
 fsaccess(Mount *mnt, int fmode, int fuid, int fgid, int m)
 {
 	/* uid none gets only other permissions */
@@ -693,7 +699,7 @@ findparent(Fid *f, vlong *qpath, char **name, char *buf, int nbuf)
 	return nil;
 }
 
-void
+static void
 fswalk(Fmsg *m)
 {
 	char *p, *e, *name, kbuf[Maxent], kvbuf[Kvmax];
@@ -790,7 +796,7 @@ fswalk(Fmsg *m)
 	putfid(f);
 }
 
-void
+static void
 fsstat(Fmsg *m)
 {
 	char *err, buf[STATMAX], kvbuf[Kvmax];
@@ -820,11 +826,11 @@ fsstat(Fmsg *m)
 	putfid(f);
 }
 
-void
+static void
 fswstat(Fmsg *m)
 {
 	char *p, *e, strs[65535], rnbuf[Kvmax], opbuf[Kvmax], kvbuf[Kvmax];
-	int op, nm, sync;
+	int op, nm, sync, rename;
 	vlong up;
 	Fcall r;
 	Dent *de;
@@ -837,10 +843,14 @@ fswstat(Fmsg *m)
 
 	nm = 0;
 	sync = 1;
+	rename = 0;
 	if((f = getfid(m->fid)) == nil){
 		rerror(m, Efid);
 		return;
 	}
+	de = f->dent;
+	k = f->dent->Key;
+	wlock(de);
 	if(f->dent->qid.type != QTDIR && f->dent->qid.type != QTFILE){
 		rerror(m, Efid);
 		goto Out;
@@ -849,13 +859,9 @@ fswstat(Fmsg *m)
 		rerror(m, Edir);
 		goto Out;
 	}
-	de = f->dent;
-	k = f->dent->Key;
-	rlock(de);
 	if(fsaccess(f->mnt, de->mode, de->uid, de->gid, DMWRITE) == -1){
 		rerror(m, Eperm);
-		runlock(de);
-		return;
+		goto Out;
 	}
 
 	/* A nop qid change is allowed. */
@@ -884,6 +890,8 @@ fswstat(Fmsg *m)
 		/* renaming to the same name is a nop. */
 		mb[nm].op = Odelete;
 		mb[nm].Key = f->dent->Key;
+		mb[nm].v = nil;
+		mb[nm].nv = 0;
 		nm++;
 		if((e = btlookup(f->mnt->root, de, &kv, kvbuf, sizeof(kvbuf))) != nil){
 			rerror(m, e);
@@ -900,13 +908,12 @@ fswstat(Fmsg *m)
 			rerror(m, Efs);
 			goto Out;
 		}
-		sync = 0;
 		k = mb[nm].Key;
+		rename = 1;
+		sync = 0;
 		nm++;
 	}
-	runlock(de);
 
-	wlock(de);
 	p = opbuf+1;
 	op = 0;
 	mb[nm].Key = k;
@@ -937,7 +944,6 @@ fswstat(Fmsg *m)
 	de->muid = f->mnt->uid;
 	PBIT32(p, f->mnt->uid);
 	p += 4;
-	wunlock(de);
 
 	opbuf[0] = op;
 	mb[nm].v = opbuf;
@@ -954,13 +960,16 @@ fswstat(Fmsg *m)
 		r.type = Rwstat;
 		respond(m, &r);
 	}
+	if(rename)
+		cpkey(f->dent, &k, f->dent->buf, sizeof(f->dent->buf));
 
 Out:
+	wunlock(de);
 	putfid(f);
 }
 
 
-void
+static void
 fsclunk(Fmsg *m)
 {
 	Fcall r;
@@ -984,7 +993,7 @@ fsclunk(Fmsg *m)
 	putfid(f);
 }
 
-void
+static void
 fscreate(Fmsg *m)
 {
 	char *p, *e, buf[Kvmax], upkbuf[Keymax], upvbuf[Inlmax];
@@ -1105,7 +1114,7 @@ fscreate(Fmsg *m)
 	putfid(f);
 }
 
-char*
+static char*
 candelete(Fid *f)
 {
 	char *e, pfx[Dpfxsz];
@@ -1133,7 +1142,7 @@ candelete(Fid *f)
 	return Enempty;
 }
 
-void
+static void
 fsremove(Fmsg *m)
 {
 	Fcall r;
@@ -1183,7 +1192,7 @@ fsremove(Fmsg *m)
 	clunkfid(f);
 }
 
-void
+static void
 fsopen(Fmsg *m)
 {
 	char *p, *e, buf[Kvmax];
@@ -1263,7 +1272,7 @@ fsopen(Fmsg *m)
 	putfid(f);
 }
 
-char*
+static char*
 fsreaddir(Fmsg *m, Fid *f, Fcall *r)
 {
 	char pfx[Dpfxsz], *p, *e;
@@ -1321,7 +1330,7 @@ fsreaddir(Fmsg *m, Fid *f, Fcall *r)
 	return nil;
 }
 
-char*
+static char*
 fsreadfile(Fmsg *m, Fid *f, Fcall *r)
 {
 	vlong n, c, o;
@@ -1357,7 +1366,7 @@ fsreadfile(Fmsg *m, Fid *f, Fcall *r)
 	return nil;
 }
 
-void
+static void
 fsread(Fmsg *m)
 {
 	char *e;
@@ -1388,7 +1397,7 @@ fsread(Fmsg *m)
 }
 
 
-void
+static void
 fswrite(Fmsg *m)
 {
 	char sbuf[Wstatmax], kbuf[4][Offksz], vbuf[4][Ptrsz];
@@ -1621,6 +1630,6 @@ runtasks(int, void *)
 		a->halt = 0;
 		a->fd = -1;
 		m->a = a;
-		chsend(fs->wrchan, m);		
+		chsend(fs->wrchan, m);	
 	}
 }

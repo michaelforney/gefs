@@ -28,11 +28,12 @@ loadarena(Arena *a, vlong o)
 		return -1;
 	p = b->data;
 	a->b = b;
-	a->log.head.addr = GBIT64(p);	p += 8;
-	a->log.head.hash = GBIT64(p);	p += 8;
-	a->log.head.gen = -1;
+	a->head.addr = GBIT64(p);	p += 8;
+	a->head.hash = GBIT64(p);	p += 8;
+	a->head.gen = -1;
 	a->size = GBIT64(p);	p += 8;
 	a->used = GBIT64(p);
+	a->tail = nil;
 	if(loadlog(a) == -1)
 		return -1;
 	if(compresslog(a) == -1)
@@ -83,7 +84,7 @@ loadfs(char *dev)
 	fs->super = b;
 	fs->nextgen = fs->snap.bp.gen + 1;
 	for(i = 0; i < Ndead; i++){
-		fs->snap.prev[i] = -1;
+		fs->snap.dead[i].prev = -1;
 		fs->snap.dead[i].head.addr = -1;
 		fs->snap.dead[i].head.hash = -1;
 		fs->snap.dead[i].head.gen = -1;

@@ -6,7 +6,7 @@
 #include "dat.h"
 #include "fns.h"
 
-void
+static void
 stablesort(Msg *m, int nm)
 {
 	int i, j;
@@ -44,13 +44,6 @@ cpkvp(Kvp *dst, Kvp *src, char *buf, int nbuf)
 	dst->nv = src->nv;
 }
 
-void
-cpmsg(Msg *dst, Msg *src, char *buf, int nbuf)
-{
-	dst->op = src->op;
-	cpkvp(dst, src, buf, nbuf);
-}
-
 int
 keycmp(Key *a, Key *b)
 {
@@ -67,14 +60,14 @@ keycmp(Key *a, Key *b)
 		return 0;
 }
 
-int
+static int
 msgsz(Msg *m)
 {
 	/* disp + op + klen + key + vlen + v */
 	return 2+1+2+m->nk +2+ m->nv;
 }
 
-int
+static int
 valsz(Kvp *kv)
 {
 	return 2 + 2+kv->nk + 2+kv->nv;
@@ -102,6 +95,7 @@ getptr(Kvp *kv, int *fill)
 	return unpackbp(kv->v, kv->nv);
 }
 
+/* Exported for reaming */
 void
 setval(Blk *b, int i, Kvp *kv)
 {
@@ -134,7 +128,7 @@ setval(Blk *b, int i, Kvp *kv)
 	memcpy(p + kv->nk + 4, kv->v, kv->nv);
 }
 
-void
+static void
 setptr(Blk *b, int i, Key *k, Bptr bp, int fill)
 {
 	char *p, buf[Ptrsz+2];
@@ -149,7 +143,7 @@ setptr(Blk *b, int i, Key *k, Bptr bp, int fill)
 	setval(b, i, &kv);
 }
 
-void
+static void
 setmsg(Blk *b, int i, Msg *m)
 {
 	char *p;
@@ -235,7 +229,7 @@ bufsearch(Blk *b, Key *k, Msg *m, int *same)
 	return ri;
 }
 
-int
+static int
 blksearch(Blk *b, Key *k, Kvp *rp, int *same)
 {
 	int lo, hi, ri, mid, r;
@@ -273,28 +267,28 @@ blksearch(Blk *b, Key *k, Kvp *rp, int *same)
 	return ri;
 }
 
-int
+static int
 buffill(Blk *b)
 {
 	assert(b->type == Tpivot);
 	return 2*b->nbuf + b->bufsz;
 }
 
-int
+static int
 filledbuf(Blk *b, int nmsg, int needed)
 {
 	assert(b->type == Tpivot);
 	return 2*(b->nbuf+nmsg) + b->bufsz + needed > Bufspc;
 }
 
-int
+static int
 filledleaf(Blk *b, int needed)
 {
 	assert(b->type == Tleaf);
 	return 2*(b->nval+1) + b->valsz + needed > Leafspc;
 }
 
-int
+static int
 filledpiv(Blk *b, int reserve)
 {
 	/* 
@@ -306,7 +300,7 @@ filledpiv(Blk *b, int reserve)
 	return 2*(b->nval+1) + b->valsz + reserve*Kpmax > Pivspc;
 }
 
-int
+static int
 copyup(Blk *n, int i, Path *pp, int *nbytes)
 {
 	Kvp kv;
@@ -343,7 +337,7 @@ copyup(Blk *n, int i, Path *pp, int *nbytes)
 	return i;
 }
 
-void
+static void
 statupdate(Kvp *kv, Msg *m)
 {
 	int op;
@@ -394,36 +388,7 @@ statupdate(Kvp *kv, Msg *m)
 	}
 }
 
-static char*
-dropsnap(Kvp *t, Msg *m)
-{
-	char *e, buf[Msgmax];
-	Tree snap, tmp, *from;
-	vlong id;
-	Kvp kv;
-	Key k;
-
-	if(unpacktree(&snap, t->v, t->nv) == nil)
-		return Efs;
-	k.k = m->v;
-	k.nk = m->nv;
-	id = GBIT64(m->v+1);
-	for(from = fs->osnap; from != nil; from = from->snext)
-		if(from->gen == id)
-			break;
-	if(from == nil){
-		if((e = btlookup(&fs->snap, &k, &kv, buf, sizeof(buf))) != nil)
-			return e;
-		if(unpacktree(&tmp, kv.v, kv.nv) == nil)
-			return Efs;
-		from = &tmp;
-	}
-	if((e = freesnap(&snap, from)) != nil)
-		return e;
-	return nil;
-}
-
-int
+static int
 apply(Kvp *kv, Msg *m, char *buf, int nbuf)
 {
 	switch(m->op){
@@ -444,7 +409,7 @@ apply(Kvp *kv, Msg *m, char *buf, int nbuf)
 	return 0;
 }
 
-int
+static int
 pullmsg(Path *p, int i, Kvp *v, Msg *m, int *full, int spc)
 {
 	if(i < 0 || i >= p->hi || *full)
@@ -468,7 +433,7 @@ pullmsg(Path *p, int i, Kvp *v, Msg *m, int *full, int spc)
  *
  * When pidx != -1, 
  */
-int
+static int
 updateleaf(Tree *t, Path *up, Path *p)
 {
 	char buf[Msgmax];
@@ -566,7 +531,7 @@ updateleaf(Tree *t, Path *up, Path *p)
  *
  * When pidx != -1, 
  */
-int
+static int
 updatepiv(Tree *, Path *up, Path *p, Path *pp)
 {
 	char buf[Msgmax];
@@ -639,7 +604,7 @@ updatepiv(Tree *, Path *up, Path *p, Path *pp)
  * would be inserted into. Split must never
  * grow the total height of the 
  */
-int
+static int
 splitleaf(Tree *t, Path *up, Path *p, Kvp *mid)
 {
 	char buf[Msgmax];
@@ -739,7 +704,7 @@ splitleaf(Tree *t, Path *up, Path *p, Kvp *mid)
  * grow the total height of the tree by more
  * than one.
  */
-int
+static int
 splitpiv(Tree *t, Path *, Path *p, Path *pp, Kvp *mid)
 {
 	int i, o, copied, halfsz;
@@ -807,7 +772,7 @@ splitpiv(Tree *t, Path *, Path *p, Path *pp, Kvp *mid)
 	return 0;
 }
 
-int
+static int
 merge(Path *p, Path *pp, int idx, Blk *a, Blk *b)
 {
 	int i, o;
@@ -849,7 +814,7 @@ merge(Path *p, Path *pp, int idx, Blk *a, Blk *b)
  * returns 1 if we'd spill out of the buffer,
  * updates *idx and returns 0 otherwise.
  */
-int
+static int
 spillscan(Blk *d, Blk *b, Msg *m, int *idx, int o)
 {
 	int i, used;
@@ -875,7 +840,7 @@ spillscan(Blk *d, Blk *b, Msg *m, int *idx, int o)
  * idx and m would spill out of the buffer
  * of d.
  */
-int
+static int
 spillsbuf(Blk *d, Blk *l, Blk *r, Msg *m, int *idx)
 {
 	if(l->type == Tleaf)
@@ -888,7 +853,7 @@ spillsbuf(Blk *d, Blk *l, Blk *r, Msg *m, int *idx)
 	return 0;
 }
 
-int
+static int
 rotate(Tree *t, Path *p, Path *pp, int midx, Blk *a, Blk *b, int halfpiv)
 {
 	int i, o, cp, sp, idx;
@@ -956,7 +921,7 @@ rotate(Tree *t, Path *p, Path *pp, int midx, Blk *a, Blk *b, int halfpiv)
 	return 0;
 }
 
-int
+static int
 rotmerge(Tree *t, Path *p, Path *pp, int idx, Blk *a, Blk *b)
 {
 	int na, nb, ma, mb, imbalance;
@@ -984,7 +949,7 @@ rotmerge(Tree *t, Path *p, Path *pp, int idx, Blk *a, Blk *b)
 		return 0;
 }
 
-int
+static int
 trybalance(Tree *t, Path *p, Path *pp, int idx)
 {
 	Blk *l, *m, *r;
@@ -1109,7 +1074,7 @@ Error:
 	return nil;
 }
 
-void
+static void
 freepath(Tree *t, Path *path, int npath)
 {
 	Path *p;
@@ -1129,7 +1094,7 @@ freepath(Tree *t, Path *path, int npath)
  * Select child node that with the largest message
  * segment in the current node's buffer.
  */
-void
+static void
 victim(Blk *b, Path *p)
 {
 	int i, j, lo, maxsz, cursz;
@@ -1168,12 +1133,6 @@ victim(Blk *b, Path *p)
 			p->pullsz = 0;
 		}
 	}
-}
-
-int
-msgcmp(void *a, void *b)
-{
-	return keycmp((Msg*)a, (Msg*)b);
 }
 
 char*
@@ -1278,7 +1237,7 @@ getroot(Tree *t, int *h)
 	return getblk(bp, 0);
 }
 
-char*
+static char*
 btlookupat(Blk *b, int h, Key *k, Kvp *r, char *buf, int nbuf)
 {
 	int i, j, ok, same;
@@ -1389,6 +1348,8 @@ btscan(Tree *t, Scan *s, char *pfx, int npfx)
 	for(i = 0; i < s->root.ht; i++){
 		p[i].vi = blksearch(b, &s->kv, &v, &same);
 		if(b->type == Tpivot){
+			if(p[i].vi == -1)
+				getval(b, ++p[i].vi, &v);
 			p[i].bi = bufsearch(b, &s->kv, &m, &same);
 			if(p[i].bi == -1 || !same)
 				p[i].bi++;

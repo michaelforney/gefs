@@ -13,20 +13,33 @@ int	ream;
 int	debug;
 char	*srvname = "gefs";
 
-void
+vlong
+inc64(vlong *v, vlong dv)
+{
+	vlong ov, nv;
+
+	while(1){
+		ov = *v;
+		nv = ov + dv;
+		if(cas64((u64int*)v, ov, nv))
+			return ov;
+	}
+}
+
+static void
 initfs(vlong cachesz)
 {
 	if((fs = mallocz(sizeof(Gefs), 1)) == nil)
 		sysfatal("malloc: %r");
 
 	fs->cmax = cachesz/Blksz;
-	if(fs->cmax >= (2*GiB)/sizeof(Bucket))
+	if(fs->cmax >= (2ULL*GiB)/sizeof(Bucket))
 		sysfatal("cache too big");
 	if((fs->cache = mallocz(fs->cmax*sizeof(Bucket), 1)) == nil)
 		sysfatal("malloc: %r");
 }
 
-void
+static void
 launch(void (*f)(int, void *), int wid, void *arg, char *text)
 {
 	int pid;
@@ -42,7 +55,7 @@ launch(void (*f)(int, void *), int wid, void *arg, char *text)
 	}
 }
 
-int
+static int
 postfd(char *name, char *suff)
 {
 	char buf[80];
@@ -60,7 +73,7 @@ postfd(char *name, char *suff)
 	return fd[1];
 }
 
-void
+static void
 usage(void)
 {
 	fprint(2, "usage: %s [-r] dev\n", argv0);

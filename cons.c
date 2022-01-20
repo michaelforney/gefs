@@ -77,6 +77,7 @@ snapfs(int fd, char **ap, int)
 	a->op = AOsnap;
 	a->fd = fd;
 	m->a = a;
+	sendsync(fd, 0);
 	chsend(fs->wrchan, m);
 	return;	
 Error:

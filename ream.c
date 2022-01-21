@@ -167,7 +167,7 @@ reamfs(char *dev)
 
 	asz = sz/fs->narena;
 	asz = asz - (asz % Blksz) - Blksz;
-	if(asz < 512*MiB)
+	if(asz < 128*MiB)
 		sysfatal("disk too small");
 	fs->arenasz = asz;
 	off = 0;

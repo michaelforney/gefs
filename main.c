@@ -11,6 +11,8 @@ Gefs *fs;
 
 int	ream;
 int	debug;
+int	noauth;
+int	nproc;
 char	*srvname = "gefs";
 
 vlong
@@ -32,6 +34,7 @@ initfs(vlong cachesz)
 	if((fs = mallocz(sizeof(Gefs), 1)) == nil)
 		sysfatal("malloc: %r");
 
+	fs->noauth = noauth;
 	fs->cmax = cachesz/Blksz;
 	if(fs->cmax >= (2ULL*GiB)/sizeof(Bucket))
 		sysfatal("cache too big");
@@ -44,7 +47,7 @@ launch(void (*f)(int, void *), int wid, void *arg, char *text)
 {
 	int pid;
 
-
+	assert(wid == -1 || wid < nelem(fs->active));
 	pid = rfork(RFPROC|RFMEM|RFNOWAIT);
 	if (pid < 0)
 		sysfatal("can't fork: %r");
@@ -83,8 +86,9 @@ usage(void)
 void
 main(int argc, char **argv)
 {
-	int srvfd, ctlfd;
+	int i, srvfd, ctlfd;
 	vlong cachesz;
+	char *s;
 
 	cachesz = 16*MiB;
 	ARGBEGIN{
@@ -99,6 +103,9 @@ main(int argc, char **argv)
 		break;
 	case 's':
 		srvname = EARGF(usage());
+		break;
+	case 'A':
+		noauth = 1;
 		break;
 	default:
 		usage();
@@ -125,6 +132,11 @@ main(int argc, char **argv)
 	fmtinstall('R', Rconv);
 	fmtinstall('F', fcallfmt);
 	fmtinstall('Q', Qconv);
+
+	if((s = getenv("NPROC")) != nil)
+		nproc = atoi(s);
+	if(nproc == 0)
+		nproc = 2;
 	if(ream){
 		reamfs(argv[0]);
 		exits(nil);
@@ -134,13 +146,13 @@ main(int argc, char **argv)
 		srvfd = postfd(srvname, "");
 		ctlfd = postfd(srvname, ".cmd");
 		loadfs(argv[0]);
-		launch(runcons, fs->nproc++, (void*)ctlfd, "ctl");
-		launch(runwrite, fs->nproc++, nil, "writeio");
-		launch(runread, fs->nproc++, nil, "readio");
-		launch(runtasks, fs->nproc++, nil, "tasks");
-//		launch(runfs, fs->nproc++, (void*)srvfd, "fs");
-		assert(fs->nproc < Maxproc);
-		runfs(fs->nproc++, (void*)srvfd);
+		launch(runtasks, -1, nil, "tasks");
+		launch(runcons, fs->nquiesce++, (void*)ctlfd, "ctl");
+		launch(runwrite, fs->nquiesce++, nil, "writeio");
+		for(i = 0; i < nproc; i++)
+			launch(runread, fs->nquiesce++, nil, "readio");
+		if(srvfd != -1)
+			launch(runfs, -1, (void*)srvfd, "srvio");
 		exits(nil);
 	}
 }

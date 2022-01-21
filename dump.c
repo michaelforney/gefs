@@ -20,6 +20,8 @@ showkey(Fmt *fmt, Key *k)
 	 * ptr:  off[8] hash[8] -- a key for an Dir block.
 	 * dir:  fixed statbuf header, user ids
 	 */
+	if(k->nk == 0)
+		return fmtprint(fmt, "\"\"");
 	switch(k->k[0]){
 	case Kdat:	/* qid[8] off[8] => ptr[16]:	pointer to data page */
 		n = fmtprint(fmt, "dat qid:%llx off:%llx", GBIT64(k->k+1), GBIT64(k->k+9));

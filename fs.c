@@ -1,5 +1,6 @@
 #include <u.h>
 #include <libc.h>
+#include <auth.h>
 #include <fcall.h>
 #include <avl.h>
 #include <bio.h>
@@ -165,8 +166,10 @@ respond(Fmsg *m, Fcall *r)
 
 	r->tag = m->tag;
 	dprint("→ %F\n", r);
-	if((n = convS2M(r, buf, sizeof(buf))) == 0)
+	if((n = convS2M(r, buf, sizeof(buf))) == 0){
+		fprint(2, "wut: %r\n");
 		abort();
+	}
 	w = write(m->fd, buf, n);
 	if(w != n)
 		fshangup(m->fd, Eio);
@@ -339,11 +342,10 @@ getdent(vlong pqid, Xdir *d)
 	de->ref = 1;
 	de->qid = d->qid;
 	de->length = d->length;
-	de->k = de->buf;
-	de->nk = 9 + strlen(d->name) + 1;
 
 	if((e = packdkey(de->buf, sizeof(de->buf), pqid, d->name)) == nil)
 		return nil;
+	de->k = de->buf;
 	de->nk = e - de->buf;
 	de->next = fs->dtab[h];
 	fs->dtab[h] = de;
@@ -529,13 +531,83 @@ fsversion(Fmsg *m, int *msz)
 	respond(m, &r);
 }
 
-static void
-fsauth(Fmsg *m)
+void
+authfree(AuthRpc *auth)
 {
-	Fcall r;
+	AuthRpc *rpc;
 
-	r.type = Rerror;
-	r.ename = "unimplemented auth";
+	if(rpc = auth){
+		close(rpc->afd);
+		auth_freerpc(rpc);
+	}
+}
+
+AuthRpc*
+authnew(void)
+{
+	static char *keyspec = "proto=p9any role=server";
+	AuthRpc *rpc;
+	int fd;
+
+	if(access("/mnt/factotum", 0) < 0)
+		if((fd = open("/srv/factotum", ORDWR)) >= 0)
+			mount(fd, -1, "/mnt", MBEFORE, "");
+	if((fd = open("/mnt/factotum/rpc", ORDWR)) < 0)
+		return nil;
+	if((rpc = auth_allocrpc(fd)) == nil){
+		close(fd);
+		return nil;
+	}
+	if(auth_rpc(rpc, "start", keyspec, strlen(keyspec)) != ARok){
+		authfree(rpc);
+		return nil;
+	}
+	return rpc;
+}
+
+static void
+fsauth(Fmsg *m, int iounit)
+{
+	Dent *de;
+	Fcall r;
+	Fid f;
+
+	if(fs->noauth){
+		rerror(m, Eauth);
+		return;
+	}
+	if((de = mallocz(sizeof(Dent), 1)) == nil){
+		rerror(m, Enomem);
+		return;
+	}
+	memset(de, 0, sizeof(Dent));
+	de->ref = 1;
+	de->qid.type = QTAUTH;
+	de->qid.path = inc64(&fs->nextqid, 1);
+	de->qid.vers = 0;
+	de->length = 0;
+	de->k = nil;
+	de->nk = 0;
+
+	memset(&f, 0, sizeof(Fid));
+	f.fid = NOFID;
+	f.mnt = nil;
+	f.qpath = de->qid.path;
+	f.pqpath = de->qid.path;
+	f.mode = -1;
+	f.iounit = iounit;
+	f.dent = de;
+	f.uid = -1;
+	f.duid = -1;
+	f.dgid = -1;
+	f.dmode = 0600;
+	f.auth = authnew();
+	if(dupfid(m->afid, &f) == nil){
+		rerror(m, Enomem);
+		return;
+	}
+	r.type = Rauth;
+	r.aqid = de->qid;
 	respond(m, &r);
 }
 
@@ -575,21 +647,21 @@ mode2bits(int req)
 }
 
 static int
-fsaccess(Mount *mnt, int fmode, int fuid, int fgid, int m)
+fsaccess(Fid *f, int fmode, int fuid, int fgid, int m)
 {
 	/* uid none gets only other permissions */
-	if(mnt->uid != 0) {
-		if(mnt->uid == fuid)
+	if(f->uid != 0) {
+		if(f->uid == fuid)
 			if((m & (fmode>>6)) == m)
 				return 0;
-		if(ingroup(mnt->uid, fgid))
+		if(ingroup(f->uid, fgid))
 			if((m & (fmode>>3)) == m)
 				return 0;
 	}
 	if(m & fmode) {
 		if((fmode & DMDIR) && (m == DMEXEC))
 			return 0;
-		if(!ingroup(mnt->uid, 9999))
+		if(!ingroup(f->uid, 9999))
 			return 0;
 	}
 	return -1;
@@ -617,12 +689,11 @@ fsattach(Fmsg *m, int iounit)
 		return;
 	}
 	rlock(&fs->userlk);
-	if((u = name2user("glenda")) == nil){
+	if((u = name2user(m->uname)) == nil){
 		rerror(m, Enouser);
 		runlock(&fs->userlk);
 		return;
 	}
-	mnt->uid = u->id;
 	runlock(&fs->userlk);
 
 	if((mnt->root = openlabel(m->aname)) == nil){
@@ -665,7 +736,8 @@ fsattach(Fmsg *m, int iounit)
 	f.mode = -1;
 	f.iounit = iounit;
 	f.dent = de;
-	f.duid = mnt->uid;
+	f.uid = u->id;
+	f.duid = u->id;
 	f.dgid = d.gid;
 	f.dmode = d.mode;
 	if(dupfid(m->fid, &f) == nil){
@@ -859,7 +931,7 @@ fswstat(Fmsg *m)
 		rerror(m, Edir);
 		goto Out;
 	}
-	if(fsaccess(f->mnt, de->mode, de->uid, de->gid, DMWRITE) == -1){
+	if(fsaccess(f, de->mode, de->uid, de->gid, DMWRITE) == -1){
 		rerror(m, Eperm);
 		goto Out;
 	}
@@ -941,8 +1013,8 @@ fswstat(Fmsg *m)
 		sync = 0;
 	}
 	op |= Owmuid;
-	de->muid = f->mnt->uid;
-	PBIT32(p, f->mnt->uid);
+	de->muid = f->uid;
+	PBIT32(p, f->uid);
 	p += 4;
 
 	opbuf[0] = op;
@@ -1018,7 +1090,7 @@ fscreate(Fmsg *m)
 	}
 	de = f->dent;
 	rlock(de);
-	if(fsaccess(f->mnt, de->mode, de->uid, de->gid, DMWRITE) == -1){
+	if(fsaccess(f, de->mode, de->uid, de->gid, DMWRITE) == -1){
 		rerror(m, Eperm);
 		runlock(de);
 		return;
@@ -1042,9 +1114,9 @@ fscreate(Fmsg *m)
 	d.atime = nsec();
 	d.mtime = d.atime;
 	d.length = 0;
-	d.uid = f->mnt->uid;
+	d.uid = f->uid;
 	d.gid = f->dgid;
-	d.muid = f->mnt->uid;
+	d.muid = f->uid;
 
 	mb[nm].op = Oinsert;
 	if(dir2kv(f->qpath, &d, &mb[nm], buf, sizeof(buf)) == -1){
@@ -1162,7 +1234,7 @@ fsremove(Fmsg *m)
 		clunkfid(f);
 		return;
 	}
-	if(fsaccess(f->mnt, f->dmode, f->duid, f->dgid, OWRITE) == -1){
+	if(fsaccess(f, f->dmode, f->duid, f->dgid, OWRITE) == -1){
 		rerror(m, Eperm);
 		runlock(f->dent);
 		return;
@@ -1218,7 +1290,7 @@ fsopen(Fmsg *m)
 		putfid(f);
 		return;
 	}
-	if(fsaccess(f->mnt, d.mode, d.uid, d.gid, mbits) == -1){
+	if(fsaccess(f, d.mode, d.uid, d.gid, mbits) == -1){
 		rerror(m, Eperm);
 		putfid(f);
 		return;
@@ -1246,7 +1318,7 @@ fsopen(Fmsg *m)
 //	}
 	if(m->mode & OTRUNC){
 		wlock(f->dent);
-		f->dent->muid = f->mnt->uid;
+		f->dent->muid = f->uid;
 		f->dent->qid.vers++;
 		f->dent->length = 0;
 
@@ -1254,7 +1326,7 @@ fsopen(Fmsg *m)
 		p = buf;
 		p[0] = Owsize|Owmuid;	p += 1;
 		PBIT64(p, 0);		p += 8;
-		PBIT32(p, f->mnt->uid);	p += 4;
+		PBIT32(p, f->uid);	p += 4;
 		mb.k = f->dent->k;
 		mb.nk = f->dent->nk;
 		mb.v = buf;
@@ -1273,7 +1345,43 @@ fsopen(Fmsg *m)
 }
 
 static char*
-fsreaddir(Fmsg *m, Fid *f, Fcall *r)
+readauth(Fmsg *m, Fid *f, Fcall *r)
+{
+	AuthInfo *ai;
+	AuthRpc *rpc;
+	User *u;
+
+	if((rpc = f->auth) == nil)
+		return Etype;
+
+	switch(auth_rpc(rpc, "read", nil, 0)){
+	default:
+		return Eauthp;
+	case ARdone:
+		if((ai = auth_getinfo(rpc)) == nil)
+			goto Phase;
+		u = name2user(ai->cuid);
+		auth_freeAI(ai);
+		if(u == nil)
+			return Enouser;
+		f->uid = u->id;
+		return nil;
+	case ARok:
+		if(m->count < rpc->narg)
+			return Eauthd;
+		if((r->data = malloc(rpc->narg)) == nil)
+			return Emem;
+		memmove(r->data, rpc->arg, rpc->narg);
+		r->count = rpc->narg;
+		return nil;
+	case ARphase:
+	Phase:
+		return Ephase;
+	}
+}
+
+static char*
+readdir(Fmsg *m, Fid *f, Fcall *r)
 {
 	char pfx[Dpfxsz], *p, *e;
 	int n, ns, done;
@@ -1331,7 +1439,7 @@ fsreaddir(Fmsg *m, Fid *f, Fcall *r)
 }
 
 static char*
-fsreadfile(Fmsg *m, Fid *f, Fcall *r)
+readfile(Fmsg *m, Fid *f, Fcall *r)
 {
 	vlong n, c, o;
 	char *p;
@@ -1384,16 +1492,33 @@ fsread(Fmsg *m)
 		putfid(f);
 		return;
 	}
-	if(f->dent->qid.type & QTDIR)
-		e = fsreaddir(m, f, &r);
+	if(f->dent->qid.type & QTAUTH)
+		e = readauth(m, f, &r);
+	else if(f->dent->qid.type & QTDIR)
+		e = readdir(m, f, &r);
 	else
-		e = fsreadfile(m, f, &r);
+		e = readfile(m, f, &r);
 	if(e != nil)
 		rerror(m, e);
 	else
 		respond(m, &r);
 	free(r.data);
 	putfid(f);
+}
+
+static char*
+writeauth(Fmsg *m, Fid *f, Fcall *r)
+{
+	AuthRpc *rpc;
+
+	if((rpc = f->auth) == nil)
+		return Etype;
+	if(auth_rpc(rpc, "write", m->data, m->count) != ARok)
+		return Ebotch;
+	r->type = Rwrite;
+	r->count = m->count;
+	return nil;
+
 }
 
 
@@ -1418,6 +1543,15 @@ fswrite(Fmsg *m)
 		putfid(f);
 		return;
 	}
+	if(f->dent->qid.type == QTAUTH){
+		e = writeauth(m, f, &r);
+		if(e != nil)
+			rerror(m, e);
+		else
+			respond(m, &r);
+		putfid(f);
+		return;
+	}		
 
 	wlock(f->dent);
 	p = m->data;
@@ -1457,7 +1591,7 @@ fswrite(Fmsg *m)
 		f->dent->length = m->offset+m->count;
 	}
 	sbuf[0] |= Owmuid;
-	PBIT32(p, f->mnt->uid);
+	PBIT32(p, f->uid);
 	p += 4;
 
 	kv[i].v = sbuf;
@@ -1506,7 +1640,7 @@ runfs(int wid, void *pfd)
 		switch(m->type){
 		/* sync setup */
 		case Tversion:	fsversion(m, &msgmax);	break;
-		case Tauth:	fsauth(m);		break;
+		case Tauth:	fsauth(m, msgmax);	break;
 		case Tclunk:	fsclunk(m);		break;
 		case Tattach:	fsattach(m, msgmax);	break;
 

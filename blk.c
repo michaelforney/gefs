@@ -135,7 +135,7 @@ pickarena(int hint)
 {
 	int n;
 
-	n = hint+ainc(&fs->roundrobin)/1024;
+	n = hint+ainc(&fs->roundrobin)/(64*1024);
 	return &fs->arenas[n%fs->narena];
 }
 
@@ -865,7 +865,7 @@ quiesce(int tid)
 	lock(&fs->activelk);
 	allquiesced = 1;
 	fs->active[tid]++;
-	for(i = 0; i < fs->nproc; i++){
+	for(i = 0; i < fs->nquiesce; i++){
 		/*
 		 * Odd parity on quiescence implies
 		 * that we're between the exit from
@@ -879,7 +879,7 @@ quiesce(int tid)
 			allquiesced = 0;
 	}
 	if(allquiesced)
-		for(i = 0; i < fs->nproc; i++)
+		for(i = 0; i < fs->nquiesce; i++)
 			fs->lastactive[i] = fs->active[i];
 	unlock(&fs->activelk);
 	if(!allquiesced)

@@ -1,8 +1,4 @@
-*** must have before usable for testing ***
-- auth against authservers
-- implement special file modes: ORCLOSE, OEXCL, etc
-
-*** must have before full release ***
+*** major issues, need to fix ***
 - live alloc log recompression
 - Reserve blocks for deletion
 - transient exec snapshots
@@ -11,7 +7,7 @@
 	- reduce io ops per update
 	- async page writeback: currently, every write to device is sync.
 
-*** nice to have, can get testing without ***
+*** nice to have, can go without ***
 - add missing management commands in console
 - performance optimization:
 	- bulk block frees

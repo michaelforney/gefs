@@ -40,7 +40,6 @@ enum {
 	Nsec	= 1000*1000*1000,	/* nanoseconds to the second */
 	Maxname	= 256,			/* maximum size of a name element */
 	Maxent	= 9+Maxname+1,		/* maximum size of ent key, with terminator */
-	Maxproc	= 8,			/* maximum number of worker procs */
 
 	/*
 	 * Kpmax must be no more than 1/4 of pivspc, or
@@ -125,6 +124,11 @@ enum {
 #define Ebadu	"attach -- unknown user or failed authentication"
 #define Erdonly	"file system read only"
 #define Elocked	"open/create -- file is locked"
+#define Eauthp	"authread -- auth protocol not finished"
+#define Eauthd	"authread -- not enough data"
+#define Ephase	"auth phase error"
+#define Enone	"auth -- user 'none' requires no authentication"
+#define Enoauth	"auth -- authentication disabled"
 
 #define Ewstatb	"wstat -- unknown bits in qid.type/mode"
 #define Ewstatd	"wstat -- attempt to change directory"
@@ -407,11 +411,11 @@ struct Gefs {
 
 	Chan	*wrchan;
 	Chan	*rdchan;
-	int	nproc;
+	int	nquiesce;
 
 	Lock	activelk;
-	int	active[Maxproc];
-	int	lastactive[Maxproc];
+	int	active[32];
+	int	lastactive[32];
 	Lock	freelk;
 	Bfree	*freep;
 	Bfree	*freehd;
@@ -419,6 +423,7 @@ struct Gefs {
 	int	fd;
 	long	broken;
 	long	rdonly;
+	int	noauth;
 
 	/* root snapshot tree */
 	Tree	snap;
@@ -522,7 +527,6 @@ struct Mount {
 	Mount	*next;
 	long	ref;
 	vlong	gen;
-	int	uid;
 	char	*name;
 	Tree	*root;
 };
@@ -537,7 +541,8 @@ struct Fid {
 	 */
 	Mount	*mnt;
 	Scan	*scan;	/* in progres scan */
-	Dent	*dent;	/* (pqid, name) ref, modified on rename */
+	Dent	*dent;	/* (pqid, name) ref, modified on rename */	
+	void	*auth;
 
 	u32int	fid;
 	vlong	qpath;
@@ -546,6 +551,7 @@ struct Fid {
 	int	mode;
 	int	iounit;
 
+	int	uid;
 	int	duid;
 	int	dgid;
 	int	dmode;

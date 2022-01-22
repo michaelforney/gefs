@@ -695,7 +695,6 @@ fillsuper(Blk *b)
 
 	assert(b->type == Tsuper);
 	p = b->data;
-	setflag(b, Bdirty);
 	memcpy(p, "gefs0001", 8); p += 8;
 	PBIT32(p, Blksz); p += 4;
 	PBIT32(p, Bufspc); p += 4;
@@ -753,34 +752,36 @@ finalize(Blk *b)
 Blk*
 getblk(Bptr bp, int flg)
 {
-	Blk *b;
 	uvlong h;
+	Blk *b;
+	int i;
 
 	if((b = lookupblk(bp.addr)) != nil)
 		return cacheblk(b);
 
-	qlock(&fs->blklk);
+	i = ihash(bp.addr) % nelem(fs->blklk);
+	qlock(&fs->blklk[i]);
 	if((b = lookupblk(bp.addr)) != nil){
 		cacheblk(b);
-		qunlock(&fs->blklk);
+		qunlock(&fs->blklk[i]);
 		return b;
 	}
 	if((b = readblk(bp.addr, flg)) == nil){
-		qunlock(&fs->blklk);
+		qunlock(&fs->blklk[i]);
 		return nil;
 	}else
 		setmalloctag(b, getcallerpc(&bp));
 	h = blkhash(b);
 	if((flg&GBnochk) == 0 && h != bp.hash){
 		fprint(2, "corrupt block %B: %llx != %llx\n", bp, blkhash(b), bp.hash);
-		qunlock(&fs->blklk);
+		qunlock(&fs->blklk[i]);
 		abort();
 		return nil;
 	}
 	b->bp.hash = h;
 	b->bp.gen = bp.gen;
 	cacheblk(b);
-	qunlock(&fs->blklk);
+	qunlock(&fs->blklk[i]);
 
 	return b;
 }

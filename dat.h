@@ -451,7 +451,7 @@ struct Gefs {
 	Dent	*dtab[Ndtab];
 
 	/* slow block io */
-	QLock	blklk;
+	QLock	blklk[32];
 
 	/* protected by lrulk */
 	Lock	lrulk;

@@ -82,16 +82,15 @@ initsnap(Blk *s, Blk *r)
 }
 
 static void
-initarena(Arena *a, vlong start, vlong asz)
+initarena(Arena *a, Fshdr *fi, vlong start, vlong asz)
 {
 	vlong addr, bo, bh;
 	char *p;
 	Blk *b;
 
-	addr = start;
 	if((b = mallocz(sizeof(Blk), 1)) == nil)
 		sysfatal("ream: %r");
-	addr += Blksz;	/* arena header */
+	addr = start+Blksz;	/* arena header */
 
 	a->head.addr = -1;
 	a->head.hash = -1;
@@ -120,11 +119,14 @@ initarena(Arena *a, vlong start, vlong asz)
 	memset(b, 0, sizeof(Blk));
 	b->type = Tarena;
 	b->bp.addr = start;
-	p = b->buf + Hdrsz;
-	PBIT64(p, bo);		p += 8;	/* freelist addr */
-	PBIT64(p, bh);		p += 8;	/* freelist hash */
-	PBIT64(p, asz);		p += 8;	/* arena size */
-	PBIT64(p, Blksz);	/* arena used */
+	b->data = b->buf + Hdrsz;
+	a->head.addr = bo;
+	a->head.hash = bh;
+	a->head.gen = -1;
+	a->size = asz;
+	a->used = Blksz;
+	a->tail = nil;
+	packarena(b->data, Blkspc, a, fi);
 	finalize(b);
 	if(syncblk(b) == -1)
 		sysfatal("ream: write arena: %r");
@@ -134,8 +136,9 @@ void
 reamfs(char *dev)
 {
 	vlong sz, asz, off;
-	Blk *sb, *rb, *tb;
+	Blk *rb, *tb;
 	Mount *mnt;
+	Arena *a;
 	Dir *d;
 	int i;
 
@@ -145,14 +148,10 @@ reamfs(char *dev)
 		sysfatal("ream: %r");
 	if(d->length < 64*MiB)
 		sysfatal("ream: disk too small");
-	if((sb = mallocz(sizeof(Blk), 1)) == nil)
-		sysfatal("ream: %r");
 	if((mnt = mallocz(sizeof(Mount), 1)) == nil)
 		sysfatal("ream: alloc mount: %r");
 	if((mnt->root = mallocz(sizeof(Tree), 1)) == nil)
 		sysfatal("ream: alloc tree: %r");
-	fs->super = sb;
-	refblk(sb);
 
 	sz = d->length;
 	sz = sz - (sz % Blksz) - Blksz;
@@ -171,23 +170,27 @@ reamfs(char *dev)
 		sysfatal("disk too small");
 	fs->arenasz = asz;
 	off = 0;
-	fprint(2, "reaming %d arenas:\n", fs->narena);
-
 	for(i = 0; i < fs->narena; i++){
 		print("\tarena %d: %lld blocks at %llx\n", i, asz/Blksz, off);
-		initarena(&fs->arenas[i], off, asz);
+		initarena(&fs->arenas[i], fs, off, asz);
 		off += asz;
 	}
+	for(i = 0; i < Ndead; i++){
+		fs->snap.dead[i].prev = -1;
+		fs->snap.dead[i].head.addr = -1;
+		fs->snap.dead[i].head.hash = -1;
+		fs->snap.dead[i].head.gen = -1;
+	}
 	
-	sb->type = Tsuper;
-	sb->bp.addr = sz;
-	sb->data = sb->buf + Hdrsz;
-	sb->ref = 2;
-
-	for(i = 0; i < fs->narena; i++)
-		if((loadarena(&fs->arenas[i], i*asz)) == -1)
+	for(i = 0; i < fs->narena; i++){
+		a = &fs->arenas[i];
+		if((loadarena(a, fs, i*asz)) == -1)
 			sysfatal("ream: loadarena: %r");
-
+		if(loadlog(a) == -1)
+			sysfatal("load log: %r");
+		if(compresslog(a) == -1)
+			sysfatal("compress log: %r");
+	}
 	if((tb = newblk(Tleaf)) == nil)
 		sysfatal("ream: allocate root: %r");
 	refblk(tb);
@@ -212,12 +215,8 @@ reamfs(char *dev)
 
 	fs->snap.bp = rb->bp;
 	fs->snap.ht = 1;
-	fillsuper(sb);
-	finalize(sb);
-	syncblk(sb);
 
 	putblk(tb);
-	putblk(sb);
 	putblk(rb);
 	free(mnt);
 	if(sync() == -1)

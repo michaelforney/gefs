@@ -14,6 +14,7 @@ typedef struct Path	Path;
 typedef struct Scan	Scan;
 typedef struct Dent	Dent;
 typedef struct Scanp	Scanp;
+typedef struct Fshdr	Fshdr;
 typedef struct Arena	Arena;
 typedef struct Arange	Arange;
 typedef struct Bucket	Bucket;
@@ -243,7 +244,6 @@ enum {
 	Traw,
 	Tpivot,
 	Tleaf,
-	Tsuper,
 	Tarena,
 	Tlog,
 	Tdead,
@@ -393,21 +393,31 @@ struct Stats {
 	vlong	cachelook;
 };
 
+struct Fshdr {
+	int	blksz;
+	int	bufspc;
+	int	hdrsz;
+	Tree	snap;
+	int	narena;
+	vlong	arenasz;
+	vlong	nextqid;
+	vlong	nextgen;
+};
+
 /*
  * Overall state of the file sytem.
  * Shadows the superblock contents.
  */
 struct Gefs {
-	/* immutable data */
-	int	blksz;	/* immutable */
-	int	bufsz;	/* immutable */
-	int	pivsz;	/* immutable */
-	int	hdrsz;	/* immutable */
+	Fshdr;
+	/* arena allocation */
+	Arena	*arenas;
+	long	roundrobin;
+	int	gotinfo;
 
 	QLock	snaplk;	/* snapshot lock */
 	Mount	*mounts;
 	Tree	*osnap;
-	Blk	*super;
 
 	Chan	*wrchan;
 	Chan	*rdchan;
@@ -424,18 +434,6 @@ struct Gefs {
 	long	broken;
 	long	rdonly;
 	int	noauth;
-
-	/* root snapshot tree */
-	Tree	snap;
-
-	vlong	nextqid;
-	vlong	nextgen;
-
-	/* arena allocation */
-	Arena	*arenas;
-	int	narena;
-	long	roundrobin;
-	vlong	arenasz;
 
 	/* user list */
 	RWLock	userlk;

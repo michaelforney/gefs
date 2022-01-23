@@ -670,7 +670,7 @@ fsaccess(Fid *f, int fmode, int fuid, int fgid, int m)
 static void
 fsattach(Fmsg *m, int iounit)
 {
-	char *e, *p, dbuf[Kvmax], kvbuf[Kvmax];
+	char *e, *p, *n, dbuf[Kvmax], kvbuf[Kvmax];
 	Mount *mnt;
 	Dent *de;
 	User *u;
@@ -689,7 +689,8 @@ fsattach(Fmsg *m, int iounit)
 		return;
 	}
 	rlock(&fs->userlk);
-	if((u = name2user(m->uname)) == nil){
+	n = (forceuser == nil) ? m->uname : forceuser;
+	if((u = name2user(n)) == nil){
 		rerror(m, Enouser);
 		runlock(&fs->userlk);
 		return;

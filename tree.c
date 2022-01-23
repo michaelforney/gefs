@@ -113,7 +113,7 @@ setval(Blk *b, int i, Kvp *kv)
 	o = spc - b->valsz;
 
 	if(2*b->nval + b->valsz > spc){
-		dprint("2*%d + %d > %d [ksz: %d, vsz: %d]\n",
+		fprint(2, "2*%d + %d > %d [ksz: %d, vsz: %d]\n",
 			2*b->nval, b->valsz, spc, kv->nk, kv->nv);
 		showblk(2, b, "setval overflow", 1);
 		abort();

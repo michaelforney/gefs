@@ -13,6 +13,7 @@ int	ream;
 int	debug;
 int	noauth;
 int	nproc;
+char	*forceuser;
 char	*srvname = "gefs";
 
 vlong
@@ -79,7 +80,7 @@ postfd(char *name, char *suff)
 static void
 usage(void)
 {
-	fprint(2, "usage: %s [-r] dev\n", argv0);
+	fprint(2, "usage: %s [-rA] [-m mem] [-s srv] [-u usr] dev\n", argv0);
 	exits("usage");
 }
 
@@ -90,12 +91,12 @@ main(int argc, char **argv)
 	vlong cachesz;
 	char *s;
 
-	cachesz = 16*MiB;
+	cachesz = 512*MiB;
 	ARGBEGIN{
 	case 'r':
 		ream = 1;
 		break;
-	case 'c':
+	case 'm':
 		cachesz = strtoll(EARGF(usage()), nil, 0)*MiB;
 		break;
 	case 'd':
@@ -106,6 +107,9 @@ main(int argc, char **argv)
 		break;
 	case 'A':
 		noauth = 1;
+		break;
+	case 'u':
+		forceuser = EARGF(usage());
 		break;
 	default:
 		usage();
@@ -152,7 +156,7 @@ main(int argc, char **argv)
 		for(i = 0; i < nproc; i++)
 			launch(runread, fs->nquiesce++, nil, "readio");
 		if(srvfd != -1)
-			launch(runfs, -1, (void*)srvfd, "srvio");
+			launch(runfs, fs->nquiesce++, (void*)srvfd, "srvio");
 		exits(nil);
 	}
 }

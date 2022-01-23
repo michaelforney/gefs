@@ -3,6 +3,7 @@
 #include <fcall.h>
 #include <avl.h>
 #include <bio.h>
+#include <pool.h>
 
 #include "dat.h"
 #include "fns.h"
@@ -434,5 +435,56 @@ packtree(char *p, int sz, Tree *t)
 		PBIT64(p, bp.addr);	p += 8;
 		PBIT64(p, bp.hash);	p += 8;
 	}
+	return p;
+}
+
+char*
+packarena(char *p, int sz, Arena *a, Fshdr *fi)
+{
+	assert(sz >= Blkspc);
+	memcpy(p, "gefs0001", 8);	p += 8;
+	PBIT32(p, Blksz);		p += 4;
+	PBIT32(p, Bufspc);		p += 4;
+	PBIT32(p, Hdrsz);		p += 4;
+	PBIT32(p, fi->snap.ht);		p += 4;
+	PBIT64(p, fi->snap.bp.addr);	p += 8;
+	PBIT64(p, fi->snap.bp.hash);	p += 8;
+	PBIT64(p, fi->snap.bp.gen);	p += 8;
+	PBIT32(p, fi->narena);		p += 4;
+	PBIT64(p, fi->arenasz);		p += 8;
+	PBIT64(p, fi->nextqid);		p += 8;
+	fi->nextgen = fi->snap.bp.gen + 1;
+	PBIT64(p, a->head.addr);	p += 8;	/* freelist addr */
+	PBIT64(p, a->head.hash);	p += 8;	/* freelist hash */
+	PBIT64(p, a->size);		p += 8;	/* arena size */
+	PBIT64(p, a->used);		p += 8;	/* arena used */
+	return p;
+}
+
+char*
+unpackarena(Arena *a, Fshdr *fi, char *p, int sz)
+{
+	assert(sz >= Blkspc);
+	memset(a, 0, sizeof(*a));
+	memset(fi, 0, sizeof(*fi));
+	if(memcmp(p, "gefs0001", 8) != 0)
+		return nil;
+	p += 8;
+	fi->blksz = GBIT32(p);		p += 4;
+	fi->bufspc = GBIT32(p);		p += 4;
+	fi->hdrsz = GBIT32(p);		p += 4;
+	fi->snap.ht = GBIT32(p);	p += 4;
+	fi->snap.bp.addr = GBIT64(p);	p += 8;
+	fi->snap.bp.hash = GBIT64(p);	p += 8;
+	fi->snap.bp.gen = GBIT64(p);	p += 8;
+	fi->narena = GBIT32(p);		p += 4;
+	fi->arenasz = GBIT64(p);	p += 8;
+	fi->nextqid = GBIT64(p);	p += 8;
+	a->head.addr = GBIT64(p);	p += 8;
+	a->head.hash = GBIT64(p);	p += 8;
+	a->head.gen = -1;		p += 0;
+	a->size = GBIT64(p);		p += 8;
+	a->used = GBIT64(p);		p += 8;
+	a->tail = nil;
 	return p;
 }

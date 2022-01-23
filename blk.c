@@ -112,7 +112,6 @@ readblk(vlong bp, int flg)
 		break;
 	case Tarena:
 	case Traw:
-	case Tsuper:
 	case Tlog:
 	case Tdead:
 		break;
@@ -191,13 +190,7 @@ Again:
 static int
 syncarena(Arena *a)
 {
-	char *p;
-
-	p = a->b->data;
-	PBIT64(p, a->head.addr);	p += 8;	/* freelist addr */
-	PBIT64(p, a->head.hash);	p += 8;	/* freelist hash */
-	PBIT64(p, a->size);		p += 8;	/* arena size */
-	PBIT64(p, a->used);			/* arena used */
+	packarena(a->b->data, Blkspc, a, fs);
 	finalize(a->b);
 	return syncblk(a->b);
 }
@@ -408,7 +401,6 @@ compresslog(Arena *a)
 	Bptr bp;
 	char *p;
 
-//	Oplog ol;
 	/*
 	 * Sync the current log to disk, and
 	 * set up a new block log tail.  While
@@ -688,27 +680,6 @@ newblk(int t)
 	return b;
 }
 
-char*
-fillsuper(Blk *b)
-{
-	char *p;
-
-	assert(b->type == Tsuper);
-	p = b->data;
-	memcpy(p, "gefs0001", 8); p += 8;
-	PBIT32(p, Blksz); p += 4;
-	PBIT32(p, Bufspc); p += 4;
-	PBIT32(p, Hdrsz); p += 4;
-	PBIT32(p, fs->snap.ht); p += 4;
-	PBIT64(p, fs->snap.bp.addr); p += 8;
-	PBIT64(p, fs->snap.bp.hash); p += 8;
-	PBIT64(p, fs->snap.bp.gen); p += 8;
-	PBIT32(p, fs->narena); p += 4;
-	PBIT64(p, fs->arenasz); p += 8;
-	PBIT64(p, fs->nextqid); p += 8;
-	return p;
-}
-
 void
 finalize(Blk *b)
 {
@@ -743,7 +714,6 @@ finalize(Blk *b)
 	case Traw:
 		b->bp.hash = blkhash(b);
 		break;
-	case Tsuper:
 	case Tarena:
 		break;
 	}
@@ -928,11 +898,6 @@ sync(void)
 //		if(syncblk(b) == -1)
 //			r = -1;
 //	}
-	fillsuper(fs->super);
-	finalize(fs->super);
-	enqueue(fs->super);
-	if(r != -1)
-		r = syncblk(fs->super);
 	qunlock(&fs->snaplk);
 	return r;
 }

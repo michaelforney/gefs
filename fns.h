@@ -9,6 +9,7 @@
 
 extern Gefs*	fs;
 extern int	debug;
+extern char*	forceuser;
 
 Blk*	newblk(int type);
 Blk*	getroot(Tree*, int*);
@@ -30,7 +31,6 @@ ushort	blkfill(Blk*);
 uvlong	blkhash(Blk*);
 u32int	ihash(vlong);
 void	finalize(Blk*);
-char*	fillsuper(Blk*);
 Tree*	newsnap(Tree*);
 char*	freesnap(Tree*, Tree*);
 char*	labelsnap(char*, vlong);
@@ -42,7 +42,7 @@ Tree*	opensnap(vlong);
 void	closesnap(Tree*);
 uvlong	siphash(void*, usize);
 void	reamfs(char*);
-int	loadarena(Arena*, vlong);
+int	loadarena(Arena*, Fshdr *fi, vlong);
 void	loadfs(char*);
 int	sync(void);
 int	loadlog(Arena*);
@@ -120,6 +120,8 @@ char*	packdval(char*, int, Xdir*);
 char*	packsnap(char*, int, vlong);
 char*	packlabel(char*, int, char*);
 char*	packsuper(char*, int, vlong);
+char*	packarena(char*, int, Arena*, Fshdr*);
+char*	unpackarena(Arena*, Fshdr*, char*, int);
 
 /* fmt */
 int	Bconv(Fmt*);

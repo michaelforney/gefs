@@ -392,7 +392,7 @@ newsnap(Tree *t)
 	if(modifysnap(Oinsert, t) != nil)
 		return nil;
 
-	if((r = malloc(sizeof(Tree))) == nil)
+	if((r = calloc(sizeof(Tree), 1)) == nil)
 		return nil;
 	gen = inc64(&fs->nextgen, 1);
 	memset(&r->lk, 0, sizeof(r->lk));

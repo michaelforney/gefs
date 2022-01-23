@@ -1,6 +1,7 @@
 </$objtype/mkfile
 
 TARG=gefs
+BIN=/$objtype/bin
 OFILES=\
 	blk.$O\
 	cache.$O\

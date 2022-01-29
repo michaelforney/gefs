@@ -86,7 +86,7 @@ loadfs(char *dev)
 		fs->snap.dead[i].ins = nil;
 	}
 
-	fprint(2, "load:\n");
+	fprint(2, "load %s:\n", dev);
 	fprint(2, "\tsnaptree:\t%B\n", fs->snap.bp);
 	fprint(2, "\tnarenas:\t%d\n", fs->narena);
 	fprint(2, "\tarenasz:\t%lld\n", fs->arenasz);

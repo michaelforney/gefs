@@ -44,7 +44,7 @@ uvlong	siphash(void*, usize);
 void	reamfs(char*);
 int	loadarena(Arena*, Fshdr *fi, vlong);
 void	loadfs(char*);
-int	sync(void);
+void	sync(void);
 int	loadlog(Arena*);
 int	scandead(Dlist*, int, void(*)(Bptr, void*), void*);
 int	endfs(void);
@@ -132,13 +132,14 @@ int	Kconv(Fmt*);
 int	Qconv(Fmt*);
 
 Chan*	mkchan(int);
-Fmsg*	chrecv(Chan*);
-void	chsend(Chan*, Fmsg*);
+void*	chrecv(Chan*, int);
+void	chsend(Chan*, void*);
 void	runfs(int, void*);
 void	runwrite(int, void*);
 void	runread(int, void*);
 void	runcons(int, void*);
 void	runtasks(int, void*);
+void	runsync(int, void*);
 
 /* it's in libc... */
 extern int cas(long*, long, long);

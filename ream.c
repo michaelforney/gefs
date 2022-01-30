@@ -218,7 +218,15 @@ reamfs(char *dev)
 
 	putblk(tb);
 	putblk(rb);
+	for(i = 0; i < fs->narena; i++){
+		a = &fs->arenas[i];
+		finalize(a->tail);
+		if(syncblk(a->tail) == -1)
+			sysfatal("sync arena: %r");
+		packarena(a->b->data, Blkspc, a, fs);
+		finalize(a->b);
+		if(syncblk(a->b) == -1)
+			sysfatal("sync arena: %r");
+	}
 	free(mnt);
-	if(sync() == -1)
-		sysfatal("ream: sync: %r");
 }

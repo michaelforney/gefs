@@ -6,16 +6,26 @@
 #include "dat.h"
 #include "fns.h"
 
-typedef struct Range Range;
+typedef struct Range	Range;
+typedef struct Flushq	Flushq;
+
 struct Range {
 	vlong off;
 	vlong len;
+};
+
+struct Flushq {
+	Blk	**heap;
+	int	nheap;
+	int	heapsz;
 };
 
 static vlong	blkalloc_lk(Arena*);
 static vlong	blkalloc(int);
 static int	blkdealloc_lk(vlong);
 static Blk*	initblk(vlong, int);
+
+static Blk magic;
 
 void
 setflag(Blk *b, int flg)
@@ -49,18 +59,6 @@ syncblk(Blk *b)
 	assert(b->flag & Bfinal);
 	clrflag(b, Bqueued|Bdirty);
 	return pwrite(fs->fd, b->buf, Blksz, b->bp.addr);
-}
-
-void
-enqueue(Blk *b)
-{
-	assert(b->flag & Bdirty);
-	finalize(b);
-	if(syncblk(b) == -1){
-		ainc(&fs->broken);
-		fprint(2, "write: %r");
-		abort();
-	}
 }
 
 static Blk*
@@ -676,6 +674,7 @@ newblk(int t)
 		return nil;
 	if((b = initblk(bp, t)) == nil)
 		return nil;
+
 	setmalloctag(b, getcallerpc(&t));
 	return b;
 }
@@ -784,7 +783,7 @@ putblk(Blk *b)
 	if(b == nil || adec(&b->ref) != 0)
 		return;
 	assert(!(b->flag & Bcached));
-	assert((b->flag & Bqueued) || !(b->flag & Bdirty));
+	assert((b->flag & Bfreed) || !(b->flag & Bdirty));
 	free(b);
 }
 
@@ -810,8 +809,8 @@ freebp(Tree *t, Bptr bp)
 void
 freeblk(Tree *t, Blk *b)
 {
-	assert(!(b->flag & Bqueued));
 	b->freed = getcallerpc(&b);
+	setflag(b, Bfreed);
 	freebp(t, b->bp);
 }
 
@@ -874,30 +873,140 @@ quiesce(int tid)
 }
 
 int
+blkcmp(Blk *a, Blk *b)
+{
+	if(a->bp.gen != b->bp.gen)
+		return (a->bp.gen < b->bp.gen) ? -1 : 1;
+	if(a->bp.addr != b->bp.addr)
+		return (a->bp.addr < b->bp.addr) ? -1 : 1;
+	return 0;
+}
+
+void
+enqueue(Blk *b)
+{
+	Arena *a;
+
+	a = getarena(b->bp.addr);
+	assert(b->flag & Bdirty);
+	refblk(b);
+	finalize(b);
+	chsend(a->sync, b);
+}
+
+void
+qput(Flushq *q, Blk *b)
+{
+	Blk *t;
+	int i;
+
+	if(q->nheap == q->heapsz)
+		abort();
+	q->heap[q->nheap] = b;
+	for(i = q->nheap; i > 0; i = (i-1)/2){
+		if(blkcmp(q->heap[i], q->heap[(i-1)/2]) == -1)
+			break;
+		t = q->heap[i];
+		q->heap[i] = q->heap[(i-1)/2];
+		q->heap[(i-1)/2] = t;
+	}
+	q->nheap++;
+
+}
+
+Blk*
+qpop(Flushq *q)
+{
+	int i, l, r, m;
+	Blk *b, *t;
+
+	if(q->nheap == 0)
+		return nil;
+	b = q->heap[0];
+	if(--q->nheap == 0)
+		return b;
+
+	i = 0;
+	q->heap[0] = q->heap[q->nheap];
+	while(1){
+		m = i;
+		l = 2*i+1;
+		r = 2*i+2;
+		if(l < q->nheap && blkcmp(q->heap[m], q->heap[l]) == -1)
+			m = l;
+		if(r < q->nheap && blkcmp(q->heap[m], q->heap[r]) == -1)
+			m = r;
+		if(m == i)
+			break;
+		t = q->heap[m];
+		q->heap[m] = q->heap[i];
+		q->heap[i] = t;
+		i = m;
+	}
+	return b;
+
+}
+
+void
+runsync(int, void *p)
+{
+	Flushq q;
+	Chan *c;
+	Blk *b;
+
+	c = p;
+	q.nheap = 0;
+	q.heapsz = fs->cmax;
+	if((q.heap = malloc(q.heapsz*sizeof(Blk*))) == nil)
+		sysfatal("alloc queue: %r");
+	while(1){
+		while(q.nheap < q.heapsz){
+			b = chrecv(c, q.nheap == 0);
+			if(b == &magic){
+				if(adec(&fs->syncing) == 0){
+					qlock(&fs->synclk);
+					rwakeupall(&fs->syncrz);
+					qunlock(&fs->synclk);
+				}
+				continue;
+			}				
+			if(b != nil)
+				qput(&q, b);
+			if(b == nil || q.nheap == q.heapsz)
+				break;
+		}
+	
+		b = qpop(&q);
+		if(!(b->flag & Bfreed)){
+			if(syncblk(b) == -1){
+				ainc(&fs->broken);
+				fprint(2, "write: %r");
+				abort();
+			}
+		}
+		putblk(b);
+	}
+}
+
+void
 sync(void)
 {
-	int i, r;
 	Arena *a;
-//	Blk *b;
+	int i;
 
-	r = 0;
-
-	qlock(&fs->snaplk);
+	qlock(&fs->synclk);
+	fs->syncing = fs->nsyncers;
+	for(i = 0; i < fs->nsyncers; i++)
+		chsend(fs->chsync[i], &magic);
+	while(fs->syncing != 0)
+		rsleep(&fs->syncrz);
 	for(i = 0; i < fs->narena; i++){
 		a = &fs->arenas[i];
 		finalize(a->tail);
 		if(syncblk(a->tail) == -1)
-			r = -1;
+			sysfatal("sync arena: %r");
 		if(syncarena(a) == -1)
-			r = -1;
+			sysfatal("sync arena: %r");
 	}
-//
-//	for(b = fs->chead; b != nil; b = b->cnext){
-//		if((b->flag & Bdirty) == 0)
-//			continue;
-//		if(syncblk(b) == -1)
-//			r = -1;
-//	}
-	qunlock(&fs->snaplk);
-	return r;
+	qunlock(&fs->synclk);
 }

@@ -65,7 +65,7 @@ snapfs(int fd, char *old, char *new)
 	if(u != nil)
 		closesnap(u);
 	closesnap(t);
-	/* we probably want explicit snapshots to be resilient */
+	/* we probably want explicit snapshots to get synced */
 	sync();
 	fprint(fd, "snap taken: %s\n", new);
 }
@@ -111,15 +111,19 @@ mkchan(int size)
 
 }
 
-Fmsg*
-chrecv(Chan *c)
+void*
+chrecv(Chan *c, int block)
 {
 	void *a;
 	long v;
 
 	v = c->count;
-	if(v == 0 || cas(&c->count, v, v-1) == 0)
-		semacquire(&c->count, 1);
+	if(v == 0 || cas(&c->count, v, v-1) == 0){
+		if(block)
+			semacquire(&c->count, 1);
+		else
+			return nil;
+	}
 	lock(&c->rl);
 	a = *c->rp;
 	if(++c->rp >= &c->args[c->size])
@@ -130,7 +134,7 @@ chrecv(Chan *c)
 }
 
 void
-chsend(Chan *c, Fmsg *m)
+chsend(Chan *c, void *m)
 {
 	long v;
 
@@ -166,10 +170,8 @@ respond(Fmsg *m, Fcall *r)
 
 	r->tag = m->tag;
 	dprint("→ %F\n", r);
-	if((n = convS2M(r, buf, sizeof(buf))) == 0){
-		fprint(2, "wut: %r\n");
+	if((n = convS2M(r, buf, sizeof(buf))) == 0)
 		abort();
-	}
 	w = write(m->fd, buf, n);
 	if(w != n)
 		fshangup(m->fd, Eio);
@@ -1686,7 +1688,7 @@ runwrite(int wid, void *)
 	int ao;
 
 	while(1){
-		m = chrecv(fs->wrchan);
+		m = chrecv(fs->wrchan, 1);
 		quiesce(wid);
 		ao = (m->a == nil) ? AOnone : m->a->op;
 		switch(ao){
@@ -1732,7 +1734,7 @@ runread(int wid, void *)
 	Fmsg *m;
 
 	while(1){
-		m = chrecv(fs->rdchan);
+		m = chrecv(fs->rdchan, 1);
 		quiesce(wid);
 		switch(m->type){
 		case Tflush:	rerror(m, Eimpl);	break;

@@ -55,7 +55,7 @@ badblk(int fd, Blk *b, int h, Kvp *lo, Kvp *hi)
 	getval(b, 0, &x);
 	if(lo && keycmp(lo, &x) > 0){
 		fprint(fd, "out of range keys %P != %P\n", lo, &x);
-		showblk(2, b, "wut", 1);
+		showblk(2, b, "out of range", 1);
 		fail++;
 	}
 	for(i = 1; i < b->nval; i++){

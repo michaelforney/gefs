@@ -433,7 +433,12 @@ struct Gefs {
 	/* arena allocation */
 	Arena	*arenas;
 	long	roundrobin;
+	long	syncing;
+	long	nsyncers;
+
 	int	gotinfo;
+	QLock	synclk;
+	Rendez	syncrz;
 
 	QLock	snaplk;	/* snapshot lock */
 	Mount	*mounts;
@@ -446,6 +451,7 @@ struct Gefs {
 	Lock	activelk;
 	int	active[32];
 	int	lastactive[32];
+	Chan	*chsync[32];
 	Lock	freelk;
 	Bfree	*freep;
 	Bfree	*freehd;
@@ -495,6 +501,7 @@ struct Arena {
 	/* freelist */
 	Bptr	head;
 	Blk	*tail;	/* tail held open for writing */
+	Chan	*sync;
 };
 
 struct Xdir {
@@ -611,6 +618,7 @@ struct Blk {
 	Blk	*fnext;
 
 	long	flag;
+	long	syncgen;
 
 	/* serialized to disk in header */
 	short	type;	/* @0, for all */

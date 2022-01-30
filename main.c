@@ -15,6 +15,7 @@ int	noauth;
 int	nproc;
 char	*forceuser;
 char	*srvname = "gefs";
+int	cachesz = 512*MiB;
 
 vlong
 inc64(vlong *v, vlong dv)
@@ -88,10 +89,8 @@ void
 main(int argc, char **argv)
 {
 	int i, srvfd, ctlfd;
-	vlong cachesz;
 	char *s;
 
-	cachesz = 512*MiB;
 	ARGBEGIN{
 	case 'r':
 		ream = 1;
@@ -141,22 +140,35 @@ main(int argc, char **argv)
 		nproc = atoi(s);
 	if(nproc == 0)
 		nproc = 2;
+	if(nproc > nelem(fs->active))
+		nproc = nelem(fs->active);
 	if(ream){
 		reamfs(argv[0]);
 		exits(nil);
-	}else{
-		fs->rdchan = mkchan(128);
-		fs->wrchan = mkchan(128);
-		srvfd = postfd(srvname, "");
-		ctlfd = postfd(srvname, ".cmd");
-		loadfs(argv[0]);
-		launch(runtasks, -1, nil, "tasks");
-		launch(runcons, fs->nquiesce++, (void*)ctlfd, "ctl");
-		launch(runwrite, fs->nquiesce++, nil, "writeio");
-		for(i = 0; i < nproc; i++)
-			launch(runread, fs->nquiesce++, nil, "readio");
-		if(srvfd != -1)
-			launch(runfs, fs->nquiesce++, (void*)srvfd, "srvio");
-		exits(nil);
 	}
+
+	loadfs(argv[0]);
+
+	fs->syncrz.l = &fs->synclk;
+	fs->rdchan = mkchan(32);
+	fs->wrchan = mkchan(32);
+	fs->nsyncers = nproc;
+	if(fs->nsyncers > fs->narena)
+		fs->nsyncers = fs->narena;
+	for(i = 0; i < fs->nsyncers; i++)
+		fs->chsync[i] = mkchan(128);
+	for(i = 0; i < fs->narena; i++)
+		fs->arenas[i].sync = fs->chsync[i%nproc];
+	srvfd = postfd(srvname, "");
+	ctlfd = postfd(srvname, ".cmd");
+	launch(runtasks, -1, nil, "tasks");
+	launch(runcons, fs->nquiesce++, (void*)ctlfd, "ctl");
+	launch(runwrite, fs->nquiesce++, nil, "mutate");
+	for(i = 0; i < nproc; i++)
+		launch(runread, fs->nquiesce++, nil, "readio");
+	for(i = 0; i < fs->nsyncers; i++)
+		launch(runsync, -1, fs->chsync[i], "syncio");
+	if(srvfd != -1)
+		launch(runfs, fs->nquiesce++, (void*)srvfd, "srvio");
+	exits(nil);
 }

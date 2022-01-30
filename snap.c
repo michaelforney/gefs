@@ -148,7 +148,7 @@ killblk(Tree *t, Bptr bp)
 Tree*
 openlabel(char *name)
 {
-	char *p, buf[Keymax];
+	char *p, buf[Kvmax];
 	Kvp kv;
 	Key k;
 

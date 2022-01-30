@@ -49,7 +49,7 @@ int	loadlog(Arena*);
 int	scandead(Dlist*, int, void(*)(Bptr, void*), void*);
 int	endfs(void);
 int	compresslog(Arena*);
-void	setval(Blk*, int, Kvp*);
+void	setval(Blk*, Kvp*);
 
 char*	loadusers(int, Tree*);
 User*	uid2user(int);

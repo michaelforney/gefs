@@ -97,39 +97,32 @@ getptr(Kvp *kv, int *fill)
 
 /* Exported for reaming */
 void
-setval(Blk *b, int i, Kvp *kv)
+setval(Blk *b, Kvp *kv)
 {
-	int o, nk, nv, spc;
+	int off, spc;
 	char *p;
 
-	assert(i == b->nval);
 	spc = (b->type == Tleaf) ? Leafspc : Pivspc;
-	p = b->data + 2*i;
-	nk = 2 + kv->nk;
-	nv = 2 + kv->nv;
-	memmove(p + 2, p, 2*(b->nval - i));
-	b->nval++;
-	b->valsz += nk + nv;
-	o = spc - b->valsz;
+	b->valsz += 2 + kv->nk + 2 + kv->nv;
+	off = spc - b->valsz;
 
-	if(2*b->nval + b->valsz > spc){
-		fprint(2, "2*%d + %d > %d [ksz: %d, vsz: %d]\n",
-			2*b->nval, b->valsz, spc, kv->nk, kv->nv);
-		showblk(2, b, "setval overflow", 1);
-		abort();
-	}
-	assert(2*b->nval + b->valsz <= spc);
-	assert(2*b->nval <= o);
-	p = b->data + o;
-	PBIT16(b->data + 2*i, o);
-	PBIT16(p +  0, kv->nk);
-	memcpy(p +  2, kv->k, kv->nk);
-	PBIT16(p + kv->nk + 2, kv->nv);
-	memcpy(p + kv->nk + 4, kv->v, kv->nv);
+	assert(2*(b->nval+1) + b->valsz <= spc);
+	assert(2*(b->nval+1) <= off);
+
+	p = b->data + 2*b->nval;
+	PBIT16(p, off);
+
+	p = b->data + off;
+	PBIT16(p, kv->nk);		p += 2;
+	memcpy(p, kv->k, kv->nk);	p += kv->nk;
+	PBIT16(p, kv->nv);		p += 2;
+	memcpy(p, kv->v, kv->nv);
+
+	b->nval++;
 }
 
 static void
-setptr(Blk *b, int i, Key *k, Bptr bp, int fill)
+setptr(Blk *b, Key *k, Bptr bp, int fill)
 {
 	char *p, buf[Ptrsz+2];
 	Kvp kv;
@@ -140,33 +133,30 @@ setptr(Blk *b, int i, Key *k, Bptr bp, int fill)
 	kv.nv = sizeof(buf);
 	p = packbp(buf, sizeof(buf), &bp);
 	PBIT16(p, fill);
-	setval(b, i, &kv);
+	setval(b, &kv);
 }
 
 static void
-setmsg(Blk *b, int i, Msg *m)
+setmsg(Blk *b, Msg *m)
 {
 	char *p;
 	int o;
 
 	assert(b->type == Tpivot);
-	assert(i >= 0 && i <= b->nbuf);
-	b->nbuf++;
 	b->bufsz += msgsz(m)-2;
-	assert(2*b->nbuf + b->bufsz <= Bufspc);
-	assert(m->op >= 0 && m->op < Nmsgtype);
 
-	p = b->data + Pivspc;
+	p = b->data + Pivspc + 2*b->nbuf;
 	o = Pivspc - b->bufsz;
-	memmove(p + 2*(i+1), p+2*i, 2*(b->nbuf - i));
-	PBIT16(p + 2*i, o);
+	PBIT16(p, o);
 
 	p = b->data + Bufspc + o;
-	*p = m->op;
-	PBIT16(p + 1, m->nk);
-	memcpy(p + 3, m->k, m->nk);
-	PBIT16(p + 3 + m->nk, m->nv);
-	memcpy(p + 5 + m->nk, m->v, m->nv);
+	*p = m->op;		p += 1;
+	PBIT16(p, m->nk);	p += 2;
+	memcpy(p, m->k, m->nk);	p += m->nk;
+	PBIT16(p, m->nv);	p += 2;
+	memcpy(p, m->v, m->nv);
+
+	b->nbuf++;
 }
 
 void
@@ -300,8 +290,8 @@ filledpiv(Blk *b, int reserve)
 	return 2*(b->nval+1) + b->valsz + reserve*Kpmax > Pivspc;
 }
 
-static int
-copyup(Blk *n, int i, Path *pp, int *nbytes)
+static void
+copyup(Blk *n, Path *pp, int *nbytes)
 {
 	Kvp kv;
 	Msg m;
@@ -319,7 +309,7 @@ copyup(Blk *n, int i, Path *pp, int *nbytes)
 			if(keycmp(&kv, &m) > 0)
 				kv.Key = m.Key;
 		}
-		setptr(n, i++, &kv, pp->nl->bp, blkfill(pp->nl));
+		setptr(n, &kv, pp->nl->bp, blkfill(pp->nl));
 		if(nbytes != nil)
 			*nbytes += valsz(&kv);
 	}
@@ -330,11 +320,10 @@ copyup(Blk *n, int i, Path *pp, int *nbytes)
 			if(keycmp(&kv, &m) > 0)
 				kv.Key = m.Key;
 		}
-		setptr(n, i++, &kv, pp->nr->bp, blkfill(pp->nr));
+		setptr(n, &kv, pp->nr->bp, blkfill(pp->nr));
 		if(nbytes != nil)
 			*nbytes += valsz(&kv);
 	}
-	return i;
 }
 
 static void
@@ -437,14 +426,13 @@ static int
 updateleaf(Tree *t, Path *up, Path *p)
 {
 	char buf[Msgmax];
-	int i, j, o, ok, full, spc;
+	int i, j, ok, full, spc;
 	Blk *b, *n;
 	Bptr bp;
 	Msg m;
 	Kvp v;
 
 	i = 0;
-	o = 0;
 	j = up->lo;
 	b = p->b;
 	/*
@@ -464,7 +452,7 @@ updateleaf(Tree *t, Path *up, Path *p)
 		getval(p->b, i, &v);
 		switch(pullmsg(up, j, &v, &m, &full, spc)){
 		case -1:
-			setval(n, o++, &v);
+			setval(n, &v);
 			i++;
 			break;
 		case 1:
@@ -494,7 +482,7 @@ updateleaf(Tree *t, Path *up, Path *p)
 					break;
 			}
 			if(ok)
-				setval(n, o++, &v);
+				setval(n, &v);
 			break;
 		}
 	}
@@ -516,7 +504,7 @@ updateleaf(Tree *t, Path *up, Path *p)
 			j++;
 		}
 		if(ok)
-			setval(n, o++, &v);
+			setval(n, &v);
 	}
 	p->npull = (j - up->lo);
 	p->nl = n;
@@ -535,25 +523,23 @@ static int
 updatepiv(Tree *, Path *up, Path *p, Path *pp)
 {
 	char buf[Msgmax];
-	int i, j, o, sz, full, spc;
+	int i, j, sz, full, spc;
 	Blk *b, *n;
 	Msg m, u;
 
-	o = 0;
 	b = p->b;
 	if((n = newblk(b->type)) == nil)
 		return -1;
 	for(i = 0; i < b->nval; i++){
 		if(pp != nil && i == p->midx){
-			o = copyup(n, o, pp, nil);
+			copyup(n, pp, nil);
 			if(pp->op == POrot || pp->op == POmerge)
 				i++;
 		}else{
 			getval(b, i, &m);
-			setval(n, o++, &m);
+			setval(n, &m);
 		}
 	}
-	o = 0;
 	i = 0;
 	j = up->lo;
 	sz = 0;
@@ -570,13 +556,13 @@ updatepiv(Tree *, Path *up, Path *p, Path *pp)
 		switch(pullmsg(up, j, &m, &u, &full, spc - sz)){
 		case -1:
 		case 0:
-			setmsg(n, o++, &m);
+			setmsg(n, &m);
 			i++;
 			break;
 		case 1:
 			cpkvp(&m, &u, buf, sizeof(buf));
 			while(pullmsg(up, j, &m, &u, &full, spc) == 0){
-				setmsg(n, o++, &u);
+				setmsg(n, &u);
 				sz = msgsz(&u);
 				p->pullsz += sz;
 				spc -= sz;
@@ -588,7 +574,7 @@ updatepiv(Tree *, Path *up, Path *p, Path *pp)
 		pullmsg(up, j, nil, &u, &full, spc);
 		if(full)
 			break;
-		setmsg(n, o++, &u);
+		setmsg(n, &u);
 		sz = msgsz(&u);
 		p->pullsz += sz;
 		spc -= sz;
@@ -609,7 +595,7 @@ splitleaf(Tree *t, Path *up, Path *p, Kvp *mid)
 {
 	char buf[Msgmax];
 	int full, copied, spc, ok, halfsz;
-	int i, j, o, c;
+	int i, j, c;
 	Blk *b, *d, *l, *r;
 	Msg m;
 	Kvp v;
@@ -629,7 +615,6 @@ splitleaf(Tree *t, Path *up, Path *p, Kvp *mid)
 	}
 
 	d = l;
-	o = 0;
 	i = 0;
 	j = up->lo;
 	full = 0;
@@ -648,7 +633,6 @@ splitleaf(Tree *t, Path *up, Path *p, Kvp *mid)
 		 */
 		if(d == l)
 		if((i == b->nval-2) || (i >= 2 && copied >= halfsz)){
-			o = 0;
 			d = r;
 			full = 0;
 			spc = Blkspc - (halfsz + Msgmax);
@@ -659,7 +643,7 @@ splitleaf(Tree *t, Path *up, Path *p, Kvp *mid)
  		c = pullmsg(up, j, &v, &m, &full, spc);
 		switch(c){
 		case -1:
-			setval(d, o++, &v);
+			setval(d, &v);
 			copied += valsz(&v);
 			i++;
 			break;
@@ -686,7 +670,7 @@ splitleaf(Tree *t, Path *up, Path *p, Kvp *mid)
 					break;
 			}
 			if(ok)
-				setval(d, o++, &v);
+				setval(d, &v);
 			break;
 		}
 	}
@@ -707,7 +691,7 @@ splitleaf(Tree *t, Path *up, Path *p, Kvp *mid)
 static int
 splitpiv(Tree *t, Path *, Path *p, Path *pp, Kvp *mid)
 {
-	int i, o, copied, halfsz;
+	int i, copied, halfsz;
 	Blk *b, *d, *l, *r;
 	Kvp tk;
 	Msg m;
@@ -725,7 +709,6 @@ splitpiv(Tree *t, Path *, Path *p, Path *pp, Kvp *mid)
 		freeblk(t, r);
 		return -1;
 	}
-	o = 0;
 	d = l;
 	copied = 0;
 	halfsz = (2*b->nval + b->valsz)/2;
@@ -739,19 +722,17 @@ splitpiv(Tree *t, Path *, Path *p, Path *pp, Kvp *mid)
 		 */
 		if(d == l)
 		if((i == b->nval-2) || (i >= 2 && copied >= halfsz)){
-			o = 0;
 			d = r;
 			getval(b, i, mid);
 		}
 		if(i == p->idx){
-			o = copyup(d, o, pp, &copied);
+			copyup(d, pp, &copied);
 			continue;
 		}
 		getval(b, i, &tk);
-		setval(d, o++, &tk);
+		setval(d, &tk);
 		copied += valsz(&tk);
 	}
-	o = 0;
 	d = l;
 	for(i = 0; i < b->nbuf; i++){
 		if(i == p->lo)
@@ -759,11 +740,9 @@ splitpiv(Tree *t, Path *, Path *p, Path *pp, Kvp *mid)
 		if(i == b->nbuf)
 			break;
 		getmsg(b, i, &m);
-		if(d == l && keycmp(&m, mid) >= 0){
-			o = 0;
+		if(d == l && keycmp(&m, mid) >= 0)
 			d = r;
-		}
-		setmsg(d, o++, &m);
+		setmsg(d, &m);
 	}
 	p->op = POsplit;
 	p->nl = l;
@@ -775,30 +754,28 @@ splitpiv(Tree *t, Path *, Path *p, Path *pp, Kvp *mid)
 static int
 merge(Path *p, Path *pp, int idx, Blk *a, Blk *b)
 {
-	int i, o;
-	Msg m;
 	Blk *d;
+	Msg m;
+	int i;
 
 	if((d = newblk(a->type)) == nil)
 		return -1;
-	o = 0;
 	for(i = 0; i < a->nval; i++){
 		getval(a, i, &m);
-		setval(d, o++, &m);
+		setval(d, &m);
 	}
 	for(i = 0; i < b->nval; i++){
 		getval(b, i, &m);
-		setval(d, o++, &m);
+		setval(d, &m);
 	}
 	if(a->type == Tpivot){
-		o = 0;
 		for(i = 0; i < a->nbuf; i++){
 			getmsg(a, i, &m);
-			setmsg(d, o++, &m);
+			setmsg(d, &m);
 		}
 		for(i = 0; i < b->nbuf; i++){
 			getmsg(b, i, &m);
-			setmsg(d, o++, &m);
+			setmsg(d, &m);
 		}
 	}
 	enqueue(d);
@@ -867,7 +844,6 @@ rotate(Tree *t, Path *p, Path *pp, int midx, Blk *a, Blk *b, int halfpiv)
 		freeblk(t, r);
 		return -1;
 	}
-	o = 0;
 	d = l;
 	cp = 0;
 	sp = -1;
@@ -877,9 +853,8 @@ rotate(Tree *t, Path *p, Path *pp, int midx, Blk *a, Blk *b, int halfpiv)
 		if(d == l && (cp >= halfpiv || spillsbuf(d, a, b, &m, &idx))){
 			sp = idx;
 			d = r;
-			o = 0;
 		}
-		setval(d, o++, &m);
+		setval(d, &m);
 		cp += valsz(&m);
 	}
 	for(i = 0; i < b->nval; i++){
@@ -887,9 +862,8 @@ rotate(Tree *t, Path *p, Path *pp, int midx, Blk *a, Blk *b, int halfpiv)
 		if(d == l && (cp >= halfpiv || spillsbuf(d, a, b, &m, &idx))){
 			sp = idx;
 			d = r;
-			o = 0;
 		}
-		setval(d, o++, &m);
+		setval(d, &m);
 		cp += valsz(&m);
 	}
 	if(a->type == Tpivot){
@@ -901,7 +875,8 @@ rotate(Tree *t, Path *p, Path *pp, int midx, Blk *a, Blk *b, int halfpiv)
 				o = 0;
 			}
 			getmsg(a, i, &m);
-			setmsg(d, o++, &m);
+			setmsg(d, &m);
+			o++;
 		}
 		for(i = 0; i < b->nbuf; i++){
 			if(o == sp){
@@ -909,7 +884,8 @@ rotate(Tree *t, Path *p, Path *pp, int midx, Blk *a, Blk *b, int halfpiv)
 				o = 0;
 			}
 			getmsg(b, i, &m);
-			setmsg(d, o++, &m);
+			setmsg(d, &m);
+			o++;
 		}
 	}
 	enqueue(l);
@@ -1064,7 +1040,7 @@ flush(Tree *t, Path *path, int npath, int *redo)
 			goto Error;
 		rp->npull = pp->npull;
 		rp->pullsz = pp->pullsz;
-		copyup(rp->nl, 0, pp, nil);
+		copyup(rp->nl, pp, nil);
 		enqueue(rp->nl);
 	}
 Out:
@@ -1237,16 +1213,17 @@ getroot(Tree *t, int *h)
 	return getblk(bp, 0);
 }
 
-static char*
-btlookupat(Blk *b, int h, Key *k, Kvp *r, char *buf, int nbuf)
+char*
+btlookup(Tree *t, Key *k, Kvp *r, char *buf, int nbuf)
 {
-	int i, j, ok, same;
-	char *err;
-	Blk **p;
+	int i, j, h, ok, same;
+	Blk *b, **p;
 	Bptr bp;
 	Msg m;
+	char *err;
 
-	assert(k != r);
+	if((b = getroot(t, &h)) == nil)
+		return Efs;
 	if((p = calloc(h, sizeof(Blk*))) == nil)
 		return Emem;
 	err = Eexist;
@@ -1294,23 +1271,9 @@ Out:
 	for(i = 0; i < h; i++)
 		if(p[i] != nil)
 			putblk(p[i]);
+	putblk(b);
 	free(p);
 	return err;
-}
-
-char*
-btlookup(Tree *t, Key *k, Kvp *r, char *buf, int nbuf)
-{
-	char *ret;
-	Blk *b;
-	int h;
-
-	if((b = getroot(t, &h)) == nil)
-		return Efs;
-	ret = btlookupat(b, h, k, r, buf, nbuf);
-	putblk(b);
-
-	return ret;
 }
 
 char*

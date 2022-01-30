@@ -323,6 +323,26 @@ struct Bptr {
 	vlong	gen;
 };
 
+struct Key{
+	char	*k;
+	int	nk;
+};
+
+struct Val {
+	short	nv;
+	char	*v;
+};
+
+struct Kvp {
+	Key;
+	Val;
+};
+
+struct Msg {
+	char	op;
+	Kvp;
+};
+
 struct Dlist {
 	vlong	prev;	/* previous generation */
 	Bptr	head;	/* first flushed block */
@@ -475,26 +495,6 @@ struct Arena {
 	/* freelist */
 	Bptr	head;
 	Blk	*tail;	/* tail held open for writing */
-};
-
-struct Key{
-	char	*k;
-	int	nk;
-};
-
-struct Val {
-	short	nv;
-	char	*v;
-};
-
-struct Kvp {
-	Key;
-	Val;
-};
-
-struct Msg {
-	char	op;
-	Kvp;
 };
 
 struct Xdir {

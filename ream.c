@@ -28,7 +28,7 @@ initroot(Blk *r)
 	d.muid = 2;
 	if(dir2kv(-1, &d, &kv, vbuf, sizeof(vbuf)) == -1)
 		sysfatal("ream: pack root: %r");
-	setval(r, 0, &kv);
+	setval(r, &kv);
 
 	if((p = packsuper(kbuf, sizeof(kbuf), 0)) == nil)
 		sysfatal("ream: pack super");
@@ -38,7 +38,7 @@ initroot(Blk *r)
 		sysfatal("ream: pack super");
 	kv.v = vbuf;
 	kv.nv = p - vbuf;
-	setval(r, 1, &kv);
+	setval(r, &kv);
 }
 
 static void
@@ -57,7 +57,7 @@ initsnap(Blk *s, Blk *r)
 	kv.v[0] = Ksnap;
 	PBIT64(kv.v+1, 0);
 	kv.nv = Snapsz;
-	setval(s, 0, &kv);
+	setval(s, &kv);
 
 	kv.k[0] = Ksnap;
 	PBIT64(kv.k+1, 0);
@@ -78,7 +78,7 @@ initsnap(Blk *s, Blk *r)
 	p = packtree(vbuf, sizeof(vbuf), &t);
 	kv.v = vbuf;
 	kv.nv = p - vbuf;
-	setval(s, 1, &kv);
+	setval(s, &kv);
 }
 
 static void

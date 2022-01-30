@@ -592,7 +592,7 @@ blkalloc(int hint)
 
 	tries = 0;
 Again:
-	a = pickarena(hint);
+	a = pickarena(hint+tries);
 	if(a == nil || tries == fs->narena){
 		werrstr("no empty arenas");
 		return -1;

@@ -70,10 +70,10 @@ readblk(vlong bp, int flg)
 	assert(bp != -1);
 	if((b = malloc(sizeof(Blk))) == nil)
 		return nil;
-	off = bp;
+	off = 0;
 	rem = Blksz;
 	while(rem != 0){
-		n = pread(fs->fd, b->buf, rem, off);
+		n = pread(fs->fd, b->buf+off, rem, bp+off);
 		if(n <= 0){
 			free(b);
 			return nil;

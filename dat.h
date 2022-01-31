@@ -86,7 +86,6 @@ enum {
 	Ktref,	/* tag[8] = snapid[]		scratch snapshot label */
 	Ksnap,	/* sid[8] => ref[8], tree[52]:	snapshot root */
 	Ksuper,	/* qid[8] => Kent:		parent dir */
-	Kdirty,	/* [0] => [0]:			mark dirty unmount */
 };
 
 enum {
@@ -392,6 +391,10 @@ struct Tree {
 	int	ht;
 	Bptr	bp;
 	vlong	gen;
+	Msg	flush[16];
+	int	nflush;
+	int	flushsz;
+	char	flushbuf[Bufspc/2];
 	Dlist	dead[Ndead];
 };
 

@@ -103,8 +103,6 @@ readblk(vlong bp, int flg)
 
 	switch(b->type){
 	default:
-		if(flg&GBraw)
-			break;
 		fprint(2, "invalid block @%llx\n", bp);
 		abort();
 		break;
@@ -674,9 +672,29 @@ newblk(int t)
 		return nil;
 	if((b = initblk(bp, t)) == nil)
 		return nil;
-
 	setmalloctag(b, getcallerpc(&t));
 	return b;
+}
+
+Blk*
+dupblk(Blk *b)
+{
+	Blk *r;
+
+	if((r = newblk(b->type)) == nil)
+		return nil;
+
+	setflag(r, Bdirty);
+	r->bp.hash = b->bp.hash;
+	r->nval = b->nval;
+	r->valsz = b->valsz;
+	r->nbuf = b->nbuf;
+	r->bufsz = b->bufsz;
+	r->logsz = b->logsz;
+	r->lognxt = b->lognxt;
+	memcpy(r->buf, b->buf, sizeof(r->buf));
+	setmalloctag(b, getcallerpc(&b));
+	return r;
 }
 
 void

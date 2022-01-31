@@ -12,6 +12,7 @@ extern int	debug;
 extern char*	forceuser;
 
 Blk*	newblk(int type);
+Blk*	dupblk(Blk*);
 Blk*	getroot(Tree*, int*);
 Blk*	getblk(Bptr, int);
 Blk*	refblk(Blk*);

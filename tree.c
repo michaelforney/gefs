@@ -194,8 +194,6 @@ bufsearch(Blk *b, Key *k, Msg *m, int *same)
 			hi = mid-1;
 			break;
 		case 0:
-			if(same != nil)
-				*same = 1;
 			ri = mid;
 			hi = mid-1;
 			break;
@@ -214,7 +212,7 @@ bufsearch(Blk *b, Key *k, Msg *m, int *same)
 		ri = lo-1;
 	else
 		*same = 1;
-	if(ri >= 0)
+	if(m != nil && ri >= 0)
 		getmsg(b, ri, m);
 	return ri;
 }
@@ -237,8 +235,6 @@ blksearch(Blk *b, Key *k, Kvp *rp, int *same)
 			hi = mid-1;
 			break;
 		case 0:
-			if(same != nil)
-				*same = 1;
 			ri = mid;
 			hi = mid-1;
 			break;
@@ -1112,6 +1108,62 @@ victim(Blk *b, Path *p)
 	}
 }
 
+static char*
+fastupsert(Tree *t, Blk *b, Msg *msg, int nmsg)
+{
+	int i, c, o, ri, lo, hi, mid, nbuf;
+	Msg cmp;
+	char *p;
+	Blk *r;
+
+	if((r = dupblk(b)) == nil)
+		return Emem;
+	
+	nbuf = r->nbuf;
+	for(i = 0; i < nmsg; i++)
+		setmsg(r, &msg[i]);
+
+	for(i = 0; i < nmsg; i++){
+		ri = -1;
+		lo = 0;
+		hi = nbuf+i-1;
+		while(lo <= hi){
+			mid = (hi + lo) / 2;
+			getmsg(r, mid, &cmp);
+			c = keycmp(&msg[i], &cmp);
+			switch(c){
+			case -1:
+				hi = mid-1;
+				break;
+			case 0:
+				ri = mid+1;
+				lo = mid+1;
+				break;
+			case 1:
+				lo = mid+1;
+				break;
+			}
+		}
+		if(ri == -1)
+			ri = hi+1;
+		p = r->data + Pivspc + 2*(nbuf+i);
+		o = GBIT16(p);
+		p = r->data + Pivspc + 2*ri;
+		memmove(p+2, p, 2*(nbuf+i-ri));
+		PBIT16(p, o);
+	}
+	lock(&t->lk);
+	t->bp = r->bp;
+	unlock(&t->lk);
+
+	freeblk(t, b);
+	enqueue(r);
+	putblk(b);
+	putblk(r);
+	return nil;
+}
+	
+
 char*
 btupsert(Tree *t, Msg *msg, int nmsg)
 {
@@ -1129,6 +1181,8 @@ btupsert(Tree *t, Msg *msg, int nmsg)
 Again:
 	if((b = getroot(t, &height)) == nil)
 		return Efs;
+	if(b->type == Tpivot && !filledbuf(b, nmsg, sz))
+		return fastupsert(t, b, msg, nmsg);
 
 	/*
 	 * The tree can grow in height by 1 when we

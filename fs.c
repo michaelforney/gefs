@@ -526,6 +526,7 @@ fsversion(Fmsg *m, int *msz)
 			*msz = m->msize;
 		r.type = Rversion;
 		r.msize = *msz;
+		r.version = "9P2000";
 	}else{
 		r.type = Rversion;
 		r.version = "unknown";

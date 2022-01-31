@@ -1064,6 +1064,7 @@ freepath(Tree *t, Path *path, int npath)
 		putblk(p->nl);
 		putblk(p->nr);
 	}
+	free(path);
 }
 
 /*
@@ -1189,13 +1190,11 @@ Again:
 	t->dirty = 1;
 	unlock(&t->lk);
 	freepath(t, path, npath);
-	free(path);
 	if(redo)
 		goto Again;
 	return 0;
 Error:
 	freepath(t, path, npath);
-	free(path);
 	return Efs;
 }
 

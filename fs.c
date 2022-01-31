@@ -461,7 +461,7 @@ dupfid(int new, Fid *f)
 	unlock(&fs->fidtablk);
 
 	if(o != nil){
-		fprint(2, "fid in use: %d == %d", o->fid, new);
+		fprint(2, "fid in use: %d == %d\n", o->fid, new);
 		abort();
 		free(n);
 		return nil;

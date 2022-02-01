@@ -485,8 +485,8 @@ compresslog(Arena *a)
 	p = tl->data + tl->logsz;
 	PBIT64(p, LogChain|graft);
 	free(log);
-	finalize(b);
-	if(syncblk(b) == -1)
+	finalize(tl);
+	if(syncblk(tl) == -1)
 		return -1;
 
 	oldhd = a->head.addr;

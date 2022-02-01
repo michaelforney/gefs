@@ -985,11 +985,10 @@ runsync(int, void *p)
 		while(q.nheap < q.heapsz){
 			b = chrecv(c, q.nheap == 0);
 			if(b == &magic){
-				if(adec(&fs->syncing) == 0){
-					qlock(&fs->synclk);
+				qlock(&fs->synclk);
+				if(--fs->syncing == 0)
 					rwakeupall(&fs->syncrz);
-					qunlock(&fs->synclk);
-				}
+				qunlock(&fs->synclk);
 				continue;
 			}				
 			if(b != nil)

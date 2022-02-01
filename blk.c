@@ -24,6 +24,7 @@ static vlong	blkalloc_lk(Arena*);
 static vlong	blkalloc(int);
 static int	blkdealloc_lk(vlong);
 static Blk*	initblk(vlong, int);
+static int	logop(Arena *, vlong, vlong, int);
 
 static Blk magic;
 
@@ -70,10 +71,10 @@ readblk(vlong bp, int flg)
 	assert(bp != -1);
 	if((b = malloc(sizeof(Blk))) == nil)
 		return nil;
-	off = 0;
+	off = bp;
 	rem = Blksz;
 	while(rem != 0){
-		n = pread(fs->fd, b->buf+off, rem, bp+off);
+		n = pread(fs->fd, b->buf, rem, off);
 		if(n <= 0){
 			free(b);
 			return nil;
@@ -234,7 +235,7 @@ grabrange(Avltree *t, vlong off, vlong len)
  * recursion.
  */
 static int
-logappend(Arena *_a, vlong off, vlong len, int op, Blk **tl)
+logappend(Arena *a, vlong off, vlong len, int op, Blk **tl)
 {
 	Blk *pb, *lb;
 	vlong o;
@@ -255,7 +256,7 @@ logappend(Arena *_a, vlong off, vlong len, int op, Blk **tl)
 	 */
 	if(lb == nil || lb->logsz >= Logspc - 40){
 		pb = lb;
-		if((o = blkalloc_lk(_a)) == -1)
+		if((o = blkalloc_lk(a)) == -1)
 			return -1;
 		if((lb = initblk(o, Tlog)) == nil)
 			return -1;
@@ -298,13 +299,16 @@ logappend(Arena *_a, vlong off, vlong len, int op, Blk **tl)
 	}
 	/*
 	 * The newly allocated log block needs
-	 * to be recorded.
+	 * to be recorded. If we're compressing
+	 * a log, it needs to go to the tail of
+	 * the new log, rather than after the
+	 * current allocation.
+	 *
+	 * Because we've just grown the log, we
+	 * know it won't recurse.
 	 */
-	if(o != -1){
-		p = lb->data + lb->logsz;
-		PBIT64(p, o|LogAlloc1);
-		lb->logsz += 8;
-	}
+	if(o != -1)
+		logop(a, o, Blksz, LogAlloc);
 	/* this gets overwritten by the next append */
 	p = lb->data + lb->logsz;
 	PBIT64(p, (uvlong)LogEnd);
@@ -478,7 +482,7 @@ compresslog(Arena *a)
 		if(logappend(a, log[i].off, log[i].len, LogFree, &tl) == -1)
 			return -1;
 
-	p = b->data + b->logsz;
+	p = tl->data + tl->logsz;
 	PBIT64(p, LogChain|graft);
 	free(log);
 	finalize(b);

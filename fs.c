@@ -486,6 +486,7 @@ clunkfid(Fid *fid)
 		}
 		pf = &f->next;
 	}
+	assert(f != nil);
 	unlock(&fs->fidtablk);
 }
 

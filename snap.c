@@ -23,8 +23,9 @@ scandead(Dlist *l, int lblk, void (*fn)(Bptr, void*), void *dat)
 		return 0;
 	if(b == nil)
 		return -1;
-	p = b->data + Loghdsz;
+Nextblk:
 	for(i = Loghdsz; i < Logspc; i += 16){
+		p = b->data + i;
 		op = GBIT64(p) & 0xff;
 		switch(op){
 		case DlEnd:
@@ -38,12 +39,11 @@ scandead(Dlist *l, int lblk, void (*fn)(Bptr, void*), void *dat)
 				fn(b->bp, dat);
 			if((b = getblk(bp, 0)) == nil)
 				return -1;
-			p = b->data + Loghdsz;
-			break;
+			goto Nextblk;
 		case DlGraft:
 			t.head.addr = GBIT64(p);	p += 8;
 			t.head.addr &= ~0xffULL;
-			t.head.hash = GBIT64(p);	p += 8;
+			t.head.hash = GBIT64(p);
 			t.head.gen = -1;
 			t.ins = nil;
 			scandead(&t, lblk, fn, dat);
@@ -51,7 +51,7 @@ scandead(Dlist *l, int lblk, void (*fn)(Bptr, void*), void *dat)
 		case DlKill:
 			bp.addr = GBIT64(p);	p += 8;
 			bp.hash = -1;
-			bp.gen = GBIT64(p);	p += 8;
+			bp.gen = GBIT64(p);
 			bp.addr &= ~0xffULL;
 			fn(bp, dat);
 			break;

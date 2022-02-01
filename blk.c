@@ -916,7 +916,7 @@ enqueue(Blk *b)
 	chsend(a->sync, b);
 }
 
-void
+static void
 qput(Flushq *q, Blk *b)
 {
 	Blk *t;
@@ -936,7 +936,7 @@ qput(Flushq *q, Blk *b)
 
 }
 
-Blk*
+static Blk*
 qpop(Flushq *q)
 {
 	int i, l, r, m;

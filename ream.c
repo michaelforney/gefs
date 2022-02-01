@@ -16,7 +16,7 @@ initroot(Blk *r)
 	Xdir d;
 
 	/* nb: values must be inserted in key order */
-	memset(&d, 0, sizeof(Dir));
+	memset(&d, 0, sizeof(Xdir));
 	d.qid = (Qid){fs->nextqid++, 0, QTDIR};
 	d.mode = DMDIR|0755;
 	d.atime = 0;

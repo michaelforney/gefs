@@ -13,7 +13,7 @@ rangecmp(Avl *a, Avl *b)
 	return ((Arange*)a)->off - ((Arange*)b)->off;
 }
 
-void
+static void
 mergeinfo(Gefs *fs, Fshdr *fi)
 {
 	if(fi->blksz != Blksz || fi->bufspc != Bufspc || fi->hdrsz != Hdrsz)

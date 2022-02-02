@@ -17,14 +17,14 @@ initroot(Blk *r)
 	/* nb: values must be inserted in key order */
 	memset(&d, 0, sizeof(Xdir));
 	d.qid = (Qid){fs->nextqid++, 0, QTDIR};
-	d.mode = DMDIR|0755;
+	d.mode = DMDIR|0775;
 	d.atime = 0;
 	d.mtime = 0;
 	d.length = 0;
 	d.name = "";
-	d.uid = 2;
-	d.gid = 2;
-	d.muid = 2;
+	d.uid = -1;
+	d.gid = -1;
+	d.muid = 0;
 	if(dir2kv(-1, &d, &kv, vbuf, sizeof(vbuf)) == -1)
 		sysfatal("ream: pack root: %r");
 	setval(r, &kv);

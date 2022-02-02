@@ -10,7 +10,7 @@ typedef struct User	User;
 
 
 char *defaultusers =
-	"-1:adm::\n"
+	"-1:adm::glenda\n"
 	"0:none::\n"
 	"1:tor:tor:\n"
 	"2:glenda:glenda:\n"

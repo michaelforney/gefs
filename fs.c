@@ -240,7 +240,7 @@ clearb(Fid *f, vlong o, vlong sz)
 }
 
 static int
-readb(Fid *f, char *d, vlong o, vlong n, int sz)
+readb(Fid *f, char *d, vlong o, vlong n, vlong sz)
 {
 	char *e, buf[17], kvbuf[17+32];
 	vlong fb, fo;

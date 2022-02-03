@@ -301,6 +301,7 @@ writeb(Fid *f, Msg *m, Bptr *ret, char *s, vlong o, vlong n, vlong sz)
 	b = newblk(Traw);
 	if(b == nil)
 		return -1;
+	t = nil;
 	if(fb < sz && (fo != 0 || n != Blksz)){
 		if(lookup(f, m, &kv, buf, sizeof(buf), 0) != nil)
 			return -1;
@@ -314,6 +315,12 @@ writeb(Fid *f, Msg *m, Bptr *ret, char *s, vlong o, vlong n, vlong sz)
 	if(fo+n > Blksz)
 		n = Blksz-fo;
 	memcpy(b->buf+fo, s, n);
+	if(t == nil){
+		if(fo > 0)
+			memset(b->buf, 0, fo);
+		if(fo+n < Blksz)
+			memset(b->buf+fo+n, 0, Blksz-fo-n);
+	}
 	enqueue(b);
 
 	packbp(m->v, m->nv, &b->bp);

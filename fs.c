@@ -254,6 +254,8 @@ readb(Fid *f, char *d, vlong o, vlong n, int sz)
 
 	fb = o & ~(Blksz-1);
 	fo = o & (Blksz-1);
+	if(fo+n > Blksz)
+		n = Blksz-fo;
 
 	k.k = buf;
 	k.nk = sizeof(buf);
@@ -262,21 +264,20 @@ readb(Fid *f, char *d, vlong o, vlong n, int sz)
 	PBIT64(k.k+9, fb);
 
 	e = lookup(f, &k, &kv, kvbuf, sizeof(kvbuf), 0);
-	if(e != nil && e != Eexist){
-		werrstr(e);
-		return -1;
+	if(e != nil){
+		if(e != Eexist){
+			werrstr(e);
+			return -1;
+		}
+		memset(d, 0, n);
+		return n;
 	}
 
 	bp = unpackbp(kv.v, kv.nv);
 	if((b = getblk(bp, GBraw)) == nil)
 		return -1;
-	if(fo+n > Blksz)
-		n = Blksz-fo;
-	if(b != nil){
-		memcpy(d, b->buf+fo, n);
-		putblk(b);
-	}else
-		memset(d, 0, n);
+	memcpy(d, b->buf+fo, n);
+	putblk(b);
 	return n;
 }
 

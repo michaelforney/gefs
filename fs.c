@@ -444,7 +444,7 @@ putfid(Fid *f)
 }
 
 static Fid*
-dupfid(int new, Fid *f)
+dupfid(u32int new, Fid *f)
 {
 	Fid *n, *o;
 	u32int h;

@@ -18,7 +18,6 @@ char Elength[]	= "name too long";
 char Eperm[]	= "permission denied";
 char Einuse[]	= "resource in use";
 char Ebadf[]	= "invalid file";
-char Emem[]	= "out of memory";
 char Ename[]	= "create/wstat -- bad character in file name";
 char Enomem[]	= "out of memory";
 char Eattach[]	= "attach required";

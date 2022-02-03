@@ -58,7 +58,7 @@ slurp(Tree *t, vlong path, vlong len)
 	Kvp kv;
 
 	if((ret = malloc(len + 1)) == nil)
-		return Emem;
+		return Enomem;
 	k.k = buf;
 	k.nk = Offksz;
 	for(o = 0; o < len; o += Blksz){
@@ -146,7 +146,7 @@ parseusers(int fd, char *udata)
 	nusers = 0;
 	usersz = 8;
 	if((users = calloc(usersz, sizeof(User))) == nil)
-		return Emem;
+		return Enomem;
 	pu = udata;
 	lnum = 0;
 	while((p = readline(&pu, buf, sizeof(buf))) != nil){
@@ -221,7 +221,7 @@ parseusers(int fd, char *udata)
 				goto Error;
 			}
 			if((g = realloc(grp, (ngrp+1)*sizeof(int))) == nil){
-				err = Emem;
+				err = Enomem;
 				goto Error;
 			}
 			grp = g;

@@ -1117,7 +1117,7 @@ fastupsert(Tree *t, Blk *b, Msg *msg, int nmsg)
 	Blk *r;
 
 	if((r = dupblk(b)) == nil)
-		return Emem;
+		return Enomem;
 	
 	nbuf = r->nbuf;
 	for(i = 0; i < nmsg; i++)
@@ -1192,7 +1192,7 @@ Again:
 	redo = 0;
 	npath = 0;
 	if((path = calloc((height + 2), sizeof(Path))) == nil)
-		return Emem;
+		return Enomem;
 	path[npath].b = nil;
 	path[npath].idx = -1;
 	path[npath].midx = -1;
@@ -1278,7 +1278,7 @@ btlookup(Tree *t, Key *k, Kvp *r, char *buf, int nbuf)
 	if((b = getroot(t, &h)) == nil)
 		return Efs;
 	if((p = calloc(h, sizeof(Blk*))) == nil)
-		return Emem;
+		return Enomem;
 	err = Eexist;
 	ok = 0;
 	p[0] = refblk(b);

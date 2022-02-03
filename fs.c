@@ -686,11 +686,11 @@ fsattach(Fmsg *m, int iounit)
 	Fid f;
 
 	if((mnt = mallocz(sizeof(Mount), 1)) == nil){
-		rerror(m, Emem);
+		rerror(m, Enomem);
 		return;
 	}
 	if((mnt->name = strdup(m->aname)) == nil){
-		rerror(m, Emem);
+		rerror(m, Enomem);
 		return;
 	}
 	rlock(&fs->userlk);
@@ -849,7 +849,7 @@ fswalk(Fmsg *m)
 	f = o;
 	if(m->fid != m->newfid && i == m->nwname){
 		if((f = dupfid(m->newfid, o)) == nil){
-			rerror(m, Emem);
+			rerror(m, Enomem);
 			putfid(o);
 			return;
 		}
@@ -1377,7 +1377,7 @@ readauth(Fmsg *m, Fid *f, Fcall *r)
 		if(m->count < rpc->narg)
 			return Eauthd;
 		if((r->data = malloc(rpc->narg)) == nil)
-			return Emem;
+			return Enomem;
 		memmove(r->data, rpc->arg, rpc->narg);
 		r->count = rpc->narg;
 		return nil;
@@ -1496,7 +1496,7 @@ fsread(Fmsg *m)
 	r.type = Rread;
 	r.count = 0;
 	if((r.data = malloc(m->count)) == nil){
-		rerror(m, Emem);
+		rerror(m, Enomem);
 		putfid(f);
 		return;
 	}

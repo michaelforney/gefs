@@ -112,7 +112,6 @@ extern char Elength[];
 extern char Eperm[];
 extern char Einuse[];
 extern char Ebadf[];
-extern char Emem[];
 extern char Ename[];
 extern char Enomem[];
 extern char Eattach[];

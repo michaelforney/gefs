@@ -30,7 +30,7 @@ int	killblk(Tree*, Bptr);
 void	reclaimblk(Bptr);
 ushort	blkfill(Blk*);
 uvlong	blkhash(Blk*);
-u32int	ihash(vlong);
+u32int	ihash(uvlong);
 void	finalize(Blk*);
 Tree*	newsnap(Tree*);
 char*	freesnap(Tree*, Tree*);

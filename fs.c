@@ -425,11 +425,11 @@ getfid(u32int fid)
 	h = ihash(fid) % Nfidtab;
 	lock(&fs->fidtablk);
 	for(f = fs->fidtab[h]; f != nil; f = f->next)
-		if(f->fid == fid)
+		if(f->fid == fid){
+			ainc(&f->ref);
 			break;
+		}
 	unlock(&fs->fidtablk);
-	if(f != nil)
-		ainc(&f->ref);
 	return f;
 }
 

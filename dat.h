@@ -97,77 +97,50 @@ enum {
 };
 
 /* internal errors */
-#define Eimpl	"not implemented"
 #define Efs	(abort(), "fs broke")
-#define Ebotch	"protocol botch"
-#define Eio	"i/o error"
-#define Efid	"unknown fid"
-#define Etype	"invalid fid type"
-#define Edscan	"invalid dir scan offset"
-#define Eexist	"directory entry not found"
-#define Emode	"unknown mode"
-#define Efull	"file system full"
-#define Eauth	"authentication failed"
-#define Elength	"name too long"
-#define Eperm	"permission denied"
-#define Einuse	"resource in use"
-#define Ebadf	"invalid file"
-#define Emem	"out of memory"
-#define Ename	"create/wstat -- bad character in file name"
-#define Enomem	"out of memory"
-#define Eattach	"attach required"
-#define Enosnap	"attach -- bad specifier"
-#define Edir	"invalid directory"
-#define Esyntax "syntax error"
-#define Enouser	"user does not exist"
-#define Efsize	"file too big"
-#define Ebadu	"attach -- unknown user or failed authentication"
-#define Erdonly	"file system read only"
-#define Elocked	"open/create -- file is locked"
-#define Eauthp	"authread -- auth protocol not finished"
-#define Eauthd	"authread -- not enough data"
-#define Ephase	"auth phase error"
-#define Enone	"auth -- user 'none' requires no authentication"
-#define Enoauth	"auth -- authentication disabled"
+extern char Eimpl[];
+extern char Ebotch[];
+extern char Eio[];
+extern char Efid[];
+extern char Etype[];
+extern char Edscan[];
+extern char Eexist[];
+extern char Emode[];
+extern char Efull[];
+extern char Eauth[];
+extern char Elength[];
+extern char Eperm[];
+extern char Einuse[];
+extern char Ebadf[];
+extern char Emem[];
+extern char Ename[];
+extern char Enomem[];
+extern char Eattach[];
+extern char Enosnap[];
+extern char Edir[];
+extern char Esyntax[];
+extern char Enouser[];
+extern char Efsize[];
+extern char Ebadu[];
+extern char Erdonly[];
+extern char Elocked[];
+extern char Eauthp[];
+extern char Eauthd[];
+extern char Ephase[];
+extern char Enone[];
+extern char Enoauth[];
 
-#define Ewstatb	"wstat -- unknown bits in qid.type/mode"
-#define Ewstatd	"wstat -- attempt to change directory"
-#define Ewstatg	"wstat -- not in group"
-#define Ewstatl	"wstat -- attempt to make length negative"
-#define Ewstatm	"wstat -- attempt to change muid"
-#define Ewstato	"wstat -- not owner or group leader"
-#define Ewstatp	"wstat -- attempt to change qid.path"
-#define Ewstatq	"wstat -- qid.type/dir.mode mismatch"
-#define Ewstatu	"wstat -- not owner"
-#define Ewstatv	"wstat -- attempt to change qid.vers"
-#define Enempty	"remove -- directory not empty"
-
-
-//#define Echar		"bad character in directory name"
-//#define Eopen		"read/write -- on non open fid"
-//#define Ecount	"read/write -- count too big"
-//#define Ealloc	"phase error -- directory entry not allocated"
-//#define Eqid		"phase error -- qid does not match"
-//#define Eaccess	"access permission denied"
-//#define Eentry	"directory entry not found"
-//#define Emode		"open/create -- unknown mode"
-//#define Edir1		"walk -- in a non-directory"
-//#define Edir2		"create -- in a non-directory"
-//#define Ephase	"phase error -- cannot happen"
-//#define Eexist	"create/wstat -- file exists"
-//#define Edot		"create/wstat -- . and .. illegal names"
-//#define Ewalk		"walk -- too many (system wide)"
-//#define Eoffset	"read/write -- offset negative"
-//#define Ebroken	"read/write -- lock is broken"
-//#define Eauth		"attach -- authentication failed"
-//#define Eauth2	"read/write -- authentication unimplemented"
-//#define Etoolong	"name too long"
-//#define Efidinuse	"fid in use"
-//#define Econvert	"protocol botch"
-//#define Eversion	"version conversion"
-//#define Eauthnone	"auth -- user 'none' requires no authentication"
-//#define Eauthdisabled	"auth -- authentication disabled",	/* development */
-//#define Eauthfile	"auth -- out of auth files"
+extern char Ewstatb[];
+extern char Ewstatd[];
+extern char Ewstatg[];
+extern char Ewstatl[];
+extern char Ewstatm[];
+extern char Ewstato[];
+extern char Ewstatp[];
+extern char Ewstatq[];
+extern char Ewstatu[];
+extern char Ewstatv[];
+extern char Enempty[];
 
 /*
  * All metadata blocks share a common header:

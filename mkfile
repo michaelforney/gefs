@@ -8,6 +8,7 @@ OFILES=\
 	check.$O\
 	cons.$O\
 	dump.$O\
+	error.$O\
 	fs.$O\
 	hash.$O\
 	load.$O\

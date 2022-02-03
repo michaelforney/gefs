@@ -284,7 +284,7 @@ readb(Fid *f, char *d, vlong o, vlong n, vlong sz)
 static int
 writeb(Fid *f, Msg *m, Bptr *ret, char *s, vlong o, vlong n, vlong sz)
 {
-	char buf[Kvmax];
+	char *e, buf[Kvmax];
 	vlong fb, fo;
 	Blk *b, *t;
 	Bptr bp;
@@ -303,14 +303,18 @@ writeb(Fid *f, Msg *m, Bptr *ret, char *s, vlong o, vlong n, vlong sz)
 		return -1;
 	t = nil;
 	if(fb < sz && (fo != 0 || n != Blksz)){
-		if(lookup(f, m, &kv, buf, sizeof(buf), 0) != nil)
+		e = lookup(f, m, &kv, buf, sizeof(buf), 0);
+		if(e == nil){
+			bp = unpackbp(kv.v, kv.nv);
+			if((t = getblk(bp, GBraw)) == nil)
+				return -1;
+			memcpy(b->buf, t->buf, Blksz);
+			freeblk(f->mnt->root, t);
+			putblk(t);
+		}else if(e != Eexist){
+			werrstr("%s", e);
 			return -1;
-		bp = unpackbp(kv.v, kv.nv);
-		if((t = getblk(bp, GBraw)) == nil)
-			return -1;
-		memcpy(b->buf, t->buf, Blksz);
-		freeblk(f->mnt->root, t);
-		putblk(t);
+		}
 	}
 	if(fo+n > Blksz)
 		n = Blksz-fo;

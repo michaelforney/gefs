@@ -113,7 +113,7 @@ initarena(Arena *a, Fshdr *fi, vlong start, vlong asz)
 	if(syncblk(b) == -1)
 		sysfatal("ream: init log");
 
-	bh = blkhash(b);
+	bh = b->bp.hash;
 	bo = b->bp.addr;
 
 	memset(b, 0, sizeof(Blk));

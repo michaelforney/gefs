@@ -491,7 +491,7 @@ compresslog(Arena *a)
 
 	oldhd = a->head.addr;
 	a->head.addr = hd->bp.addr;
-	a->head.hash = blkhash(hd);
+	a->head.hash = hd->bp.hash;
 	a->head.gen = -1;
 	if(syncarena(a) == -1)
 		return -1;
@@ -763,7 +763,7 @@ getblk(Bptr bp, int flg)
 		setmalloctag(b, getcallerpc(&bp));
 	h = blkhash(b);
 	if((flg&GBnochk) == 0 && h != bp.hash){
-		fprint(2, "corrupt block %B: %.16llux != %.16llux\n", bp, blkhash(b), bp.hash);
+		fprint(2, "corrupt block %B: %.16llux != %.16llux\n", bp, h, bp.hash);
 		qunlock(&fs->blklk[i]);
 		abort();
 		return nil;

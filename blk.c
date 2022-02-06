@@ -703,7 +703,7 @@ dupblk(Blk *b)
 void
 finalize(Blk *b)
 {
-	vlong h;
+	uvlong h;
 
 	setflag(b, Bfinal);
 	if(b->type != Traw)
@@ -763,7 +763,7 @@ getblk(Bptr bp, int flg)
 		setmalloctag(b, getcallerpc(&bp));
 	h = blkhash(b);
 	if((flg&GBnochk) == 0 && h != bp.hash){
-		fprint(2, "corrupt block %B: %llx != %llx\n", bp, blkhash(b), bp.hash);
+		fprint(2, "corrupt block %B: %.16llux != %.16llux\n", bp, blkhash(b), bp.hash);
 		qunlock(&fs->blklk[i]);
 		abort();
 		return nil;

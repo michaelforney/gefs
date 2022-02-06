@@ -290,7 +290,7 @@ enum {
 
 struct Bptr {
 	vlong	addr;
-	vlong	hash;
+	uvlong	hash;
 	vlong	gen;
 };
 

@@ -98,7 +98,7 @@ siphash24(const void *src, unsigned long src_sz, const char key[16]) {
 u64int
 siphash(void *src, usize len)
 {
-	char key[16] = "gefsgefsgefsgefs";
+	static char key[16] = "gefsgefsgefsgefs";
 	return siphash24(src, len, key);
 }
 

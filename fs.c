@@ -153,11 +153,13 @@ chsend(Chan *c, void *m)
 static void
 fshangup(int fd, char *fmt, ...)
 {
+	char buf[ERRMAX];
 	va_list ap;
 
 	va_start(ap, fmt);
-	vfprint(2, fmt, ap);
+	vsnprint(buf, sizeof(buf), fmt, ap);
 	va_end(ap);
+	fprint(2, "%s\n", buf);
 	close(fd);
 	abort();
 }

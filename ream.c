@@ -146,23 +146,22 @@ reamfs(char *dev)
 		sysfatal("open %s: %r", dev);
 	if((d = dirfstat(fs->fd)) == nil)
 		sysfatal("ream: %r");
-	if(d->length < 64*MiB)
+	sz = d->length;
+	free(d);
+	if(sz < 64*MiB)
 		sysfatal("ream: disk too small");
 	if((mnt = mallocz(sizeof(Mount), 1)) == nil)
 		sysfatal("ream: alloc mount: %r");
 	if((mnt->root = mallocz(sizeof(Tree), 1)) == nil)
 		sysfatal("ream: alloc tree: %r");
 
-	sz = d->length;
-	sz = sz - (sz % Blksz) - Blksz;
-	fs->narena = (d->length + 64ULL*GiB - 1) / (64ULL*GiB);
+	fs->narena = (sz + 64ULL*GiB - 1) / (64ULL*GiB);
 	if(fs->narena < 8)
 		fs->narena = 8;
 	if(fs->narena >= 128)
 		fs->narena = 128;
 	if((fs->arenas = calloc(fs->narena, sizeof(Arena))) == nil)
 		sysfatal("malloc: %r");
-	free(d);
 
 	asz = sz/fs->narena;
 	asz = asz - (asz % Blksz) - Blksz;

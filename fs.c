@@ -3,6 +3,7 @@
 #include <auth.h>
 #include <fcall.h>
 #include <avl.h>
+#include <bio.h>
 #include <sys/socket.h>
 
 #include "dat.h"
@@ -617,13 +618,13 @@ clunkfid(Conn *c, Fid *fid)
 }
 
 static int
-readmsg(Conn *c, Fmsg **pm)
+readmsg(Conn *c, Biobufhdr *bp, Fmsg **pm)
 {
 	char szbuf[4];
 	int sz, n;
 	Fmsg *m;
 
-	n = readn(c->rfd, szbuf, 4);
+	n = Bread(bp, szbuf, 4);
 	if(n <= 0){
 		*pm = nil;
 		return n;
@@ -639,7 +640,7 @@ readmsg(Conn *c, Fmsg **pm)
 	}
 	if((m = malloc(sizeof(Fmsg)+sz)) == nil)
 		return -1;
-	if(readn(c->rfd, m->buf+4, sz-4) != sz-4){
+	if(Bread(bp, m->buf+4, sz-4) != sz-4){
 		werrstr("short read: %r");
 		free(m);
 		return -1;
@@ -2032,10 +2033,12 @@ runfs(int, void *pc)
 	char err[128];
 	Fcall r;
 	Fmsg *m;
+	Biobuf b;
 
 	c = pc;
+	Binit(&b, c->rfd, OREAD);
 	while(1){
-		if(readmsg(c, &m) < 0){
+		if(readmsg(c, &b, &m) < 0){
 			fshangup(c, "read message: %r");
 			return;
 		}

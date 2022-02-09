@@ -64,7 +64,11 @@ OFILES=\
 	compat/utfrune.o\
 	compat/vfprint.o\
 	compat/vseprint.o\
-	compat/vsnprint.o
+	compat/vsnprint.o\
+	compat/binit.o\
+	compat/bread.o\
+	compat/bflush.o\
+	compat/blethal.o
 
 HFILES=\
 	dat.h\

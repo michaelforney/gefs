@@ -801,7 +801,9 @@ fswalk(Fmsg *m)
 	e = nil;
 	up = o->qpath;
 	prev = o->qpath;
+	rlock(o->dent);
 	d = *o->dent;
+	runlock(o->dent);
 	duid = d.uid;
 	dgid = d.gid;
 	dmode = d.mode;

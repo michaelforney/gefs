@@ -544,10 +544,8 @@ blkalloc_lk(Arena *a)
 
 	t = a->free;
 	r = (Arange*)t->root;
-	if(r == nil){
-		unlock(a);
+	if(r == nil)
 		return -1;
-	}
 
 	/*
 	 * A bit of sleight of hand here:

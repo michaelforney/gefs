@@ -1060,6 +1060,7 @@ fsclunk(Fmsg *m)
 	lock(f);
 	if(f->scan != nil){
 		btdone(f->scan);
+		free(f->scan);
 		f->scan = nil;
 	}
 	unlock(f);
@@ -1205,18 +1206,17 @@ candelete(Fid *f)
 
 	pfx[0] = Kent;
 	PBIT64(pfx+1, f->qpath);
-	if((e = btscan(f->mnt->root, s, pfx, sizeof(pfx))) != nil){
-		btdone(s);
-		free(s);
-		return e;
-	}
+	if((e = btscan(f->mnt->root, s, pfx, sizeof(pfx))) != nil)
+		goto Out;
 	done = 0;
 	if((e = btnext(s, &s->kv, &done)) != nil)
-		return e;
+		goto Out;
+	if(!done)
+		e = Enempty;
+Out:
 	btdone(s);
-	if(done)
-		return nil;
-	return Enempty;
+	free(s);
+	return e;
 }
 
 static void
@@ -1395,8 +1395,6 @@ readdir(Fmsg *m, Fid *f, Fcall *r)
 	s = f->scan;
 	if(s != nil && s->offset != 0 && s->offset != m->offset)
 		return Edscan;
-	if((r->data = malloc(m->count)) == nil)
-		return Enomem;
 	if(s == nil || m->offset == 0){
 		if((s = mallocz(sizeof(Scan), 1)) == nil)
 			return Enomem;
@@ -1405,12 +1403,15 @@ readdir(Fmsg *m, Fid *f, Fcall *r)
 		PBIT64(pfx+1, f->qpath);
 		if((e = btscan(f->mnt->root, s, pfx, sizeof(pfx))) != nil){
 			btdone(s);
+			free(s);
 			return e;
 		}
 
 		lock(f);
-		if(f->scan != nil)
+		if(f->scan != nil){
 			btdone(f->scan);
+			free(f->scan);
+		}
 		f->scan = s;
 		unlock(f);
 	}

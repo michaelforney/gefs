@@ -880,6 +880,7 @@ quiesce(int tid)
 	if(fs->freep != nil){
 		p = fs->freep->next;
 		fs->freep->next = nil;
+		fs->freep = fs->freehd;
 	}
 	unlock(&fs->freelk);
 
@@ -889,7 +890,6 @@ quiesce(int tid)
 		free(p);
 		p = n;
 	}
-	fs->freep = fs->freehd;
 }
 
 int

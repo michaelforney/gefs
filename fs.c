@@ -1235,40 +1235,35 @@ fsremove(Fmsg *m)
 	}
 
 	rlock(f->dent);
-	if((e = candelete(f)) != nil){
-		runlock(f->dent);
-		rerror(m, e);
-		clunkfid(f);
-		return;
-	}
+	if((e = candelete(f)) != nil)
+		goto Error;
 	if(fsaccess(f, f->dmode, f->duid, f->dgid, OWRITE) == -1){
-		rerror(m, Eperm);
-		runlock(f->dent);
-		return;
+		e = Eperm;
+		goto Error;
 	}
 	mb.op = Odelete;
 	mb.k = f->dent->k;
 	mb.nk = f->dent->nk;
 	mb.nv = 0;
-	if((e = btupsert(f->mnt->root, &mb, 1)) != nil){
-		runlock(f->dent);
-		rerror(m, e);
-		clunkfid(f);
-		return;
-	}
+	if((e = btupsert(f->mnt->root, &mb, 1)) != nil)
+		goto Error;
 	if(f->dent->qid.type == QTFILE){
-		if((e = clearb(f, 0, f->dent->length)) != nil){
-			runlock(f->dent);
-			rerror(m, e);
-			clunkfid(f);
-			return;
-		}
+		e = clearb(f, 0, f->dent->length);
+		if(e != nil)
+			goto Error;
 	}
-	runlock(f->dent);
 
+	clunkfid(f);
+	runlock(f->dent);
 	r.type = Rremove;
 	respond(m, &r);
+	return;
+
+Error:
 	clunkfid(f);
+	runlock(f->dent);
+	rerror(m, e);
+	return;
 }
 
 static void
@@ -1576,7 +1571,7 @@ fswrite(Fmsg *m)
 			for(j = 0; j < i; j++)
 				freebp(f->mnt->root, bp[i]);
 			wunlock(f->dent);
-			rerror(m, "%r");
+			fprint(2, "%r");
 			putfid(f);
 			abort();
 			return;

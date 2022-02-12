@@ -796,6 +796,7 @@ fswalk(Fmsg *m)
 	}
 	if(o->mode != -1){
 		rerror(m, Einuse);
+		putfid(o);
 		return;
 	}
 	e = nil;
@@ -856,7 +857,7 @@ fswalk(Fmsg *m)
 	if(i > 0){
 		dent = getdent(up, &d);
 		if(dent == nil){
-			if(m->fid != m->newfid)
+			if(f != o)
 				clunkfid(f);
 			rerror(m, Enomem);
 			putfid(f);
@@ -1094,13 +1095,15 @@ fscreate(Fmsg *m)
 	}
 	if(m->perm & (DMMOUNT|DMAUTH)){
 		rerror(m, "unknown permission");
+		putfid(f);
 		return;
 	}
 	de = f->dent;
 	rlock(de);
 	if(fsaccess(f, de->mode, de->uid, de->gid, DMWRITE) == -1){
-		rerror(m, Eperm);
 		runlock(de);
+		rerror(m, Eperm);
+		putfid(f);
 		return;
 	}
 	runlock(de);
@@ -1233,6 +1236,7 @@ fsremove(Fmsg *m)
 		rerror(m, Efid);
 		return;
 	}
+	clunkfid(f);
 
 	rlock(f->dent);
 	if((e = candelete(f)) != nil)
@@ -1253,17 +1257,16 @@ fsremove(Fmsg *m)
 			goto Error;
 	}
 
-	clunkfid(f);
 	runlock(f->dent);
 	r.type = Rremove;
 	respond(m, &r);
+	putfid(f);
 	return;
 
 Error:
-	clunkfid(f);
 	runlock(f->dent);
 	rerror(m, e);
-	return;
+	putfid(f);
 }
 
 static void
@@ -1337,6 +1340,7 @@ fsopen(Fmsg *m)
 		if((e = btupsert(f->mnt->root, &mb, 1)) != nil){
 			wunlock(f->dent);
 			rerror(m, e);
+			putfid(f);
 			return;
 		}
 		wunlock(f->dent);

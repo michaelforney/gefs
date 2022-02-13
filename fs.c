@@ -1255,7 +1255,7 @@ fsremove(Fmsg *m)
 	rlock(f->dent);
 	if((e = candelete(f)) != nil)
 		goto Error;
-	if(fsaccess(f, f->dmode, f->duid, f->dgid, OWRITE) == -1){
+	if(fsaccess(f, f->dmode, f->duid, f->dgid, DMWRITE) == -1){
 		e = Eperm;
 		goto Error;
 	}
@@ -1389,8 +1389,6 @@ readauth(Fmsg *m, Fid *f, Fcall *r)
 	case ARok:
 		if(m->count < rpc->narg)
 			return Eauthd;
-		if((r->data = malloc(rpc->narg)) == nil)
-			return Enomem;
 		memmove(r->data, rpc->arg, rpc->narg);
 		r->count = rpc->narg;
 		return nil;

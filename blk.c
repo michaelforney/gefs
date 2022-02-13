@@ -650,6 +650,7 @@ initblk(vlong bp, int t)
 	b->bp.addr = bp;
 	b->bp.hash = -1;
 	b->bp.gen = fs->nextgen;
+	b->qgen = fs->qgen;
 	b->data = b->buf + Hdrsz;
 	b->fnext = nil;
 
@@ -875,6 +876,7 @@ quiesce(int tid)
 	if(!allquiesced)
 		return;
 
+	inc64(&fs->qgen, 1);
 	lock(&fs->freelk);
 	p = nil;
 	if(fs->freep != nil){
@@ -895,8 +897,8 @@ quiesce(int tid)
 int
 blkcmp(Blk *a, Blk *b)
 {
-	if(a->bp.gen != b->bp.gen)
-		return (a->bp.gen < b->bp.gen) ? -1 : 1;
+	if(a->qgen != b->qgen)
+		return (a->qgen < b->qgen) ? -1 : 1;
 	if(a->bp.addr != b->bp.addr)
 		return (a->bp.addr < b->bp.addr) ? -1 : 1;
 	return 0;

@@ -369,21 +369,21 @@ clunkdent(Dent *de)
 	Dent *e, **pe;
 	u32int h;
 
-	if(adec(&de->ref) == 0){
-		h = ihash(de->qid.path) % Ndtab;
-		lock(&fs->dtablk);
-		pe = &fs->dtab[h];
-		for(e = fs->dtab[h]; e != nil; e = e->next){
-			if(e == de){
-				*pe = e->next;
-				unlock(&fs->dtablk);
-				free(de);
-				return;
-			}
-			pe = &e->next;
-		}
-		abort();
+	lock(&fs->dtablk);
+	if(adec(&de->ref) != 0)
+		goto Out;
+	h = ihash(de->qid.path) % Ndtab;
+	pe = &fs->dtab[h];
+	for(e = fs->dtab[h]; e != nil; e = e->next){
+		if(e == de)
+			break;
+		pe = &e->next;
 	}
+	assert(e != nil);
+	*pe = e->next;
+	free(de);
+Out:
+	unlock(&fs->dtablk);
 }
 
 void

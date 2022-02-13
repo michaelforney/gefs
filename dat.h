@@ -450,7 +450,7 @@ struct Gefs {
 	Chan	*wrchan;
 	Chan	*rdchan;
 	int	nquiesce;
-
+	vlong	qgen;
 	Lock	activelk;
 	int	active[32];
 	int	lastactive[32];
@@ -621,7 +621,7 @@ struct Blk {
 	Blk	*fnext;
 
 	long	flag;
-	long	syncgen;
+	long	qgen;
 
 	/* serialized to disk in header */
 	short	type;	/* @0, for all */

@@ -212,9 +212,9 @@ parseusers(int fd, char *udata)
 			if(m[0] == '\0')
 				continue;
 			u = nil;
-			for(i = 0; i < nusers; i++)
-				if(strcmp(users[i].name, m) == 0)
-					u = &users[i];
+			for(j = 0; j < nusers; j++)
+				if(strcmp(users[j].name, m) == 0)
+					u = &users[j];
 			if(u == nil){
 				fprint(fd, "/adm/users:%d: user %s does not exist\n", lnum, m);
 				err = Enouser;

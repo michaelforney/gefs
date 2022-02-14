@@ -47,27 +47,43 @@ snapfs(int fd, char *old, char *new)
 	Tree *t, *u;
 	char *e;
 
-	u = openlabel(new);
-	if((t = openlabel(old)) == nil){
+	if(strcmp(old, "-") == 0)
+		old = nil;
+	if(strcmp(new, "-") == 0)
+		new = nil;
+	if(old == nil && new == nil)
+		return;
+	t = old != nil ? openlabel(old) : opensnap(0);
+	if(t == nil){
 		fprint(fd, "snap: open %s: does not exist\n", old);
 		return;
 	}
-	if((e = labelsnap(new, t->gen)) != nil){
-		fprint(fd, "snap: label %s: %s\n", new, e);
-		return;
-	}
-	if(u != nil){
-		if((e = unrefsnap(u->gen, -1)) != nil){
-			fprint(fd, "snap: unref %s: %s\n", new, e);
+	if(new != nil){
+		u = openlabel(new);
+		if((e = labelsnap(new, t->gen)) != nil){
+			fprint(fd, "snap: label %s: %s\n", new, e);
+			return;
+		}
+		if(u != nil){
+			if((e = unrefsnap(u->gen, -1)) != nil){
+				fprint(fd, "snap: unref %s: %s\n", new, e);
+				return;
+			}
+			closesnap(u);
+		}
+	}else{
+		if((e = unlabelsnap(t->gen, old)) != nil){
+			fprint(fd, "snap: unlabel %s: %s\n", old, e);
 			return;
 		}
 	}
-	if(u != nil)
-		closesnap(u);
 	closesnap(t);
 	/* we probably want explicit snapshots to get synced */
 	sync();
-	fprint(fd, "snap taken: %s\n", new);
+	if(new != nil)
+		fprint(fd, "snap taken: %s\n", new);
+	else
+		fprint(fd, "snap deleted: %s\n", old);
 }
 
 static void

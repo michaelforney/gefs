@@ -291,7 +291,7 @@ showtree(int fd, char **ap, int na)
 	memset(&t, 0, sizeof(t));
 	if(na == 1)
 		name = ap[0];
-	if(strcmp(name, "dump") == 0)
+	if(strcmp(name, "snap") == 0)
 		t = &fs->snap;
 	else if((t = openlabel(name)) == nil){
 		fprint(fd, "open %s: %r\n", name);

@@ -563,7 +563,6 @@ struct Scanp {
 
 struct Scan {
 	vlong	offset;	/* last read offset */
-	Tree	root;
 
 	int	done;
 	int	overflow;
@@ -573,6 +572,7 @@ struct Scan {
 	char	kvbuf[Kvmax];
 	char	pfxbuf[Keymax];
 	Scanp	*path;
+	int	pathsz;
 };
 
 struct Blk {

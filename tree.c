@@ -1378,18 +1378,19 @@ btscan(Tree *t, Scan *s, char *pfx, int npfx)
 	cpkey(&s->kv, &s->pfx, s->kvbuf, sizeof(s->kvbuf));
 
 	lock(&t->lk);
-	s->root = *t;
+	s->pathsz = t->ht;
+	bp = t->bp;
 	unlock(&t->lk);
-	if((s->path = calloc(s->root.ht, sizeof(Scanp))) == nil){
+	if((s->path = calloc(s->pathsz, sizeof(Scanp))) == nil){
 		free(s);
 		return nil;
 	}
 
 	p = s->path;
-	if((b = getblk(s->root.bp, 0)) == nil)
+	if((b = getblk(bp, 0)) == nil)
 		return Eio;
 	p[0].b = b;
-	for(i = 0; i < s->root.ht; i++){
+	for(i = 0; i < s->pathsz; i++){
 		p[i].vi = blksearch(b, &s->kv, &v, &same);
 		if(b->type == Tpivot){
 			if(p[i].vi == -1)
@@ -1419,7 +1420,7 @@ btnext(Scan *s, Kvp *r, int *done)
 	/* load up the correct blocks for the scan */
 Again:
 	p = s->path;
-	h = s->root.ht;
+	h = s->pathsz;
 	*done = 0;
 	start = h;
 	srcbuf = -1;
@@ -1497,7 +1498,7 @@ btdone(Scan *s)
 {
 	int i;
 
-	for(i = 0; i < s->root.ht; i++)
+	for(i = 0; i < s->pathsz; i++)
 		putblk(s->path[i].b);
 	free(s->path);
 }

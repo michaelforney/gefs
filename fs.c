@@ -903,7 +903,7 @@ fsstat(Fmsg *m)
 		rerror(m, Efid);
 		return;
 	}
-	if((err = btlookup(f->mnt->root, f->dent, &kv, kvbuf, sizeof(kvbuf))) != nil){
+	if((err = lookup(f, f->dent, &kv, kvbuf, sizeof(kvbuf), 0)) != nil){
 		rerror(m, err);
 		putfid(f);
 		return;

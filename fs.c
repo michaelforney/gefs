@@ -208,10 +208,12 @@ lookup(Fid *f, Key *k, Kvp *kv, char *buf, int nbuf, int lk)
 		rlock(f->dent);
 	lock(f->mnt);
 	r = f->mnt->root;
+	ainc(&r->memref);
 	unlock(f->mnt);
 	e = btlookup(r, k, kv, buf, nbuf);
 	if(lk)
 		runlock(f->dent);
+	closesnap(r);
 	return e;
 }
 

@@ -374,8 +374,6 @@ Nextblk:
 			dropblk(b);
 			dprint("log@%d: chain %B\n", i, bp);
 			goto Nextblk;
-			break;
-
 		case LogAlloc:
 		case LogAlloc1:
 			len = (op >= Log2wide) ? UNPACK64(d+8) : Blksz;

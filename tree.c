@@ -467,7 +467,7 @@ updateleaf(Tree *t, Path *up, Path *p)
 		return -1;
 	while(i < b->nval){
 		ok = 1;
-		getval(p->b, i, &v);
+		getval(b, i, &v);
 		switch(pullmsg(up, j, &v, &m, &full, spc)){
 		case -1:
 			setval(n, &v);
@@ -1016,12 +1016,11 @@ flush(Tree *t, Path *path, int npath)
 	up = &path[npath - 2];
 	if(p->b->type == Tleaf){
 		if(!filledleaf(p->b, up->sz)){
-			if(updateleaf(t, p-1, p) == -1)
+			if(updateleaf(t, up, p) == -1)
 				goto Error;
 			enqueue(p->nl);
 			rp = p;
 		}else{
-
 			if(splitleaf(t, up, p, &mid) == -1)
 				goto Error;
 			enqueue(p->nl);
@@ -1218,7 +1217,7 @@ Again:
 	 * node in the path.
 	 */
 	npath = 0;
-	if((path = calloc((height + 2), sizeof(Path))) == nil)
+	if((path = calloc(height + 2, sizeof(Path))) == nil)
 		return Enomem;
 	path[npath].b = nil;
 	path[npath].idx = -1;
@@ -1263,7 +1262,6 @@ Again:
 		dh = -1;
 	else
 		abort();
-
 
 	assert(rb->bp.addr != 0);
 	assert(rb->bp.addr != 0);
@@ -1334,7 +1332,7 @@ btlookup(Tree *t, Key *k, Kvp *r, char *buf, int nbuf)
 		j = bufsearch(p[i], k, &m, &same);
 		if(j < 0 || !same)
 			continue;
-		if(!(ok || m.op == Oinsert)){
+		if(!ok && m.op != Oinsert){
 			fprint(2, "lookup %K << %M missing insert\n", k, &m);
 			for(int j = 0; j < h; j++){
 				print("busted %d\n",j);

@@ -265,7 +265,7 @@ Cmd cmdtab[] = {
 	{.name="show",	.sub="tree",	.minarg=0, .maxarg=1, .fn=showtree},
 	{.name="show",	.sub="users",	.minarg=0, .maxarg=0, .fn=showusers},
 	{.name="show",	.sub="blk",	.minarg=1, .maxarg=1, .fn=showblkdump},
-	{.name="debug",	.sub=nil,	.minarg=1, .maxarg=1, .fn=setdbg},
+	{.name="debug",	.sub=nil,	.minarg=0, .maxarg=1, .fn=setdbg},
 
 	{.name=nil, .sub=nil},
 };

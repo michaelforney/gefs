@@ -314,15 +314,27 @@ unlabelsnap(vlong gen, char *name)
 char*
 refsnap(vlong id)
 {
+	Msg m;
 	Tree *t;
-	char *e;
+	char *p, buf[Snapsz];
 
-	t = opensnap(id);
-	t->ref++;
-	if((e = modifysnap(Oinsert, t)) != nil)
-		return e;
-	closesnap(t);
-	return nil;
+	qlock(&fs->snaplk);
+	for(t = fs->opensnap; t != nil; t = t->snext){
+		if(t->gen == id){
+			t->ref++;
+			break;
+		}
+	}
+	qunlock(&fs->snaplk);
+
+	m.op = Orefsnap;
+	if((p = packsnap(buf, sizeof(buf), id)) == nil)
+		return Elength;
+	m.k = buf;
+	m.nk = p - buf;
+	m.v = nil;
+	m.nv = 0;
+	return btupsert(&fs->snap, &m, 1);
 }
 
 char*

@@ -398,6 +398,8 @@ statupdate(Kvp *kv, Msg *m)
 static int
 apply(Kvp *kv, Msg *m, char *buf, int nbuf)
 {
+	int ref;
+
 	switch(m->op){
 	case Oclearb:
 	case Odelete:
@@ -409,6 +411,12 @@ apply(Kvp *kv, Msg *m, char *buf, int nbuf)
 	case Owstat:
 		assert(keycmp(kv, m) == 0);
 		statupdate(kv, m);
+		return 1;
+	case Orefsnap:
+		assert(keycmp(kv, m) == 0);
+		assert(kv->nv >= Treesz);
+		ref = GBIT32(kv->v);
+		PBIT32(kv->v, ref+1);
 		return 1;
 	default:
 		abort();

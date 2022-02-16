@@ -247,6 +247,7 @@ enum {
 	Odelete,	/* delete kvp */
 	Oclearb,	/* free block ptr if exists */
 	Owstat,		/* kvp dirent */
+	Orefsnap,	/* increase snap ref count */
 	Nmsgtype,	/* maximum message type */
 };
 

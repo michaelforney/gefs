@@ -163,6 +163,7 @@ Mconv(Fmt *fmt)
 	[Odelete]	"Odelete",
 	[Oclearb]	"Oclearb",
 	[Owstat]	"Owstat",
+	[Orefsnap]	"Orefsnap",
 	};
 	Msg *m;
 	int f, n;

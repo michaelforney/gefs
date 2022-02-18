@@ -1154,6 +1154,7 @@ fastupsert(Tree *t, Blk *b, Msg *msg, int nmsg)
 	}
 	lock(&t->lk);
 	t->bp = r->bp;
+	t->dirty = 1;
 	unlock(&t->lk);
 
 	freeblk(t, b);

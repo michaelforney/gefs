@@ -486,7 +486,9 @@ updateleaf(Tree *t, Path *up, Path *p)
 			 * new values must always start as
 			 * an insertion, mutations come after.
 			 */
-			if(m.op != Oinsert){
+			if(m.op == Oclearb)
+				ok = 0;
+			else if(m.op != Oinsert){
 				print("%d(/%d), %d: %M not insert\n", i, b->nval, j, &m);
 				abort();
 			}
@@ -520,6 +522,8 @@ updateleaf(Tree *t, Path *up, Path *p)
 		ok = 1;
 		cpkvp(&v, &m, buf, sizeof(buf));
 		p->pullsz += msgsz(&m);
+		if(m.op == Oclearb)
+			continue;
 		if(m.op != Oinsert){
 			print("%d(/%d), %d: %M not insert\n", i, b->nval, j, &m);
 			showblk(2, up->b, "parent", 0);
@@ -680,7 +684,9 @@ splitleaf(Tree *t, Path *up, Path *p, Kvp *mid)
 			 * new values must always start as
 			 * an insertion, mutations come after.
 			 */
-			if(m.op != Oinsert){
+			if(m.op == Oclearb)
+				ok = 0;
+			else if(m.op != Oinsert){
 				print("%d(/%d), %d: %M not insert\n", i, b->nval, j, &m);
 				abort();
 			}

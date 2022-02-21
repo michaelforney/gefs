@@ -20,7 +20,7 @@ mergeinfo(Gefs *fs, Fshdr *fi)
 		sysfatal("parameter mismatch");
 	if(fs->gotinfo && fs->narena != fi->narena)
 		sysfatal("arena count mismatch");
-	if(fs->gotinfo && fi->snap.gen < fs->snap.gen)
+	if(fs->gotinfo && fi->nextgen != fs->nextgen)
 		fprint(2, "not all arenas synced: rolling back\n");
 	fs->Fshdr = *fi;
 }

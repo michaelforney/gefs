@@ -64,7 +64,7 @@ initsnap(Blk *s, Blk *r)
 	memset(&t, 0, sizeof(Tree));
 	t.ref = 2;
 	t.ht = 1;
-	t.gen = 0;
+	t.gen = fs->nextgen++;
 	t.bp = r->bp;
 	for(i = 0; i < Ndead; i++){
 		t.dead[i].prev = -1;

@@ -389,7 +389,7 @@ newsnap(Tree *t)
 	Tree *r;
 	int i;
 
-	if(modifysnap(Oinsert, t) != nil)
+	if(t->dirty && modifysnap(Oinsert, t) != nil)
 		return nil;
 
 	if((r = calloc(sizeof(Tree), 1)) == nil)

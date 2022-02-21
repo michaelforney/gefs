@@ -698,6 +698,7 @@ fsattach(Fmsg *m, int iounit)
 	Kvp kv;
 	Key dk;
 	Fid f;
+	Tree *t;
 
 	if((mnt = mallocz(sizeof(Mount), 1)) == nil){
 		rerror(m, Enomem);
@@ -718,10 +719,15 @@ fsattach(Fmsg *m, int iounit)
 	}
 	runlock(&fs->userlk);
 
-	if((mnt->root = openlabel(m->aname)) == nil){
+	if((t = openlabel(m->aname)) == nil){
 		rerror(m, Enosnap);
 		return;
 	}
+	if((mnt->root = newsnap(t)) == nil){
+		rerror(m, Enomem);
+		return;
+	}
+	closesnap(t);
 
 	if((p = packdkey(dbuf, sizeof(dbuf), -1ULL, "")) == nil){
 		rerror(m, Elength);

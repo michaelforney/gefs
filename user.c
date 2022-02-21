@@ -14,10 +14,10 @@ char *defaultusers =
 	"0:none::\n"
 	"1:tor:tor:\n"
 	"2:glenda:glenda:\n"
-	"10000:sys::\n"
+	"10000:sys::glenda\n"
 	"10001:map:map:\n"
 	"10002:doc::\n"
-	"10003:upas:upas:\n"
+	"10003:upas:upas:glenda\n"
 	"10004:font::\n"
 	"10005:bootes:bootes:\n";
 

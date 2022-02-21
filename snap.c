@@ -78,8 +78,10 @@ dlinsert(Dlist *dl, vlong v1, vlong v2)
 	char *p;
 
 	lb = dl->ins;
+	/*
 	if(lb == nil && dl->head.addr != -1)
 		lb = getblk(dl->head, 0);
+	*/
 	/*
 	 * move to the next block when we have
 	 * 32 bytes in the log:

@@ -367,22 +367,31 @@ redeadlist(Bptr bp, void *pt)
 char*
 freesnap(Tree *snap, Tree *next)
 {
-	Dlist dl;
-	int i;
+	int i, j;
 
 	assert(snap->gen != next->gen);
 	assert(next->dead[0].prev == snap->gen);
 
-	dl = next->dead[Ndead-1];
-	scandead(&next->dead[0], 1, freedead, nil);
-	for(i = 0; i < Ndead-2; i++){
-		if(graft(&snap->dead[i], &next->dead[i+1]) == -1)
-			return Efs;
-		next->dead[i] = snap->dead[i];
+	/* free blocks born after snap's prev and killed in next */
+	for(i = 0; i < Ndead-1; i++){
+		if(next->dead[i].prev <= snap->dead[0].prev)
+			break;
+		scandead(&next->dead[i], 1, freedead, nil);
 	}
-	for(; i < Ndead; i++)
-		next->dead[i] = snap->dead[i];
-	scandead(&dl, 0, redeadlist, next);
+
+	for(j = 0; j < Ndead; j++){
+		next->dead[j] = snap->dead[j];
+		if(next->dead[j].prev == -1)
+			continue;
+		for(; i < Ndead; i++){
+			if(next->dead[i].prev < next->dead[j].prev)
+				break;
+			if(i == Ndead-1 && next->dead[i].prev > next->dead[j].prev)
+				scandead(&next->dead[i], 0, redeadlist, next);
+			else if(graft(&next->dead[j], &next->dead[i]) == -1)
+				return Efs;
+		}
+	}
 
 	return nil;
 }

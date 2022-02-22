@@ -1152,13 +1152,13 @@ fastupsert(Tree *t, Blk *b, Msg *msg, int nmsg)
 		memmove(p+2, p, 2*(nbuf+i-ri));
 		PBIT16(p, o);
 	}
+	enqueue(r);
 	lock(&t->lk);
 	t->bp = r->bp;
 	t->dirty = 1;
 	unlock(&t->lk);
 
 	freeblk(t, b);
-	enqueue(r);
 	putblk(b);
 	putblk(r);
 	return nil;

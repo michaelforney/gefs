@@ -304,8 +304,8 @@ runcons(int tid, void *pfd)
 			break;
 		}
 		if(c->name == nil){
-			fprint(fd, "unknown command '");
-			for(i = 0; i < nf; i++)
+			fprint(fd, "unknown command '%s", f[0]);
+			for(i = 1; i < nf; i++)
 				fprint(fd, " %s", f[i]);
 			fprint(fd, "'\n");
 		}

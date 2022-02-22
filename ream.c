@@ -49,19 +49,17 @@ initsnap(Blk *s, Blk *r)
 	Kvp kv;
 	int i;
 
-
+	p = packlabel(kbuf, sizeof(kbuf), "main");
 	kv.k = kbuf;
+	kv.nk = p - kbuf;
+	p = packsnap(vbuf, sizeof(vbuf), 0);
 	kv.v = vbuf;
-	kv.k[0] = Klabel;
-	kv.nk = 1 + snprint(kv.k+1, sizeof(kbuf)-1, "main");
-	kv.v[0] = Ksnap;
-	PBIT64(kv.v+1, 0);
-	kv.nv = Snapsz;
+	kv.nv = p - vbuf;
 	setval(s, &kv);
 
-	kv.k[0] = Ksnap;
-	PBIT64(kv.k+1, 0);
-	kv.nk = Snapsz;
+	p = packsnap(kbuf, sizeof(kbuf), 0);
+	kv.k = kbuf;
+	kv.nk = p - kbuf;
 
 	memset(&t, 0, sizeof(Tree));
 	t.ref = 2;

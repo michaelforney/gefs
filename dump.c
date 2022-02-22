@@ -301,6 +301,8 @@ showtree(int fd, char **ap, int na)
 	fprint(fd, "=== [%s] %B @%d\n", name, t->bp, t->ht);
 	rshowblk(fd, b, 0, 1);
 	putblk(b);
+	if(t != &fs->snap)
+		closesnap(t);
 }
 
 void

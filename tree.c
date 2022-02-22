@@ -969,8 +969,8 @@ Out:
 	return ret;
 }
 
-static Blk*
-flush(Tree *t, Path *path, int npath, int *redo)
+static Path*
+flush(Tree *t, Path *path, int npath)
 {
 
 	Path *up, *p, *pp, *rp;
@@ -987,7 +987,6 @@ flush(Tree *t, Path *path, int npath, int *redo)
 	pp = nil;
 	p = &path[npath - 1];
 	up = &path[npath - 2];
-	*redo = 0;
 	if(p->b->type == Tleaf){
 		if(!filledleaf(p->b, up->sz)){
 			if(updateleaf(t, p-1, p) == -1)
@@ -1040,8 +1039,7 @@ flush(Tree *t, Path *path, int npath, int *redo)
 		enqueue(rp->nl);
 	}
 Out:
-	*redo = (rp->npull != (path[0].hi - path[0].lo));
-	return rp->nl;
+	return rp;
 Error:
 	return nil;
 }
@@ -1168,8 +1166,8 @@ fastupsert(Tree *t, Blk *b, Msg *msg, int nmsg)
 char*
 btupsert(Tree *t, Msg *msg, int nmsg)
 {
-	int i, npath, redo, dh, sz, height;
-	Path *path;
+	int i, npath, npull, dh, sz, height;
+	Path *path, *rp;
 	Blk *b, *rb;
 	Kvp sep;
 	Bptr bp;
@@ -1178,6 +1176,7 @@ btupsert(Tree *t, Msg *msg, int nmsg)
 	stablesort(msg, nmsg);
 	for(i = 0; i < nmsg; i++)
 		sz += msgsz(&msg[i]);
+	npull = 0;
 
 Again:
 	if((b = getroot(t, &height)) == nil)
@@ -1190,7 +1189,6 @@ Again:
 	 * split, so we allocate room for one extra
 	 * node in the path.
 	 */
-	redo = 0;
 	npath = 0;
 	if((path = calloc((height + 2), sizeof(Path))) == nil)
 		return Enomem;
@@ -1201,7 +1199,7 @@ Again:
 
 	path[0].sz = sz;
 	path[0].ins = msg;
-	path[0].lo = 0;
+	path[0].lo = npull;
 	path[0].hi = nmsg;
 	while(b->type == Tpivot){
 		if(!filledbuf(b, nmsg, path[npath - 1].sz))
@@ -1224,9 +1222,10 @@ Again:
 	npath++;
 
 	dh = -1;
-	rb = flush(t, path, npath, &redo);
-	if(rb == nil)
+	rp = flush(t, path, npath);
+	if(rp == nil)
 		goto Error;
+	rb = rp->nl;
 
 	if(path[0].nl != nil)
 		dh = 1;
@@ -1244,8 +1243,9 @@ Again:
 	t->bp = rb->bp;
 	t->dirty = 1;
 	unlock(&t->lk);
+	npull += rp->npull;
 	freepath(t, path, npath);
-	if(redo)
+	if(npull != nmsg)
 		goto Again;
 	return 0;
 Error:

@@ -103,7 +103,7 @@ refreshusers(int fd, char **ap, int na)
 
 	l = (na == 0) ? "main" : ap[0];
 	if((t = openlabel(l)) == nil){
-		fprint(fd, "load users: no label %s", l);
+		fprint(fd, "load users: no label %s\n", l);
 		return;
 	}
 	e = loadusers(fd, t);

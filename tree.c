@@ -368,7 +368,7 @@ statupdate(Kvp *kv, Msg *m)
 		abort();
 	}
 	if(packdval(kv->v, kv->nv, &d) == nil){
-		fprint(2, "repacking dir failed");
+		fprint(2, "repacking dir failed\n");
 		abort();
 	}
 }

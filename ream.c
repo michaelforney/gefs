@@ -83,49 +83,47 @@ initarena(Arena *a, Fshdr *fi, vlong start, vlong asz)
 {
 	vlong addr, bo, bh;
 	char *p;
-	Blk *b;
+	Blk b;
 
-	if((b = mallocz(sizeof(Blk), 1)) == nil)
-		sysfatal("ream: %r");
 	addr = start+Blksz;	/* arena header */
 
 	a->head.addr = -1;
 	a->head.hash = -1;
 	a->head.gen = -1;
 
-	memset(b, 0, sizeof(Blk));
-	b->type = Tlog;
-	b->bp.addr = addr;
-	b->logsz = 32;
-	b->data = b->buf + _Loghdsz;
-	b->flag |= Bdirty;
+	memset(&b, 0, sizeof(Blk));
+	b.type = Tlog;
+	b.bp.addr = addr;
+	b.logsz = 32;
+	b.data = b.buf + _Loghdsz;
+	b.flag |= Bdirty;
 
-	p = b->data + Loghashsz;
+	p = b.data + Loghashsz;
 	PBIT64(p, addr|LogFree);	p += 8;	/* addr */
 	PBIT64(p, asz-Blksz);		p += 8;	/* len */
-	PBIT64(p, b->bp.addr|LogAlloc);	p += 8;	/* addr */
+	PBIT64(p, b.bp.addr|LogAlloc);	p += 8;	/* addr */
 	PBIT64(p, Blksz);		p += 8;	/* len */
 	PBIT64(p, (uvlong)LogEnd);	/* done */
-	finalize(b);
-	if(syncblk(b) == -1)
+	finalize(&b);
+	if(syncblk(&b) == -1)
 		sysfatal("ream: init log");
 
-	bh = b->bp.hash;
-	bo = b->bp.addr;
+	bh = b.bp.hash;
+	bo = b.bp.addr;
 
-	memset(b, 0, sizeof(Blk));
-	b->type = Tarena;
-	b->bp.addr = start;
-	b->data = b->buf;
+	memset(&b, 0, sizeof(Blk));
+	b.type = Tarena;
+	b.bp.addr = start;
+	b.data = b.buf;
 	a->head.addr = bo;
 	a->head.hash = bh;
 	a->head.gen = -1;
 	a->size = asz;
 	a->used = Blksz;
 	a->tail = nil;
-	packarena(b->data, Blksz, a, fi);
-	finalize(b);
-	if(syncblk(b) == -1)
+	packarena(b.data, Blksz, a, fi);
+	finalize(&b);
+	if(syncblk(&b) == -1)
 		sysfatal("ream: write arena: %r");
 }
 

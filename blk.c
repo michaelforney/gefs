@@ -919,21 +919,17 @@ enqueue(Blk *b)
 static void
 qput(Flushq *q, Blk *b)
 {
-	Blk *t;
 	int i;
 
 	if(q->nheap == q->heapsz)
 		abort();
-	q->heap[q->nheap] = b;
 	for(i = q->nheap; i > 0; i = (i-1)/2){
-		if(blkcmp(q->heap[i], q->heap[(i-1)/2]) == 1)
+		if(blkcmp(b, q->heap[(i-1)/2]) == 1)
 			break;
-		t = q->heap[i];
 		q->heap[i] = q->heap[(i-1)/2];
-		q->heap[(i-1)/2] = t;
 	}
+	q->heap[i] = b;
 	q->nheap++;
-
 }
 
 static Blk*

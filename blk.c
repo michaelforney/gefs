@@ -926,7 +926,7 @@ qput(Flushq *q, Blk *b)
 		abort();
 	q->heap[q->nheap] = b;
 	for(i = q->nheap; i > 0; i = (i-1)/2){
-		if(blkcmp(q->heap[i], q->heap[(i-1)/2]) == -1)
+		if(blkcmp(q->heap[i], q->heap[(i-1)/2]) == 1)
 			break;
 		t = q->heap[i];
 		q->heap[i] = q->heap[(i-1)/2];
@@ -954,9 +954,9 @@ qpop(Flushq *q)
 		m = i;
 		l = 2*i+1;
 		r = 2*i+2;
-		if(l < q->nheap && blkcmp(q->heap[m], q->heap[l]) == -1)
+		if(l < q->nheap && blkcmp(q->heap[m], q->heap[l]) == 1)
 			m = l;
-		if(r < q->nheap && blkcmp(q->heap[m], q->heap[r]) == -1)
+		if(r < q->nheap && blkcmp(q->heap[m], q->heap[r]) == 1)
 			m = r;
 		if(m == i)
 			break;

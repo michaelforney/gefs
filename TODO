@@ -1,11 +1,20 @@
+*** pending disk format changes ***
+- deadlists in snap tree, rather than tree blob
+- hashes stored out-of-line
+- remove generic header from blocks, type header
+  for arenas should start with 'ge', type header
+  for other blocks should be some other mnemonic
+- packarena should have next gen
+- small file optimizations
+	- inline data
+	- block fragmentation
+
 *** major issues, need to fix ***
 - live alloc log recompression
 - Reserve blocks for deletion
+- reclaiming data from deleted files is very delayed
 - transient exec snapshots
 - testing, debugging, bugfixes
-- basic performance optimization
-	- reduce io ops per update
-	- async page writeback: currently, every write to device is sync.
 
 *** nice to have, can go without ***
 - add missing management commands in console
@@ -13,6 +22,3 @@
 	- bulk block frees
 	- background block frees
 	- root block reuse
-- small file optimizations
-	- inline data
-	- block fragmentation

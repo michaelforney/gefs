@@ -250,25 +250,48 @@ rshowblk(int fd, Blk *b, int indent, int recurse)
 		return;
 	}
 	fprint(fd, "%.*s[BLK]|{%B}\n", 4*indent, spc, b->bp);
-	if(b->type == Tpivot){
+	switch(b->type){
+	case Tpivot:
 		for(i = 0; i < b->nbuf; i++){
 			getmsg(b, i, &m);
 			fprint(fd, "%.*s[%03d]|%M\n", 4*indent, spc, i, &m);
 		}
-	}
-	for(i = 0; i < b->nval; i++){
-		getval(b, i, &kv);
-		if(b->type == Tpivot){
-			fprint(fd, "%.*s[%03d]|%#P\n", 4*indent, spc, i, &kv);
-			bp = unpackbp(kv.v, kv.nv);
-			if((c = getblk(bp, 0)) == nil)
-				sysfatal("failed load: %r");
-			if(recurse)
-				rshowblk(fd, c, indent + 1, 1);
-			putblk(c);
-		}else{
-			fprint(fd, "%.*s[%03d]|%P\n", 4*indent, spc, i, &kv);
+		/* wet floor */
+	case Tleaf:
+		for(i = 0; i < b->nval; i++){
+			getval(b, i, &kv);
+			if(b->type == Tpivot){
+				fprint(fd, "%.*s[%03d]|%#P\n", 4*indent, spc, i, &kv);
+				bp = unpackbp(kv.v, kv.nv);
+				if((c = getblk(bp, 0)) == nil)
+					sysfatal("failed load: %r");
+				if(recurse)
+					rshowblk(fd, c, indent + 1, 1);
+				putblk(c);
+			}else{
+				fprint(fd, "%.*s[%03d]|%P\n", 4*indent, spc, i, &kv);
+			}
 		}
+		break;
+	case Tarena:
+		fprint(fd, "arena -- ");
+		goto Show;
+	case Tlog:
+		fprint(fd, "log -- ");
+		goto Show;
+	case Tdead:
+		fprint(fd, "dead -- ");
+		goto Show;
+	case Traw:
+		fprint(fd, "raw -- ");
+	Show:
+		for(i = 0; i < 32; i++){
+			fprint(fd, "%x", b->buf[i] & 0xff);
+			if(i % 4 == 0)
+				fprint(fd, " ");
+		}
+		fprint(fd, "\n");
+		break;
 	}
 }
 

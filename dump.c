@@ -287,7 +287,7 @@ rshowblk(int fd, Blk *b, int indent, int recurse)
 	Show:
 		for(i = 0; i < 32; i++){
 			fprint(fd, "%x", b->buf[i] & 0xff);
-			if(i % 4 == 0)
+			if(i % 4 == 3)
 				fprint(fd, " ");
 		}
 		fprint(fd, "\n");

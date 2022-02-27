@@ -465,6 +465,8 @@ updateleaf(Tree *t, Path *up, Path *p)
 			goto Copy;
 		case 0:
 			i++;
+			if(m.op != Oinsert)
+				cpkvp(&v, &v, buf, sizeof(buf));
 			while(j < up->hi){
 				if(m.op == Oclearb){
 					bp = unpackbp(v.v, v.nv);
@@ -657,6 +659,8 @@ splitleaf(Tree *t, Path *up, Path *p, Kvp *mid)
 			goto Copy;
 		case 0:
 			i++;
+			if(m.op != Oinsert)
+				cpkvp(&v, &v, buf, sizeof(buf));
 			while(j < up->hi){
 				ok = apply(&v, &m, buf, sizeof(buf));
 		Copy:

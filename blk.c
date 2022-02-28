@@ -857,10 +857,10 @@ reclaimblk(Bptr bp)
 {
 	Arena *a;
 
+	cachedel(bp.addr);
 	a = getarena(bp.addr);
 	lock(a);
 	blkdealloc_lk(bp.addr);
-	cachedel(bp.addr);
 	unlock(a);
 }
 

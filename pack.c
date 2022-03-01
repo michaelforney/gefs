@@ -159,7 +159,8 @@ packdkey(char *p, int sz, vlong up, char *name)
 	ep = p + sz;
 	p = pack8(&err, p, ep, Kent);
 	p = pack64(&err, p, ep, up);
-	p = packstr(&err, p, ep, name);
+	if(name != nil)
+		p = packstr(&err, p, ep, name);
 	if(err)
 		return nil;
 	return p;

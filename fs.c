@@ -1214,8 +1214,7 @@ candelete(Fid *f)
 	if((s = mallocz(sizeof(Scan), 1)) == nil)
 		return Enomem;
 
-	pfx[0] = Kent;
-	PBIT64(pfx+1, f->qpath);
+	packdkey(pfx, sizeof(pfx), f->qpath, nil);
 	if((e = btscan(f->mnt->root, s, pfx, sizeof(pfx))) != nil)
 		goto Out;
 	done = 0;
@@ -1403,8 +1402,7 @@ readdir(Fmsg *m, Fid *f, Fcall *r)
 		if((s = mallocz(sizeof(Scan), 1)) == nil)
 			return Enomem;
 
-		pfx[0] = Kent;
-		PBIT64(pfx+1, f->qpath);
+		packdkey(pfx, sizeof(pfx), f->qpath, nil);
 		if((e = btscan(f->mnt->root, s, pfx, sizeof(pfx))) != nil){
 			btdone(s);
 			free(s);

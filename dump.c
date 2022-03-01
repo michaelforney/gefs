@@ -83,7 +83,7 @@ showval(Fmt *fmt, Kvp *v, int op, int flg)
 			if(kv2dir(v, &d) == -1)
 				n = fmtprint(fmt, "bad dir");
 			else
-				n = fmtprint(fmt, "[qid=(%lld,%lud,%d), %o, t=%lld,%lld, l=%lld]",
+				n = fmtprint(fmt, "[qid=(%llux,%lud,%d), %o, t=%lld,%lld, l=%lld]",
 					d.qid.path, d.qid.vers, d.qid.type,
 					d.mode, d.atime, d.mtime, d.length);
 			break;

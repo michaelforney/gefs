@@ -182,12 +182,14 @@ showent(int fd, char **ap, int)
 	Tree *t;
 	Kvp kv;
 	Key k;
+	vlong pqid;
 
 	if((t = openlabel("main")) == nil){
 		fprint(fd, "could not open main snap\n");
 		return;
 	}
-	if((p = packdkey(kbuf, sizeof(kbuf), atoll(ap[0]), ap[1])) == nil){
+	pqid = strtoll(ap[0], nil, 16);
+	if((p = packdkey(kbuf, sizeof(kbuf), pqid, ap[1])) == nil){
 		fprint(fd, "could not pack key\n");
 		return;
 	}

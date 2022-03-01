@@ -870,7 +870,7 @@ fswalk(Fmsg *m)
 		}
 		putfid(o);
 	}
-	if(i > 0){
+	if(i > 0 && i == m->nwname){
 		dent = getdent(up, &d);
 		if(dent == nil){
 			if(f != o)
@@ -879,14 +879,12 @@ fswalk(Fmsg *m)
 			putfid(f);
 			return;
 		}
-		if(i == m->nwname){
-			f->qpath = r.wqid[i-1].path;
-			f->pqpath = up;
-			f->dent = dent;
-			f->duid = duid;
-			f->dgid = dgid;
-			f->dmode = dmode;
-		}
+		f->qpath = r.wqid[i-1].path;
+		f->pqpath = up;
+		f->dent = dent;
+		f->duid = duid;
+		f->dgid = dgid;
+		f->dmode = dmode;
 	}
 	respond(m, &r);
 	putfid(f);

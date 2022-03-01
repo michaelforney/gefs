@@ -923,16 +923,14 @@ fsstat(Fmsg *m)
 static void
 fswstat(Fmsg *m)
 {
-	char *p, *e, strs[65535], rnbuf[Kvmax], opbuf[Kvmax], kvbuf[Kvmax];
+	char *p, *e, strs[65535], rnbuf[Kvmax], opbuf[Kvmax];
 	int op, nm, sync, rename;
-	vlong up;
 	Fcall r;
 	Dent *de;
 	Msg mb[3];
 	Xdir o;
 	Dir d;
 	Fid *f;
-	Kvp kv;
 	Key k;
 
 	nm = 0;
@@ -987,18 +985,10 @@ fswstat(Fmsg *m)
 		mb[nm].v = nil;
 		mb[nm].nv = 0;
 		nm++;
-		if((e = btlookup(f->mnt->root, de, &kv, kvbuf, sizeof(kvbuf))) != nil){
-			rerror(m, e);
-			goto Out;
-		}
-		if(kv2dir(&kv, &o) == -1){
-			rerror(m, "stat: %r");
-			goto Out;
-		}
+		o = de->Xdir;
 		o.name = d.name;
 		mb[nm].op = Oinsert;
-		up = GBIT64(f->dent->k+1);
-		if(dir2kv(up, &o, &mb[nm], rnbuf, sizeof(rnbuf)) == -1){
+		if(dir2kv(f->pqpath, &o, &mb[nm], rnbuf, sizeof(rnbuf)) == -1){
 			rerror(m, Efs);
 			goto Out;
 		}
@@ -1190,6 +1180,7 @@ fscreate(Fmsg *m)
 		return;
 	}
 	f->mode = mode2bits(m->mode);
+	f->pqpath = f->qpath;
 	f->qpath = d.qid.path;
 	f->dent = de;
 	wlock(de);

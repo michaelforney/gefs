@@ -176,29 +176,52 @@ showdf(int fd, char**, int)
 }
 
 static void
-showent(int fd, char **ap, int)
+showent(int fd, char **ap, int na)
 {
-	char *e, *p, kbuf[Keymax], kvbuf[Kvmax];
+	char *e, *p, *name, kbuf[Keymax], kvbuf[Kvmax];
 	Tree *t;
 	Kvp kv;
 	Key k;
 	vlong pqid;
+	Scan s;
+	int done;
 
 	if((t = openlabel("main")) == nil){
 		fprint(fd, "could not open main snap\n");
 		return;
 	}
 	pqid = strtoll(ap[0], nil, 16);
-	if((p = packdkey(kbuf, sizeof(kbuf), pqid, ap[1])) == nil){
+	name = na == 2 ? ap[1] : nil;
+	if((p = packdkey(kbuf, sizeof(kbuf), pqid, name)) == nil){
 		fprint(fd, "could not pack key\n");
-		return;
+		goto Out;
 	}
 	k.k = kbuf;
 	k.nk = p - kbuf;
-	if((e = btlookup(t, &k, &kv, kvbuf, sizeof(kvbuf))) != nil)
-		fprint(fd, "not found: %s\n", e);
-	else
+	if(name != nil){
+		if((e = btlookup(t, &k, &kv, kvbuf, sizeof(kvbuf))) != nil){
+			fprint(fd, "lookup failed: %s\n", e);
+			goto Out;
+		}
 		fprint(fd, "%P\n", &kv);
+	}else{
+		if((e = btscan(t, &s, k.k, k.nk)) != nil){
+			fprint(fd, "scan failed: %s\n", e);
+			goto Out;
+		}
+		while(1){
+			if((e = btnext(&s, &kv, &done)) != nil){
+				fprint(fd, "scan failed: %s\n", e);
+				btdone(&s);
+				goto Out;
+			}
+			if(done)
+				break;
+			fprint(fd, "%P\n", &kv);
+		}
+		btdone(&s);
+	}
+Out:
 	closesnap(t);
 }
 
@@ -232,7 +255,7 @@ help(int fd, char**, int)
 		"	are supported:\n"
 		"	cache\n"
 		"		the contents of the in-memory cache\n"
-		"	ent pqid name\n"
+		"	ent pqid [name]\n"
 		"		the contents of a directory entry\n"
 		"	tree [name]\n"
 		"		the contents of the tree associated with a\n"
@@ -260,7 +283,7 @@ Cmd cmdtab[] = {
 
 	/* debugging */
 	{.name="show",	.sub="cache",	.minarg=0, .maxarg=0, .fn=showcache},
-	{.name="show",	.sub="ent",	.minarg=2, .maxarg=2, .fn=showent},
+	{.name="show",	.sub="ent",	.minarg=1, .maxarg=2, .fn=showent},
 	{.name="show",	.sub="fid",	.minarg=0, .maxarg=0, .fn=showfid},
 	{.name="show",	.sub="free",	.minarg=0, .maxarg=0, .fn=showfree},
 	{.name="show",	.sub="snap",	.minarg=0, .maxarg=1, .fn=showsnap},

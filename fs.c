@@ -942,8 +942,8 @@ fswstat(Fmsg *m)
 	de = f->dent;
 	k = f->dent->Key;
 	wlock(de);
-	if(f->dent->qid.type != QTDIR && f->dent->qid.type != QTFILE){
-		rerror(m, Efid);
+	if(f->dent->qid.type & QTAUTH){
+		rerror(m, Emode);
 		goto Out;
 	}
 	if(convM2D(m->stat, m->nstat, &d, strs) <= BIT16SZ){

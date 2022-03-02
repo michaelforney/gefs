@@ -1124,6 +1124,10 @@ fscreate(Fmsg *m)
 	d.qid.path = inc64(&fs->nextqid, 1);
 	d.qid.vers = 0;
 	d.mode = m->perm;
+	if(m->perm & DMDIR)
+		d.mode &= ~0777 | de->mode & 0777;
+	else
+		d.mode &= ~0666 | de->mode & 0666;
 	d.name = m->name;
 	d.atime = nsec();
 	d.mtime = d.atime;

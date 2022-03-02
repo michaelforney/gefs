@@ -10,7 +10,6 @@
 
 static char*	clearb(Fid*, vlong, vlong);
 
-// FIXME: hack. We sync way too often.
 static char*
 updatemount(Mount *mnt)
 {

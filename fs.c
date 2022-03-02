@@ -1609,6 +1609,10 @@ fswrite(Fmsg *m)
 		p += 8;
 		f->dent->length = m->offset+m->count;
 	}
+	sbuf[0] |= Owmtime;
+	f->dent->mtime = nsec();
+	PBIT64(p, f->dent->mtime);
+	p += 8;
 	sbuf[0] |= Owmuid;
 	PBIT32(p, f->uid);
 	p += 4;

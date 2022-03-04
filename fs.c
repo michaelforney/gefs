@@ -703,6 +703,8 @@ fsattach(Fmsg *m, int iounit)
 		rerror(m, Enomem);
 		return;
 	}
+	if(m->aname[0] == '\0')
+		m->aname = "main";
 	if((mnt->name = strdup(m->aname)) == nil){
 		rerror(m, Enomem);
 		return;

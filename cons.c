@@ -230,7 +230,7 @@ showblkdump(int fd, char **ap, int)
 {
 	Bptr bp;
 
-	bp.addr = atoll(ap[0]);
+	bp.addr = strtoll(ap[0], nil, 16);
 	bp.hash = -1;
 	bp.gen = -1;
 	showbp(fd, bp, 0);

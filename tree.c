@@ -6,6 +6,27 @@
 #include "dat.h"
 #include "fns.h"
 
+typedef struct Path	Path;
+
+struct Path {
+	/* Flowing down for flush */
+	Msg	*ins;	/* inserted values, bounded by lo..hi */
+	Blk	*b;	/* to shadow */
+	int	idx;	/* insert at */
+	int	lo;	/* key range */
+	int	hi;	/* key range */
+	int	sz;	/* size of range */
+
+	/* Flowing up from flush */
+	int	op;	/* change done along path */
+	Blk	*m;	/* node merged against, for post-update free */
+	Blk	*nl;	/* new left */
+	Blk	*nr;	/* new right, if we split or rotated */
+	int	midx;	/* modification index */
+	int	npull;	/* number of messages successfully pulled */
+	int	pullsz;	/* size of pulled messages */
+};
+
 static void
 stablesort(Msg *m, int nm)
 {

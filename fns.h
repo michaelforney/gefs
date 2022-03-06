@@ -79,7 +79,6 @@ Bptr	getptr(Kvp*, int*);
 void	initshow(void);
 void	showblk(int, Blk*, char*, int);
 void	showbp(int, Bptr, int);
-void	showpath(int, Path*, int);
 void	showtreeroot(int, Tree*);
 void	showtree(int, char**, int);
 void	showsnap(int, char**, int);

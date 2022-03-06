@@ -411,37 +411,6 @@ showcache(int fd, char**, int)
 }
 
 void
-showpath(int fd, Path *p, int np)
-{
-#define A(b) (b ? b->bp.addr : -1)
-	int i;
-	char *op[] = {
-	[POmod] = "POmod",
-	[POrot] = "POrot",
-	[POsplit] = "POsplit",
-	[POmerge] = "POmerge",
-	};
-
-	fprint(fd, "path:\n");
-	for(i = 0; i < np; i++){
-		fprint(fd, "\t[%d] ==>\n"
-			"\t\t%s: b(%p)=%llx [%s]\n"
-			"\t\tnl(%p)=%llx, nr(%p)=%llx\n"
-			"\t\tidx=%d, midx=%d\n"
-			"\t\tpullsz=%d, npull=%d, \n"
-			"\t\tclear=(%d. %d)\n",
-			i, op[p[i].op],
-			p[i].b, A(p[i].b), (p[i].b == nil) ? "nil" : (p[i].b->type == Tleaf ? "leaf" : "pivot"),
-			p[i].nl, A(p[i].nl),
-			p[i].nr, A(p[i].nr),
-			p[i].idx, p[i].midx,
-			p[i].pullsz, p[i].npull,
-			p[i].lo, p[i].hi);
-	}
-#undef A
-}
-
-void
 showfree(int fd, char **, int)
 {
 	Arange *r;

@@ -24,7 +24,7 @@ scandead(Dlist *l, int lblk, void (*fn)(Bptr, void*), void *dat)
 	if(b == nil)
 		return -1;
 Nextblk:
-	for(i = Loghdsz; i < Logspc; i += 16){
+	for(i = Loghashsz; i < Logspc; i += 16){
 		p = b->data + i;
 		op = GBIT64(p) & 0xff;
 		switch(op){
@@ -96,7 +96,7 @@ dlinsert(Dlist *dl, vlong v1, vlong v2)
 				return -1;
 			dl->head = pb->bp;
 		}
-		lb->logsz = Loghdsz;
+		lb->logsz = Loghashsz;
 		dl->ins = lb;
 		putblk(pb);
 	}

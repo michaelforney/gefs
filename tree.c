@@ -461,7 +461,7 @@ updateleaf(Tree *t, Path *up, Path *p)
 	 * messages are.
 	 */
 	full = 0;
-	spc = Blkspc - blkfill(b);
+	spc = Leafspc - blkfill(b);
 	if((n = newblk(b->type)) == nil)
 		return -1;
 	while(i < b->nval){
@@ -639,9 +639,9 @@ splitleaf(Tree *t, Path *up, Path *p, Kvp *mid)
 	full = 0;
 	copied = 0;
 	halfsz = (2*b->nval + b->valsz + up->sz) / 2;
-	if(halfsz > Blkspc/2)
-		halfsz = Blkspc/2;
-	spc = Blkspc - (halfsz + Msgmax);
+	if(halfsz > Leafspc/2)
+		halfsz = Leafspc/2;
+	spc = Leafspc - (halfsz + Msgmax);
 	assert(b->nval >= 4);
 	while(i < b->nval){
 		/*
@@ -654,7 +654,7 @@ splitleaf(Tree *t, Path *up, Path *p, Kvp *mid)
 		if((i == b->nval-2) || (i >= 2 && copied >= halfsz)){
 			d = r;
 			full = 0;
-			spc = Blkspc - (halfsz + Msgmax);
+			spc = Leafspc - (halfsz + Msgmax);
 			getval(b, i, mid);
 		}
 		ok = 1;
@@ -951,7 +951,7 @@ trybalance(Tree *t, Path *p, Path *pp, int idx)
 {
 	Blk *l, *m, *r;
 	Kvp kl, kr;
-	int ret, fill;
+	int spc, ret, fill;
 	Bptr bp;
 
 	l = nil;
@@ -963,10 +963,11 @@ trybalance(Tree *t, Path *p, Path *pp, int idx)
 		return 0;
 
 	m = refblk(pp->nl);
+	spc = (m->type == Tleaf) ? Leafspc : Pivspc;
 	if(idx-1 >= 0){
 		getval(p->b, idx-1, &kl);
 		bp = getptr(&kl, &fill);
-		if(fill + blkfill(m) < Blkspc){
+		if(fill + blkfill(m) < spc){
 			if((l = getblk(bp, 0)) == nil)
 				goto Out;
 			if(rotmerge(t, p, pp, idx-1, l, m) == -1)
@@ -977,7 +978,7 @@ trybalance(Tree *t, Path *p, Path *pp, int idx)
 	if(idx+1 < p->b->nval){
 		getval(p->b, idx+1, &kr);
 		bp = getptr(&kr, &fill);
-		if(fill + blkfill(m) < Blkspc){
+		if(fill + blkfill(m) < spc){
 			if((r = getblk(bp, 0)) == nil)
 				goto Out;
 			if(rotmerge(t, p, pp, idx, m, r) == -1)

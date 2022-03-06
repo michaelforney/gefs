@@ -92,7 +92,6 @@ readblk(vlong bp, int flg)
 	b->bp.addr = bp;
 	b->bp.hash = -1;
 	b->bp.gen = -1;
-	b->data = b->buf + Hdrsz;
 	b->fnext = nil;
 
 	b->nval = 0;
@@ -107,18 +106,24 @@ readblk(vlong bp, int flg)
 		fprint(2, "invalid block @%llx\n", bp);
 		abort();
 		break;
-	case Tarena:
 	case Traw:
+	case Tarena:
+		b->data = b->buf;
+		break;
 	case Tlog:
 	case Tdead:
+		b->data = b->buf + _Loghdsz;
+		break;
 		break;
 	case Tpivot:
+		b->data = b->buf + Pivhdsz;
 		b->nval = GBIT16(b->buf+2);
 		b->valsz = GBIT16(b->buf+4);
 		b->nbuf = GBIT16(b->buf+6);
 		b->bufsz = GBIT16(b->buf+8);
 		break;
 	case Tleaf:
+		b->data = b->buf + Leafhdsz;
 		b->nval = GBIT16(b->buf+2);
 		b->valsz = GBIT16(b->buf+4);
 		break;
@@ -187,7 +192,7 @@ Again:
 static int
 syncarena(Arena *a)
 {
-	packarena(a->b->data, Blkspc, a, fs);
+	packarena(a->b->data, Blksz, a, fs);
 	finalize(a->b);
 	return syncblk(a->b);
 }
@@ -261,7 +266,7 @@ logappend(Arena *a, vlong off, vlong len, int op, Blk **tl)
 		if((lb = initblk(o, Tlog)) == nil)
 			return -1;
 		cacheblk(lb);
-		lb->logsz = Loghdsz;
+		lb->logsz = Loghashsz;
 		p = lb->data + lb->logsz;
 		PBIT64(p, (uvlong)LogEnd);
 		finalize(lb);
@@ -343,11 +348,11 @@ Nextblk:
 		return -1;
 	bh = GBIT64(b->data);
 	/* the hash covers the log and offset */
-	if(bh != siphash(b->data+8, Blkspc-8)){
+	if(bh != siphash(b->data+Loghashsz, Logspc-Loghashsz)){
 		werrstr("corrupt log");
 		return -1;
 	}
-	for(i = Loghdsz; i < Logspc; i += n){
+	for(i = Loghashsz; i < Logspc; i += n){
 		d = b->data + i;
 		ent = GBIT64(d);
 		op = ent & 0xff;
@@ -418,7 +423,7 @@ compresslog(Arena *a)
 	if((b = initblk(ba, Tlog)) == nil)
 		return -1;
 	setflag(b, Bdirty);
-	b->logsz = Loghdsz;
+	b->logsz = Loghashsz;
 
 	p = b->data + b->logsz;
 	PBIT64(p, (uvlong)LogEnd);
@@ -477,7 +482,7 @@ compresslog(Arena *a)
 	}
 	hd = b;
 	tl = b;
-	b->logsz = Loghdsz;
+	b->logsz = Loghashsz;
 	for(i = 0; i < n; i++)
 		if(logappend(a, log[i].off, log[i].len, LogFree, &tl) == -1)
 			return -1;
@@ -503,7 +508,7 @@ compresslog(Arena *a)
 			bp.gen = -1;
 			if((b = getblk(bp, GBnochk)) == nil)
 				return -1;
-			for(i = Loghdsz; i < Logspc; i += n){
+			for(i = Loghashsz; i < Logspc; i += n){
 				p = b->data + i;
 				v = GBIT64(p);
 				n = ((v&0xff) >= Log2wide) ? 16 : 8;
@@ -651,7 +656,22 @@ initblk(vlong bp, int t)
 	b->bp.hash = -1;
 	b->bp.gen = fs->nextgen;
 	b->qgen = fs->qgen;
-	b->data = b->buf + Hdrsz;
+	switch(t){
+	case Traw:
+	case Tarena:
+		b->data = b->buf;
+		break;
+	case Tdead:
+	case Tlog:
+		b->data = b->buf + _Loghdsz;
+		break;
+	case Tpivot:
+		b->data = b->buf + Pivhdsz;
+		break;
+	case Tleaf:
+		b->data = b->buf + Leafhdsz;
+		break;
+	}
 	b->fnext = nil;
 
 	setflag(b, Bdirty);
@@ -710,9 +730,6 @@ finalize(Blk *b)
 		PBIT16(b->buf, b->type);
 	switch(b->type){
 	default:
-	case Tnone:
-		abort();
-		break;
 	case Tpivot:
 		PBIT16(b->buf+2, b->nval);
 		PBIT16(b->buf+4, b->valsz);
@@ -727,7 +744,7 @@ finalize(Blk *b)
 		break;
 	case Tlog:
 	case Tdead:
-		h = siphash(b->data + 8, Blkspc-8);
+		h = siphash(b->data + Loghashsz, Logspc-Loghashsz);
 		PBIT64(b->data, h);
 		b->bp.hash = blkhash(b);
 		break;

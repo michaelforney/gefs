@@ -98,10 +98,10 @@ initarena(Arena *a, Fshdr *fi, vlong start, vlong asz)
 	b->type = Tlog;
 	b->bp.addr = addr;
 	b->logsz = 32;
-	b->data = b->buf + Hdrsz;
+	b->data = b->buf + _Loghdsz;
 	b->flag |= Bdirty;
 
-	p = b->data+Loghdsz;
+	p = b->data + Loghashsz;
 	PBIT64(p, addr|LogFree);	p += 8;	/* addr */
 	PBIT64(p, asz-Blksz);		p += 8;	/* len */
 	PBIT64(p, b->bp.addr|LogAlloc);	p += 8;	/* addr */
@@ -117,14 +117,14 @@ initarena(Arena *a, Fshdr *fi, vlong start, vlong asz)
 	memset(b, 0, sizeof(Blk));
 	b->type = Tarena;
 	b->bp.addr = start;
-	b->data = b->buf + Hdrsz;
+	b->data = b->buf;
 	a->head.addr = bo;
 	a->head.hash = bh;
 	a->head.gen = -1;
 	a->size = asz;
 	a->used = Blksz;
 	a->tail = nil;
-	packarena(b->data, Blkspc, a, fi);
+	packarena(b->data, Blksz, a, fi);
 	finalize(b);
 	if(syncblk(b) == -1)
 		sysfatal("ream: write arena: %r");
@@ -220,7 +220,7 @@ reamfs(char *dev)
 		finalize(a->tail);
 		if(syncblk(a->tail) == -1)
 			sysfatal("sync arena: %r");
-		packarena(a->b->data, Blkspc, a, fs);
+		packarena(a->b->data, Blksz, a, fs);
 		finalize(a->b);
 		if(syncblk(a->b) == -1)
 			sysfatal("sync arena: %r");

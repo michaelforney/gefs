@@ -442,11 +442,10 @@ packtree(char *p, int sz, Tree *t)
 char*
 packarena(char *p, int sz, Arena *a, Fshdr *fi)
 {
-	assert(sz >= Blkspc);
+	assert(sz == Blksz);
 	memcpy(p, "gefs0001", 8);	p += 8;
 	PBIT32(p, Blksz);		p += 4;
 	PBIT32(p, Bufspc);		p += 4;
-	PBIT32(p, Hdrsz);		p += 4;
 	PBIT32(p, fi->snap.ht);		p += 4;
 	PBIT64(p, fi->snap.bp.addr);	p += 8;
 	PBIT64(p, fi->snap.bp.hash);	p += 8;
@@ -465,15 +464,16 @@ packarena(char *p, int sz, Arena *a, Fshdr *fi)
 char*
 unpackarena(Arena *a, Fshdr *fi, char *p, int sz)
 {
-	assert(sz >= Blkspc);
+	assert(sz == Blksz);
 	memset(a, 0, sizeof(*a));
 	memset(fi, 0, sizeof(*fi));
-	if(memcmp(p, "gefs0001", 8) != 0)
+	if(memcmp(p, "gefs0001", 8) != 0){
+		werrstr("wrong block header %.8s\n", p);
 		return nil;
+	}
 	p += 8;
 	fi->blksz = GBIT32(p);		p += 4;
 	fi->bufspc = GBIT32(p);		p += 4;
-	fi->hdrsz = GBIT32(p);		p += 4;
 	fi->snap.ht = GBIT32(p);	p += 4;
 	fi->snap.bp.addr = GBIT64(p);	p += 8;
 	fi->snap.bp.hash = GBIT64(p);	p += 8;

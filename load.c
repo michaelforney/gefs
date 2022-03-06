@@ -16,7 +16,7 @@ rangecmp(Avl *a, Avl *b)
 static void
 mergeinfo(Gefs *fs, Fshdr *fi)
 {
-	if(fi->blksz != Blksz || fi->bufspc != Bufspc || fi->hdrsz != Hdrsz)
+	if(fi->blksz != Blksz || fi->bufspc != Bufspc)
 		sysfatal("parameter mismatch");
 	if(fs->gotinfo && fs->narena != fi->narena)
 		sysfatal("arena count mismatch");
@@ -36,7 +36,8 @@ loadarena(Arena *a, Fshdr *fi, vlong o)
 	bp.gen = -1;
 	if((b = getblk(bp, GBnochk)) == nil)
 		return -1;
-	unpackarena(a, fi, b->data, Blkspc);
+	if(unpackarena(a, fi, b->data, Blksz) == nil)
+		return -1;
 	if((a->free = avlcreate(rangecmp)) == nil)
 		return -1;
 	a->b = b;

@@ -46,7 +46,6 @@ enum {
 	 * there is no way to get a valid split of a
 	 * maximally filled tree.
 	 */
-	Loghdsz	= 8,			/* log hash */
 	Keymax	= 128,			/* key data limit */
 	Inlmax	= 512,			/* inline data limit */
 	Ptrsz	= 24,			/* off, hash, gen */
@@ -63,14 +62,17 @@ enum {
 	Wstatmax = 4+8+8+8,		/* mode, size, atime, mtime */
 	
 
-	Hdrsz	= 10,
-	Rootsz	= 4+Ptrsz,		/* root pointer */
-	Blkspc	= Blksz - Hdrsz,
-	Bufspc  = Blkspc / 2,
-	Pivspc	= Blkspc - Bufspc,
-	Logspc	= Blkspc - Loghdsz,
-	Leafspc = Blkspc,
-	Msgmax  = 1 + (Kvmax > Kpmax ? Kvmax : Kpmax)
+	Pivhdsz		= 10,
+	Leafhdsz	= 6,
+	_Loghdsz		= 2,
+	Loghashsz	= 8,
+	Rootsz		= 4+Ptrsz,	/* root pointer */
+	Pivsz		= Blksz - Pivhdsz,
+	Bufspc		= (Blksz - Pivhdsz) / 2,
+	Pivspc		= Blksz - Pivhdsz - Bufspc,
+	Logspc		= Blksz - _Loghdsz,
+	Leafspc 	= Blksz - Leafhdsz,
+	Msgmax  	= 1 + (Kvmax > Kpmax ? Kvmax : Kpmax)
 };
 
 enum {
@@ -154,8 +156,6 @@ extern char Enempty[];
  *	bufsz[4]	portion of leaf nodes
  *			allocated to buffers,
  *			in bytes
- *	hdrsz[4]	size of tree node header,
- *			in bytes.
  *	height[4]	tree height of root node
  *	rootb[8]	address of root in last
  *			snapshot.
@@ -210,13 +210,12 @@ extern char Enempty[];
  *	off[8] hash[8] fill[2]
  */
 enum {
-	Tnone,
 	Traw,
 	Tpivot,
 	Tleaf,
-	Tarena,
 	Tlog,
 	Tdead,
+	Tarena = 0x6567,	/* 'ge' */
 };
 
 enum {
@@ -390,7 +389,6 @@ struct Stats {
 struct Fshdr {
 	int	blksz;
 	int	bufspc;
-	int	hdrsz;
 	Tree	snap;
 	int	narena;
 	vlong	arenasz;

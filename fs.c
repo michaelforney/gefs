@@ -1117,6 +1117,7 @@ fscreate(Fmsg *m)
 		putfid(f);
 		return;
 	}
+	d.gid = de->gid;
 	runlock(de);
 
 	nm = 0;
@@ -1141,7 +1142,6 @@ fscreate(Fmsg *m)
 	d.mtime = d.atime;
 	d.length = 0;
 	d.uid = f->uid;
-	d.gid = f->dgid;
 	d.muid = f->uid;
 
 	mb[nm].op = Oinsert;

@@ -26,7 +26,7 @@ static int	blkdealloc_lk(vlong);
 static Blk*	initblk(vlong, int);
 static int	logop(Arena *, vlong, vlong, int);
 
-static Blk magic;
+static Blk magic = {.bp.addr = 1LL<<62};
 
 void
 setflag(Blk *b, int flg)
@@ -997,13 +997,6 @@ runsync(int, void *p)
 	while(1){
 		while(q.nheap < q.heapsz){
 			b = chrecv(c, q.nheap == 0);
-			if(b == &magic){
-				qlock(&fs->synclk);
-				if(--fs->syncing == 0)
-					rwakeupall(&fs->syncrz);
-				qunlock(&fs->synclk);
-				continue;
-			}				
 			if(b != nil)
 				qput(&q, b);
 			if(b == nil || q.nheap == q.heapsz)
@@ -1011,7 +1004,12 @@ runsync(int, void *p)
 		}
 	
 		b = qpop(&q);
-		if(!(b->flag & Bfreed)){
+		if(b == &magic){
+			qlock(&fs->synclk);
+			if(--fs->syncing == 0)
+				rwakeupall(&fs->syncrz);
+			qunlock(&fs->synclk);
+		}else if(!(b->flag & Bfreed)){
 			if(syncblk(b) == -1){
 				ainc(&fs->broken);
 				fprint(2, "write: %r");
@@ -1030,6 +1028,7 @@ sync(void)
 
 	qlock(&fs->synclk);
 	fs->syncing = fs->nsyncers;
+	magic.qgen = fs->qgen;
 	for(i = 0; i < fs->nsyncers; i++)
 		chsend(fs->chsync[i], &magic);
 	while(fs->syncing != 0)

@@ -12,6 +12,7 @@ int	ream;
 int	debug;
 int	stdio;
 int	noauth;
+int	noperm;
 int	nproc;
 char	*forceuser;
 char	*srvname = "gefs";
@@ -29,6 +30,7 @@ initfs(vlong cachesz)
 	fs->lrurz.l = &fs->lrulk;
 	fs->syncrz.l = &fs->synclk;
 	fs->noauth = noauth;
+	fs->noperm = noperm;
 	fs->cmax = cachesz/Blksz;
 	if(fs->cmax > (1<<30))
 		sysfatal("cache too big");
@@ -152,6 +154,9 @@ main(int argc, char **argv)
 		break;
 	case 'A':
 		noauth = 1;
+		break;
+	case 'P':
+		noperm = 1;
 		break;
 	case 'u':
 		forceuser = EARGF(usage());

@@ -807,6 +807,8 @@ mode2bits(int req)
 static int
 fsaccess(Fid *f, ulong fmode, int fuid, int fgid, int m)
 {
+	if(fs->noperm)
+		return 0;
 	/* uid none gets only other permissions */
 	if(f->uid != 0) {
 		if(f->uid == fuid)
@@ -1245,18 +1247,20 @@ fswstat(Fmsg *m)
 		}
 	}
 	if(op & (Owmode|Owmtime)){
-		if(f->uid != de->uid && !groupleader(f->uid, de->gid)){
+		if(!fs->noperm && f->uid != de->uid && !groupleader(f->uid, de->gid)){
 			rerror(m, Ewstato);
 			goto Out;
 		}
 	}
 	if(op & Owuid){
-		/* FIXME: should allow during bootstrapping */
-		rerror(m, Ewstatu);
-		goto Out;
+		if(!fs->noperm){
+			rerror(m, Ewstatu);
+			goto Out;
+		}
 	}
 	if(op & Owgid){
-		if(!(f->uid == de->uid && ingroup(f->uid, n.gid))
+		if(!fs->noperm
+		&& !(f->uid == de->uid && ingroup(f->uid, n.gid))
 		&& !(groupleader(f->uid, de->gid) && groupleader(f->uid, n.gid))){
 			rerror(m, Ewstatg);
 			goto Out;

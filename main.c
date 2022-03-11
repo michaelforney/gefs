@@ -11,6 +11,7 @@ Gefs *fs;
 int	ream;
 int	debug;
 int	noauth;
+int	noperm;
 int	nproc;
 char	*forceuser;
 char	*srvname = "gefs";
@@ -37,6 +38,7 @@ initfs(vlong cachesz)
 		sysfatal("malloc: %r");
 
 	fs->noauth = noauth;
+	fs->noperm = noperm;
 	fs->cmax = cachesz/Blksz;
 	if(fs->cmax >= (2ULL*GiB)/sizeof(Bucket))
 		sysfatal("cache too big");
@@ -137,6 +139,9 @@ main(int argc, char **argv)
 		break;
 	case 'A':
 		noauth = 1;
+		break;
+	case 'P':
+		noperm = 1;
 		break;
 	case 'u':
 		forceuser = EARGF(usage());

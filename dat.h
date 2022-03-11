@@ -436,6 +436,7 @@ struct Gefs {
 	long	broken;
 	long	rdonly;
 	int	noauth;
+	int	noperm;
 
 	/* user list */
 	RWLock	userlk;

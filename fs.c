@@ -195,22 +195,18 @@ rerror(Fmsg *m, char *fmt, ...)
 
 
 static char*
-lookup(Fid *f, Key *k, Kvp *kv, char *buf, int nbuf, int lk)
+lookup(Fid *f, Key *k, Kvp *kv, char *buf, int nbuf)
 {
 	char *e;
 	Tree *r;
 
 	if(f->mnt == nil)
 		return Eattach;
-	if(lk)
-		rlock(f->dent);
 	lock(f->mnt);
 	r = f->mnt->root;
 	ainc(&r->memref);
 	unlock(f->mnt);
 	e = btlookup(r, k, kv, buf, nbuf);
-	if(lk)
-		runlock(f->dent);
 	closesnap(r);
 	return e;
 }
@@ -265,7 +261,7 @@ readb(Fid *f, char *d, vlong o, vlong n, vlong sz)
 	PBIT64(k.k+1, f->qpath);
 	PBIT64(k.k+9, fb);
 
-	e = lookup(f, &k, &kv, kvbuf, sizeof(kvbuf), 0);
+	e = lookup(f, &k, &kv, kvbuf, sizeof(kvbuf));
 	if(e != nil){
 		if(e != Eexist){
 			werrstr(e);
@@ -305,7 +301,7 @@ writeb(Fid *f, Msg *m, Bptr *ret, char *s, vlong o, vlong n, vlong sz)
 		return -1;
 	t = nil;
 	if(fb < sz && (fo != 0 || n != Blksz)){
-		e = lookup(f, m, &kv, buf, sizeof(buf), 0);
+		e = lookup(f, m, &kv, buf, sizeof(buf));
 		if(e == nil){
 			bp = unpackbp(kv.v, kv.nv);
 			if((t = getblk(bp, GBraw)) == nil)
@@ -795,7 +791,7 @@ findparent(Fid *f, vlong *qpath, char **name, char *buf, int nbuf)
 		return Elength;
 	k.k = kbuf;
 	k.nk = p - kbuf;
-	if((e = lookup(f, &k, &kv, buf, nbuf, 0)) != nil)
+	if((e = lookup(f, &k, &kv, buf, nbuf)) != nil)
 		return e;
 	if((*name = unpackdkey(kv.v, kv.nv, qpath)) == nil)
 		return Efs;
@@ -851,7 +847,7 @@ fswalk(Fmsg *m)
 		}
 		k.k = kbuf;
 		k.nk = p - kbuf;
-		if((e = lookup(o, &k, &kv, kvbuf, sizeof(kvbuf), 0)) != nil)
+		if((e = lookup(o, &k, &kv, kvbuf, sizeof(kvbuf))) != nil)
 			break;
 		duid = d.uid;
 		dgid = d.gid;
@@ -913,7 +909,7 @@ fsstat(Fmsg *m)
 		rerror(m, Efid);
 		return;
 	}
-	if((err = lookup(f, f->dent, &kv, kvbuf, sizeof(kvbuf), 0)) != nil){
+	if((err = lookup(f, f->dent, &kv, kvbuf, sizeof(kvbuf))) != nil){
 		rerror(m, err);
 		putfid(f);
 		return;
@@ -1303,7 +1299,7 @@ fsopen(Fmsg *m)
 		rerror(m, Efid);
 		return;
 	}
-	if((e = lookup(f, f->dent, &kv, buf, sizeof(buf), 0)) != nil){
+	if((e = lookup(f, f->dent, &kv, buf, sizeof(buf))) != nil){
 		rerror(m, e);
 		putfid(f);
 		return;

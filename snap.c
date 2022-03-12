@@ -126,6 +126,8 @@ graft(Dlist *dst, Dlist *src)
 		src->head = src->ins->bp;
 		src->ins = nil;
 	}
+	if(src->head.addr == -1)
+		return 0;
 	return dlinsert(dst, src->head.addr|DlGraft, src->head.hash);
 }
 

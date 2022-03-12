@@ -2,8 +2,6 @@
 #include <libc.h>
 #include <fcall.h>
 #include <avl.h>
-#include <bio.h>
-#include <pool.h>
 
 #include "dat.h"
 #include "fns.h"

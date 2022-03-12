@@ -3,7 +3,6 @@
 #include <auth.h>
 #include <fcall.h>
 #include <avl.h>
-#include <bio.h>
 
 #include "dat.h"
 #include "fns.h"

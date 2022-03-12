@@ -831,7 +831,7 @@ freebp(Tree *t, Bptr bp)
 	Bfree *f;
 
 	dprint("[%s] free blk %B\n", (t == &fs->snap) ? "snap" : "data", bp);
-	if(t != nil && bp.gen <= t->gen){
+	if(t != nil && t != &fs->snap && bp.gen <= t->gen){
 		killblk(t, bp);
 		return;
 	}

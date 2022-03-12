@@ -535,8 +535,12 @@ static void
 fsversion(Fmsg *m, int *msz)
 {
 	Fcall r;
+	char *p;
 
 	memset(&r, 0, sizeof(Fcall));
+	p = strchr(m->version, '.');
+	if(p != nil)
+		*p = '\0';
 	if(strcmp(m->version, "9P2000") == 0){
 		if(m->msize < *msz)
 			*msz = m->msize;

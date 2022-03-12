@@ -1736,6 +1736,8 @@ runwrite(int wid, void *)
 			for(mnt = fs->mounts; mnt != nil; mnt = mnt->next)
 				updatemount(mnt);
 			sync();
+			if(m->a->fd != -1)
+				fprint(m->a->fd, "sync done\n");
 			freemsg(m);
 			break;
 		case AOsnap:

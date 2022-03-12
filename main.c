@@ -125,7 +125,6 @@ main(int argc, char **argv)
 	assert(Treesz < Inlmax);
 	initfs(cachesz);
 	initshow();
-	quotefmtinstall();
 	fmtinstall('H', encodefmt);
 	fmtinstall('B', Bconv);
 	fmtinstall('M', Mconv);

@@ -479,7 +479,7 @@ struct Arena {
 struct Xdir {
 	/* file data */
 	Qid	qid;	/* unique id from server */
-	int	mode;	/* permissions */
+	ulong	mode;	/* permissions */
 	vlong	atime;	/* last read time: nsec */
 	vlong	mtime;	/* last write time: nsec */
 	uvlong	length;	/* file length */

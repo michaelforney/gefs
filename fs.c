@@ -665,7 +665,7 @@ mode2bits(int req)
 }
 
 static int
-fsaccess(Fid *f, int fmode, int fuid, int fgid, int m)
+fsaccess(Fid *f, ulong fmode, int fuid, int fgid, int m)
 {
 	/* uid none gets only other permissions */
 	if(f->uid != 0) {

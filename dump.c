@@ -82,7 +82,7 @@ showval(Fmt *fmt, Kvp *v, int op, int flg)
 			if(kv2dir(v, &d) == -1)
 				n = fmtprint(fmt, "bad dir");
 			else
-				n = fmtprint(fmt, "[qid=(%llux,%lud,%d), %o, t=%lld,%lld, l=%lld]",
+				n = fmtprint(fmt, "[qid=(%llux,%lud,%d), %luo, t=%lld,%lld, l=%lld]",
 					d.qid.path, d.qid.vers, d.qid.type,
 					d.mode, d.atime, d.mtime, d.length);
 			break;
@@ -97,7 +97,7 @@ showval(Fmt *fmt, Kvp *v, int op, int flg)
 				p += 8;
 			}
 			if(ws & Owmode){
-				n += fmtprint(fmt, "mode:%o ", GBIT32(p));
+				n += fmtprint(fmt, "mode:%uo ", GBIT32(p));
 				p += 4;
 			}
 			if(ws & Owmtime){

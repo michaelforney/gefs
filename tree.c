@@ -607,7 +607,7 @@ updatepiv(Tree *, Path *up, Path *p, Path *pp)
 /*
  * Splits a node, returning the block that msg
  * would be inserted into. Split must never
- * grow the total height of the 
+ * grow the total height of the tree by more than 1.
  */
 static int
 splitleaf(Tree *t, Path *up, Path *p, Kvp *mid)

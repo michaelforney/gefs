@@ -648,6 +648,30 @@ ingroup(int uid, int gid)
 }
 
 static int
+groupleader(int uid, int gid)
+{
+	User *g;
+	int i, lead;
+
+	lead = 0;
+	rlock(&fs->userlk);
+	g = uid2user(gid);
+	if(g != nil){
+		if(g->lead == 0){
+			for(i = 0; i < g->nmemb; i++)
+				if(g->memb[i] == uid){
+					lead = 1;
+					break;
+				}
+		}else if(uid == g->lead)
+			lead = 1;
+	}
+	runlock(&fs->userlk);
+	return lead;
+
+}
+
+static int
 mode2bits(int req)
 {
 	int m;
@@ -930,26 +954,24 @@ static void
 fswstat(Fmsg *m)
 {
 	char *p, *e, strs[65535], rnbuf[Kvmax], opbuf[Kvmax];
-	int op, nm, sync, rename;
+	int op, nm, rename;
 	Fcall r;
 	Dent *de;
-	Msg mb[3];
-	Xdir o;
+	Msg mb[2];
+	Xdir n;
 	Dir d;
 	Fid *f;
 	Key k;
+	User *u;
 
-	nm = 0;
-	sync = 1;
 	rename = 0;
 	if((f = getfid(m->fid)) == nil){
 		rerror(m, Efid);
 		return;
 	}
 	de = f->dent;
-	k = f->dent->Key;
 	wlock(de);
-	if(f->dent->qid.type & QTAUTH){
+	if(de->qid.type & QTAUTH){
 		rerror(m, Emode);
 		goto Out;
 	}
@@ -957,12 +979,13 @@ fswstat(Fmsg *m)
 		rerror(m, Edir);
 		goto Out;
 	}
-	if(fsaccess(f, de->mode, de->uid, de->gid, DMWRITE) == -1){
-		rerror(m, Eperm);
-		goto Out;
-	}
 
-	/* A nop qid change is allowed. */
+	n = de->Xdir;
+	n.qid.vers++;
+	p = opbuf+1;
+	op = 0;
+
+	/* check validity of updated fields and construct Owstat message */
 	if(d.qid.path != ~0 || d.qid.vers != ~0){
 		if(d.qid.path != de->qid.path){
 			rerror(m, Ewstatp);
@@ -972,86 +995,158 @@ fswstat(Fmsg *m)
 			rerror(m, Ewstatv);
 			goto Out;
 		}
-		sync = 0;
 	}
-
-	/*
-	 * rename: verify name is valid, same name renames are nops.
-	 * this is inserted into the tree as a pair of delete/create
-	 * messages.
-	 */
-	if(d.name != nil && *d.name != '\0'){
-		if(okname(d.name) == -1){
-			rerror(m, Ename);
+	if(*d.name != '\0'){
+		if(strcmp(d.name, de->name) != 0){
+			rename = 1;
+			if(okname(d.name) == -1){
+				rerror(m, Ename);
+				goto Out;
+			}
+			n.name = d.name;
+		}
+	}
+	if(d.length != ~0){
+		if(d.length < 0){
+			rerror(m, Ewstatl);
 			goto Out;
 		}
-		/* renaming to the same name is a nop. */
+		if(d.length != de->length){
+			n.length = d.length;
+			op |= Owsize;
+			PBIT64(p, n.length);
+			p += 8;
+		}
+	}
+	if(d.mode != ~0){
+		if((d.mode^de->mode) & DMDIR){
+			rerror(m, Ewstatd);
+			goto Out;
+		}
+		if(d.mode & ~(DMDIR|DMAPPEND|DMEXCL|DMTMP|0777)){
+			rerror(m, Ewstatb);
+			goto Out;
+		}
+		if(d.mode != de->mode){
+			n.mode = d.mode;
+			n.qid.type = d.mode>>24;
+			op |= Owmode;
+			PBIT32(p, n.mode);
+			p += 4;
+		}
+	}
+	if(d.mtime != ~0){
+		n.mtime = d.mtime*Nsec;
+		if(n.mtime != de->mtime){
+			op |= Owmtime;
+			PBIT64(p, n.mtime);
+			p += 8;
+		}
+	}
+	if(*d.uid != '\0'){
+		rlock(&fs->userlk);
+		u = name2user(d.uid);
+		if(u == nil){
+			runlock(&fs->userlk);
+			rerror(m, Enouser);
+			goto Out;
+		}
+		n.uid = u->id;
+		runlock(&fs->userlk);
+		if(n.uid != de->uid){
+			op |= Owuid;
+			PBIT32(p, n.uid);
+			p += 4;
+		}
+	}
+	if(*d.gid != '\0'){
+		rlock(&fs->userlk);
+		u = name2user(d.gid);
+		if(u == nil){
+			runlock(&fs->userlk);
+			rerror(m, Enouser);
+			goto Out;
+		}
+		n.gid = u->id;
+		runlock(&fs->userlk);
+		if(n.gid != de->gid){
+			op |= Owgid;
+			PBIT32(p, n.gid);
+			p += 4;
+		}
+	}
+	op |= Owmuid;
+	n.muid = f->uid;
+	PBIT32(p, n.muid);
+	p += 4;
+
+	/* check permissions */
+	if(rename){
+		if(fsaccess(f, f->dmode, f->duid, f->dgid, DMWRITE) == -1){
+			rerror(m, Eperm);
+			goto Out;
+		}
+	}
+	if(op & Owsize){
+		if(fsaccess(f, de->mode, de->uid, de->gid, DMWRITE) == -1){
+			rerror(m, Eperm);
+			goto Out;
+		}
+	}
+	if(op & (Owmode|Owmtime)){
+		if(f->uid != de->uid && !groupleader(f->uid, de->gid)){
+			rerror(m, Ewstato);
+			goto Out;
+		}
+	}
+	if(op & Owuid){
+		/* FIXME: should allow during bootstrapping */
+		rerror(m, Ewstatu);
+		goto Out;
+	}
+	if(op & Owgid){
+		if(!(f->uid == de->uid && ingroup(f->uid, n.gid))
+		&& !(groupleader(f->uid, de->gid) && groupleader(f->uid, n.gid))){
+			rerror(m, Ewstatg);
+			goto Out;
+		}
+	}
+
+	/* update directory entry */
+	nm = 0;
+	if(rename){
 		mb[nm].op = Odelete;
-		mb[nm].Key = f->dent->Key;
+		mb[nm].Key = de->Key;
 		mb[nm].v = nil;
 		mb[nm].nv = 0;
 		nm++;
-		o = de->Xdir;
-		o.name = d.name;
+
 		mb[nm].op = Oinsert;
-		if(dir2kv(f->pqpath, &o, &mb[nm], rnbuf, sizeof(rnbuf)) == -1){
+		if(dir2kv(f->pqpath, &n, &mb[nm], rnbuf, sizeof(rnbuf)) == -1){
 			rerror(m, Efs);
 			goto Out;
 		}
 		k = mb[nm].Key;
-		rename = 1;
-		sync = 0;
+		nm++;
+	}else{
+		opbuf[0] = op;
+		mb[nm].op = Owstat;
+		mb[nm].Key = de->Key;
+		mb[nm].v = opbuf;
+		mb[nm].nv = p - opbuf;
 		nm++;
 	}
+	if((e = btupsert(f->mnt->root, mb, nm)) != nil){
+		rerror(m, e);
+		goto Out;
+	}
 
-	p = opbuf+1;
-	op = 0;
-	mb[nm].Key = k;
-	mb[nm].op = Owstat;
-	de->qid.vers++;
-	if(d.length != ~0){
-		op |= Owsize;
-		de->length = d.length;
-		PBIT64(p, d.length);
-		p += 8;
-		sync = 0;
-	}
-	if(d.mode != ~0){
-		op |= Owmode;
-		de->mode = d.mode;
-		PBIT32(p, d.mode);
-		p += 4;
-		sync = 0;
-	}
-	if(d.mtime != ~0){
-		op |= Owmtime;
-		de->mtime = d.mtime;
-		PBIT64(p, (vlong)d.mtime*Nsec);
-		p += 8;
-		sync = 0;
-	}
-	op |= Owmuid;
-	de->muid = f->uid;
-	PBIT32(p, f->uid);
-	p += 4;
-
-	opbuf[0] = op;
-	mb[nm].v = opbuf;
-	mb[nm].nv = p - opbuf;
-	nm++;
-
-	if(sync){
-		rerror(m, Eimpl);
-	}else{
-		if((e = btupsert(f->mnt->root, mb, nm)) != nil){
-			rerror(m, e);
-			goto Out;
-		}
-		r.type = Rwstat;
-		respond(m, &r);
-	}
+	de->Xdir = n;
 	if(rename)
-		cpkey(f->dent, &k, f->dent->buf, sizeof(f->dent->buf));
+		cpkey(de, &k, de->buf, sizeof(de->buf));
+
+	r.type = Rwstat;
+	respond(m, &r);
 
 Out:
 	wunlock(de);

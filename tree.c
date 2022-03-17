@@ -361,6 +361,7 @@ statupdate(Kvp *kv, Msg *m)
 	}
 	if(op & Owmode){
 		d.mode = GBIT32(p);
+		d.qid.type = d.mode>>24;
 		p += 4;
 	}
 	if(op & Owmtime){

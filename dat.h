@@ -37,7 +37,7 @@ enum {
 	Nfidtab	= 1024,			/* number of fit hash entries */
 	Ndtab	= 1024,			/* number of dir tab entries */
 	Max9p	= 16*KiB,		/* biggest message size we're willing to negotiate */
-	Nsec	= 1000*1000*1000,	/* nanoseconds to the second */
+	Nsec	= 1000LL*1000*1000,	/* nanoseconds to the second */
 	Maxname	= 256,			/* maximum size of a name element */
 	Maxent	= 9+Maxname+1,		/* maximum size of ent key, with terminator */
 

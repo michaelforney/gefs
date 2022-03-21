@@ -296,15 +296,14 @@ Cmd cmdtab[] = {
 };
 
 void
-runcons(int tid, void *pfd)
+runcons(int tid, void *)
 {
 	char buf[256], *f[4], **ap;
-	int i, n, nf, na, fd;
+	int i, n, nf, na;
 	Cmd *c;
 
-	fd = (uintptr)pfd;
 	while(1){
-		if((n = read(fd, buf, sizeof(buf)-1)) == -1)
+		if((n = read(0, buf, sizeof(buf)-1)) == -1)
 			break;
 		quiesce(tid);
 		buf[n] = 0;
@@ -325,14 +324,14 @@ runcons(int tid, void *pfd)
 			}
 			if(na < c->minarg || na > c->maxarg)
 				continue;
-			c->fn(fd, ap, na);
+			c->fn(1, ap, na);
 			break;
 		}
 		if(c->name == nil){
-			fprint(fd, "unknown command '%s", f[0]);
+			fprint(1, "unknown command '%s", f[0]);
 			for(i = 1; i < nf; i++)
-				fprint(fd, " %s", f[i]);
-			fprint(fd, "'\n");
+				fprint(1, " %s", f[i]);
+			fprint(1, "'\n");
 		}
 		quiesce(tid);
 	}

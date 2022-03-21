@@ -143,8 +143,4 @@ void	runcons(int, void*);
 void	runtasks(int, void*);
 void	runsync(int, void*);
 
-/* it's in libc... */
-extern int cas(long*, long, long);
-extern int fasp(void***, void*);
-extern int cas64(u64int*, u64int, u64int);
 vlong	inc64(vlong*, vlong);

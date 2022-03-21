@@ -1,7 +1,12 @@
+#define _GNU_SOURCE
 #include <u.h>
 #include <libc.h>
 #include <avl.h>
 #include <fcall.h>
+#include <arpa/inet.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
+#include <sys/un.h>
 
 #include "dat.h"
 #include "fns.h"
@@ -10,7 +15,6 @@ Gefs *fs;
 
 int	ream;
 int	debug;
-int	stdio;
 int	noauth;
 int	noperm;
 int	nproc;
@@ -22,14 +26,7 @@ int	cachesz = 512*MiB;
 vlong
 inc64(vlong *v, vlong dv)
 {
-	vlong ov, nv;
-
-	while(1){
-		ov = *v;
-		nv = ov + dv;
-		if(cas64((u64int*)v, ov, nv))
-			return ov;
-	}
+	return atomic_fetch_add(v, dv);
 }
 
 static void
@@ -47,59 +44,100 @@ initfs(vlong cachesz)
 		sysfatal("malloc: %r");
 }
 
+typedef struct Startarg {
+	void (*fn)(int, void *);
+	int wid;
+	void *arg;
+} Startarg;
+
+static void *
+start(void *p)
+{
+	Startarg *arg;
+
+	arg = p;
+	arg->fn(arg->wid, arg->arg);
+	free(arg);
+	return NULL;
+}
+
 static void
 launch(void (*f)(int, void *), int wid, void *arg, char *text)
 {
-	int pid;
+	pthread_t thread;
+	pthread_attr_t attr;
+	Startarg *a;
 
 	assert(wid == -1 || wid < nelem(fs->active));
-	pid = rfork(RFPROC|RFMEM|RFNOWAIT);
-	if (pid < 0)
-		sysfatal("can't fork: %r");
-	if (pid == 0) {
-		procsetname("%s", text);
-		(*f)(wid, arg);
-		exits("child returned");
-	}
-}
-
-static int
-postfd(char *name, char *suff, ulong perm)
-{
-	char buf[80];
-	int fd[2];
-	int cfd;
-
-	if(pipe(fd) < 0)
-		sysfatal("can't make a pipe");
-	snprint(buf, sizeof buf, "/srv/%s%s", name, suff);
-	if((cfd = create(buf, OWRITE|ORCLOSE|OCEXEC, perm)) == -1)
-		sysfatal("create %s: %r", buf);
-	if(fprint(cfd, "%d", fd[0]) == -1)
-		sysfatal("write %s: %r", buf);
-	close(fd[0]);
-	return fd[1];
+	a = malloc(sizeof *a);
+	a->fn = f;
+	a->wid = wid;
+	a->arg = arg;
+	if(pthread_attr_init(&attr) != 0)
+		sysfatal("attr init failed");
+	if(pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED) != 0)
+		sysfatal("set detach state failed");
+	if(pthread_create(&thread, &attr, start, a) != 0)
+		sysfatal("thread create failed");
+	pthread_setname_np(thread, text);
 }
 
 static void
 runannounce(int, void *arg)
 {
-	char *ann, adir[40], ldir[40];
-	int actl, lctl, fd;
+	char *ann, *p;
+	int sock, fd;
 	Conn *c;
+	union {
+		struct sockaddr sa;
+		struct sockaddr_in in;
+		struct sockaddr_un un;
+	} addr;
+	socklen_t addrlen;
 
 	ann = arg;
-	if((actl = announce(ann, adir)) < 0)
-		sysfatal("announce %s: %r", ann);
-	while(1){
-		if((lctl = listen(adir, ldir)) < 0){
-			fprint(2, "listen %s: %r", adir);
-			break;
+	if(strncmp(ann, "unix!", 5) == 0){
+		ann += 5;
+		addr.un.sun_family = AF_UNIX;
+		strecpy(addr.un.sun_path, addr.un.sun_path+sizeof(addr.un.sun_path), ann);
+		addrlen = sizeof(addr.un);
+		unlink(addr.un.sun_path);
+	}else if(strncmp(ann, "tcp!", 4) == 0){
+		ann += 4;
+		p = strchr(ann, '!');
+		if(p)
+			*p++ = '\0';
+		addr.in.sin_family = AF_INET;
+		addr.in.sin_addr.s_addr = strcmp(ann, "*") == 0 ? INADDR_ANY : inet_addr(ann);
+		addr.in.sin_port = htons(p ? atoi(p) : 564);
+		addrlen = sizeof(addr.in);
+	}else{
+		fprint(2, "unknown announce string");
+		return;
+	}
+	sock = socket(addr.sa.sa_family, SOCK_STREAM, 0);
+	if(sock < 0){
+		fprint(2, "socket: %s", strerror(errno));
+		return;
+	}
+	if(addr.sa.sa_family == AF_INET){
+		if(setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &(int){1}, sizeof(int)) != 0){
+			fprint(2, "setsockopt: %s", strerror(errno));
+			return;
 		}
-		fd = accept(lctl, ldir);
-		close(lctl);
+	}
+	if(bind(sock, &addr.sa, addrlen) != 0){
+		fprint(2, "bind: %s", strerror(errno));
+		return;
+	}
+	if(listen(sock, 1) != 0){
+		fprint(2, "listen: %s", strerror(errno));
+		return;
+	}
+	while(1){
+		fd = accept(sock, NULL, NULL);
 		if(fd < 0){
-			fprint(2, "accept %s: %r", ldir);
+			fprint(2, "accept: %s", strerror(errno));
 			continue;
 		}
 		if(!(c = newconn(fd, fd))){
@@ -110,7 +148,7 @@ runannounce(int, void *arg)
 
 		launch(runfs, -1, c, "netio");
 	}
-	close(actl);
+	close(sock);
 }
 
 static void
@@ -120,12 +158,11 @@ usage(void)
 	exits("usage");
 }
 
-void
+int
 main(int argc, char **argv)
 {
-	int i, srvfd, ctlfd, nann;
+	int i, nann;
 	char *s, *ann[16];
-	Conn *c;
 
 	nann = 0;
 	ARGBEGIN{
@@ -145,9 +182,6 @@ main(int argc, char **argv)
 		break;
 	case 'n':
 		srvname = EARGF(usage());
-		break;
-	case 's':
-		stdio = 1;
 		break;
 	case 'A':
 		noauth = 1;
@@ -196,6 +230,8 @@ main(int argc, char **argv)
 		reamfs(dev);
 		exits(nil);
 	}
+	if(nann == 0)
+		usage();
 
 	loadfs(dev);
 
@@ -209,10 +245,7 @@ main(int argc, char **argv)
 		fs->chsync[i] = mkchan(128);
 	for(i = 0; i < fs->narena; i++)
 		fs->arenas[i].sync = fs->chsync[i%nproc];
-	srvfd = postfd(srvname, "", 0666);
-	ctlfd = postfd(srvname, ".cmd", 0660);
 	launch(runtasks, -1, nil, "tasks");
-	launch(runcons, fs->nquiesce++, (void*)ctlfd, "ctl");
 	launch(runwrite, fs->nquiesce++, nil, "mutate");
 	for(i = 0; i < nproc; i++)
 		launch(runread, fs->nquiesce++, nil, "readio");
@@ -220,15 +253,5 @@ main(int argc, char **argv)
 		launch(runsync, -1, fs->chsync[i], "syncio");
 	for(i = 0; i < nann; i++)
 		launch(runannounce, -1, ann[i], "announce");
-	if(srvfd != -1){
-		if((c = newconn(srvfd, srvfd)) == nil)
-			sysfatal("%r");
-		launch(runfs, -1, c, "srvio");
-	}
-	if(stdio){
-		if((c = newconn(0, 1)) == nil)
-			sysfatal("%r");
-		runfs(-1, c);
-	}
-	exits(nil);
+	runcons(fs->nquiesce++, nil);
 }

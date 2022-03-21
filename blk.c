@@ -31,27 +31,13 @@ static Blk magic = {.bp.addr = 1LL<<62};
 void
 setflag(Blk *b, int flg)
 {
-	long ov, nv;
-
-	while(1){
-		ov = b->flag;
-		nv = ov | flg;
-		if(cas(&b->flag, ov, nv))
-			break;
-	}
+	atomic_fetch_or(&b->flag, flg);
 }
 
 void
 clrflag(Blk *b, int flg)
 {
-	long ov, nv;
-
-	while(1){
-		ov = b->flag;
-		nv = ov & ~flg;
-		if(cas(&b->flag, ov, nv))
-			break;
-	}
+	atomic_fetch_and(&b->flag, ~flg);
 }
 
 int
@@ -82,7 +68,7 @@ readblk(vlong bp, int flg)
 		off += n;
 		rem -= n;
 	}
-	b->ref = 1;
+	atomic_init(&b->ref, 1);
 	b->cnext = nil;
 	b->cprev = nil;
 	b->hnext = nil;
@@ -642,7 +628,7 @@ initblk(vlong bp, int t)
 		 * want to reset the refs
 		 * on an allocation.
 		 */
-		b->ref = 1;
+		atomic_init(&b->ref, 1);
 		b->cnext = nil;
 		b->cprev = nil;
 		b->hnext = nil;
@@ -653,7 +639,7 @@ initblk(vlong bp, int t)
 	b->bp.addr = bp;
 	b->bp.hash = -1;
 	b->bp.gen = fs->nextgen;
-	b->qgen = fs->qgen;
+	b->qgen = atomic_load_explicit(&fs->qgen, memory_order_relaxed);
 	switch(t){
 	case Traw:
 	case Tarena:
@@ -981,7 +967,7 @@ qpop(Flushq *q)
 }
 
 void
-runsync(int, void *p)
+runsync(int wid, void *p)
 {
 	Flushq q;
 	Chan *c;

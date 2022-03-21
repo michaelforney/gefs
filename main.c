@@ -67,7 +67,7 @@ launch(void (*f)(int, void *), int wid, void *arg, char *text)
 }
 
 static int
-postfd(char *name, char *suff)
+postfd(char *name, char *suff, ulong perm)
 {
 	char buf[80];
 	int fd[2];
@@ -76,7 +76,7 @@ postfd(char *name, char *suff)
 	if(pipe(fd) < 0)
 		sysfatal("can't make a pipe");
 	snprint(buf, sizeof buf, "/srv/%s%s", name, suff);
-	if((cfd = create(buf, OWRITE|ORCLOSE|OCEXEC, 0600)) == -1)
+	if((cfd = create(buf, OWRITE|ORCLOSE|OCEXEC, perm)) == -1)
 		sysfatal("create %s: %r", buf);
 	if(fprint(cfd, "%d", fd[0]) == -1)
 		sysfatal("write %s: %r", buf);
@@ -217,8 +217,8 @@ main(int argc, char **argv)
 		qinit(&fs->syncq[i]);
 	for(i = 0; i < fs->narena; i++)
 		fs->arenas[i].sync = &fs->syncq[i%fs->nsyncers];
-	srvfd = postfd(srvname, "");
-	ctlfd = postfd(srvname, ".cmd");
+	srvfd = postfd(srvname, "", 0666);
+	ctlfd = postfd(srvname, ".cmd", 0660);
 	launch(runtasks, -1, nil, "tasks");
 	launch(runcons, fs->nworker++, (void*)ctlfd, "ctl");
 	launch(runwrite, fs->nworker++, nil, "mutate");

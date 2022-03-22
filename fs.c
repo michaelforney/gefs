@@ -1529,8 +1529,10 @@ readdir(Fmsg *m, Fid *f, Fcall *r)
 	p = r->data;
 	n = m->count;
 	if(s->overflow){
-		if((ns = kv2statbuf(&s->kv, p, n)) == -1)
-			return Edscan;
+		if((ns = kv2statbuf(&s->kv, p, n)) == -1){
+			r->count = 0;
+			return nil;
+		}
 		s->overflow = 0;
 		p += ns;
 		n -= ns;

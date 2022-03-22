@@ -247,7 +247,6 @@ kv2dir(Kvp *kv, Xdir *d)
 	v = unpack32(&err, v, ev, &d->gid);
 	v = unpack32(&err, v, ev, &d->muid);
 	if(err){
-//		print("fucked: %P\n", kv);
 		werrstr("val too small [%s]", d->name);
 		return -1;
 	}
@@ -263,33 +262,29 @@ kv2dir(Kvp *kv, Xdir *d)
 }
 
 int
-kv2statbuf(Kvp *kv, char *buf, int nbuf)
+dir2statbuf(Xdir *d, char *buf, int nbuf)
 {
 	int sz, nn, nu, ng, nm, ret;
 	vlong atime, mtime;
 	User *u, *g, *m;
 	char *p;
-	Xdir d;
-
-	if(kv2dir(kv, &d) == -1)
-		return -1;
 
 	ret = -1;
 	rlock(&fs->userlk);
-	if((u = uid2user(d.uid)) == nil)
+	if((u = uid2user(d->uid)) == nil)
 		goto Out;
-	if((g = uid2user(d.gid)) == nil)
+	if((g = uid2user(d->gid)) == nil)
 		goto Out;
-	if((m = uid2user(d.muid)) == nil)
+	if((m = uid2user(d->muid)) == nil)
 		goto Out;
 
 	p = buf;
-	nn = strlen(d.name);
+	nn = strlen(d->name);
 	nu = strlen(u->name);
 	ng = strlen(g->name);
 	nm = strlen(m->name);
-	atime = (d.atime+Nsec/2)/Nsec;
-	mtime = (d.mtime+Nsec/2)/Nsec;
+	atime = (d->atime+Nsec/2)/Nsec;
+	mtime = (d->mtime+Nsec/2)/Nsec;
 	sz = STATFIXLEN + nn + nu + ng + nm;
 	if(sz > nbuf)
 		goto Out;
@@ -297,16 +292,16 @@ kv2statbuf(Kvp *kv, char *buf, int nbuf)
 	PBIT16(p, sz-2);		p += 2;
 	PBIT16(p, -1 /*type*/);		p += 2;
 	PBIT32(p, -1 /*dev*/);		p += 4;
-	PBIT8(p, d.qid.type);		p += 1;
-	PBIT32(p, d.qid.vers);		p += 4;
-	PBIT64(p, d.qid.path);		p += 8;
-	PBIT32(p, d.mode);		p += 4;
+	PBIT8(p, d->qid.type);		p += 1;
+	PBIT32(p, d->qid.vers);		p += 4;
+	PBIT64(p, d->qid.path);		p += 8;
+	PBIT32(p, d->mode);		p += 4;
 	PBIT32(p, atime);		p += 4;
 	PBIT32(p, mtime);		p += 4;
-	PBIT64(p, d.length);		p += 8;
+	PBIT64(p, d->length);		p += 8;
 
 	PBIT16(p, nn);			p += 2;
-	memcpy(p, d.name, nn);		p += nn;
+	memcpy(p, d->name, nn);		p += nn;
 	PBIT16(p, nu);			p += 2;
 	memcpy(p, u->name, nu);		p += nu;
 	PBIT16(p, ng);			p += 2;
@@ -318,6 +313,16 @@ kv2statbuf(Kvp *kv, char *buf, int nbuf)
 Out:
 	runlock(&fs->userlk);
 	return ret;	
+}
+
+int
+kv2statbuf(Kvp *kv, char *buf, int nbuf)
+{
+	Xdir d;
+
+	if(kv2dir(kv, &d) == -1)
+		return -1;
+	return dir2statbuf(&d, buf, nbuf);
 }
 
 int

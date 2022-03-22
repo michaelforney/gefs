@@ -359,6 +359,7 @@ getdent(vlong pqid, Xdir *d)
 		return nil;
 	de->k = de->buf;
 	de->nk = e - de->buf;
+	de->name = de->buf + 11;
 	de->next = fs->dtab[h];
 	fs->dtab[h] = de;
 
@@ -937,22 +938,19 @@ fswalk(Fmsg *m)
 static void
 fsstat(Fmsg *m)
 {
-	char *err, buf[STATMAX], kvbuf[Kvmax];
+	char buf[STATMAX];
 	Fcall r;
 	Fid *f;
-	Kvp kv;
 	int n;
 
 	if((f = getfid(m->conn, m->fid)) == nil){
 		rerror(m, Efid);
 		return;
 	}
-	if((err = lookup(f, f->dent, &kv, kvbuf, sizeof(kvbuf))) != nil){
-		rerror(m, err);
-		putfid(f);
-		return;
-	}
-	if((n = kv2statbuf(&kv, buf, sizeof(buf))) == -1){
+	rlock(f->dent);
+	n = dir2statbuf(f->dent, buf, sizeof(buf));
+	runlock(f->dent);
+	if(n == -1){
 		rerror(m, "stat: %r");
 		putfid(f);
 		return;

@@ -23,6 +23,7 @@ typedef struct Dlist	Dlist;
 typedef struct Mount	Mount;
 typedef struct User	User;
 typedef struct Stats	Stats;
+typedef struct Conn	Conn;
 
 enum {
 	KiB	= 1024ULL,
@@ -345,7 +346,7 @@ struct Amsg {
 
 struct Fmsg {
 	Fcall;
-	int	fd;	/* the fd to repsond on */
+	Conn	*conn;
 	int	sz;	/* the size of the message buf */
 	Amsg	*a;	/* admin messages */
 	uchar	buf[];
@@ -416,6 +417,9 @@ struct Gefs {
 	Mount	*mounts;
 	Tree	*osnap;
 
+	Lock	connlk;
+	Conn	*conns;
+
 	Chan	*wrchan;
 	Chan	*rdchan;
 	int	nquiesce;
@@ -437,10 +441,6 @@ struct Gefs {
 	RWLock	userlk;
 	User	*users;
 	int	nusers;
-
-	/* fid hash table */
-	Lock	fidtablk;
-	Fid	*fidtab[Nfidtab];
 
 	/* dent hash table */
 	Lock	dtablk;
@@ -506,6 +506,17 @@ struct Mount {
 	vlong	gen;
 	char	*name;
 	Tree	*root;
+};
+
+struct Conn {
+	Conn	*next;
+	int	fd;
+	int	iounit;
+	int	versioned;
+
+	/* fid hash table */
+	Lock	fidtablk;
+	Fid	*fidtab[Nfidtab];
 };
 
 struct Fid {

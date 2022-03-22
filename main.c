@@ -78,19 +78,50 @@ postfd(char *name, char *suff)
 }
 
 static void
+runannounce(int, void *arg)
+{
+	char *ann, adir[40], ldir[40];
+	int actl, lctl, fd;
+
+	ann = arg;
+	if((actl = announce(ann, adir)) < 0)
+		sysfatal("announce %s: %r", ann);
+	while(1){
+		if((lctl = listen(adir, ldir)) < 0){
+			fprint(2, "listen %s: %r", adir);
+			break;
+		}
+		fd = accept(lctl, ldir);
+		close(lctl);
+		if(fd < 0){
+			fprint(2, "accept %s: %r", ldir);
+			continue;
+		}
+		launch(runfs, -1, (void *)fd, "netio");
+	}
+	close(actl);
+}
+
+static void
 usage(void)
 {
-	fprint(2, "usage: %s [-rA] [-m mem] [-s srv] [-u usr] dev\n", argv0);
+	fprint(2, "usage: %s [-rA] [-m mem] [-s srv] [-u usr] [-a net]... dev\n", argv0);
 	exits("usage");
 }
 
 void
 main(int argc, char **argv)
 {
-	int i, srvfd, ctlfd;
-	char *s;
+	int i, srvfd, ctlfd, nann;
+	char *s, *ann[16];
 
+	nann = 0;
 	ARGBEGIN{
+	case 'a':
+		if(nann == nelem(ann))
+			sysfatal("too many announces");
+		ann[nann++] = EARGF(usage());
+		break;
 	case 'r':
 		ream = 1;
 		break;
@@ -166,7 +197,9 @@ main(int argc, char **argv)
 		launch(runread, fs->nquiesce++, nil, "readio");
 	for(i = 0; i < fs->nsyncers; i++)
 		launch(runsync, -1, fs->chsync[i], "syncio");
+	for(i = 0; i < nann; i++)
+		launch(runannounce, -1, ann[i], "announce");
 	if(srvfd != -1)
-		launch(runfs, fs->nquiesce++, (void*)srvfd, "srvio");
+		launch(runfs, -1, (void *)srvfd, "srvio");
 	exits(nil);
 }

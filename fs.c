@@ -172,9 +172,9 @@ respond(Fmsg *m, Fcall *r)
 	dprint("→ %F\n", r);
 	if((n = convS2M(r, buf, sizeof(buf))) == 0)
 		abort();
-	w = write(m->fd, buf, n);
+	w = write(m->conn->fd, buf, n);
 	if(w != n)
-		fshangup(m->fd, Eio);
+		fshangup(m->conn->fd, Eio);
 	free(m);
 }
 
@@ -401,33 +401,36 @@ showfid(int fd, char**, int)
 {
 	int i;
 	Fid *f;
+	Conn *c;
 
-	lock(&fs->fidtablk);
-	fprint(fd, "fids:---\n");
-	for(i = 0; i < Nfidtab; i++)
-		for(f = fs->fidtab[i]; f != nil; f = f->next){
-			rlock(f->dent);
-			fprint(fd, "\tfid[%d]: %d [refs=%ld, k=%K, qid=%Q]\n",
-				i, f->fid, f->dent->ref, &f->dent->Key, f->dent->qid);
-			runlock(f->dent);
-		}
-	unlock(&fs->fidtablk);
+	for(c = fs->conns; c != nil; c = c->next){
+		lock(&c->fidtablk);
+		fprint(fd, "fids:%d\n", c->fd);
+		for(i = 0; i < Nfidtab; i++)
+			for(f = c->fidtab[i]; f != nil; f = f->next){
+				rlock(f->dent);
+				fprint(fd, "\tfid[%d]: %d [refs=%ld, k=%K, qid=%Q]\n",
+					i, f->fid, f->dent->ref, &f->dent->Key, f->dent->qid);
+				runlock(f->dent);
+			}
+		unlock(&c->fidtablk);
+	}
 }
 
 static Fid*
-getfid(u32int fid)
+getfid(Conn *c, u32int fid)
 {
 	u32int h;
 	Fid *f;
 
 	h = ihash(fid) % Nfidtab;
-	lock(&fs->fidtablk);
-	for(f = fs->fidtab[h]; f != nil; f = f->next)
+	lock(&c->fidtablk);
+	for(f = c->fidtab[h]; f != nil; f = f->next)
 		if(f->fid == fid){
 			ainc(&f->ref);
 			break;
 		}
-	unlock(&fs->fidtablk);
+	unlock(&c->fidtablk);
 	return f;
 }
 
@@ -442,7 +445,7 @@ putfid(Fid *f)
 }
 
 static Fid*
-dupfid(u32int new, Fid *f)
+dupfid(Conn *c, u32int new, Fid *f)
 {
 	Fid *n, *o;
 	u32int h;
@@ -459,16 +462,16 @@ dupfid(u32int new, Fid *f)
 	if(n->mnt != nil)
 		ainc(&n->mnt->ref);
 
-	lock(&fs->fidtablk);
+	lock(&c->fidtablk);
 	ainc(&n->dent->ref);
-	for(o = fs->fidtab[h]; o != nil; o = o->next)
+	for(o = c->fidtab[h]; o != nil; o = o->next)
 		if(o->fid == new)
 			break;
 	if(o == nil){
-		n->next = fs->fidtab[h];
-		fs->fidtab[h] = n;
+		n->next = c->fidtab[h];
+		c->fidtab[h] = n;
 	}
-	unlock(&fs->fidtablk);
+	unlock(&c->fidtablk);
 
 	if(o != nil){
 		fprint(2, "fid in use: %d == %d\n", o->fid, new);
@@ -480,15 +483,15 @@ dupfid(u32int new, Fid *f)
 }
 
 static void
-clunkfid(Fid *fid)
+clunkfid(Conn *c, Fid *fid)
 {
 	Fid *f, **pf;
 	u32int h;
 
-	lock(&fs->fidtablk);
+	lock(&c->fidtablk);
 	h = ihash(fid->fid) % Nfidtab;
-	pf = &fs->fidtab[h];
-	for(f = fs->fidtab[h]; f != nil; f = f->next){
+	pf = &c->fidtab[h];
+	for(f = c->fidtab[h]; f != nil; f = f->next){
 		if(f == fid){
 			assert(adec(&f->ref) != 0);
 			*pf = f->next;
@@ -497,37 +500,47 @@ clunkfid(Fid *fid)
 		pf = &f->next;
 	}
 	assert(f != nil);
-	unlock(&fs->fidtablk);
+	unlock(&c->fidtablk);
 }
 
-static Fmsg*
-readmsg(int fd, int max)
+static int
+readmsg(Conn *c, Fmsg **pm)
 {
 	char szbuf[4];
-	int sz;
+	int sz, n;
 	Fmsg *m;
 
-	if(readn(fd, szbuf, 4) != 4)
-		return nil;
+	n = readn(c->fd, szbuf, 4);
+	if(n <= 0){
+		*pm = nil;
+		return n;
+	}
+	if(n != 4){
+		werrstr("short read: %r");
+		return -1;
+	}
 	sz = GBIT32(szbuf);
-	if(sz > max)
-		return nil;
+	if(sz > c->iounit){
+		werrstr("message size too large");
+		return -1;
+	}
 	if((m = malloc(sizeof(Fmsg)+sz)) == nil)
-		return nil;
-	if(readn(fd, m->buf+4, sz-4) != sz-4){
+		return -1;
+	if(readn(c->fd, m->buf+4, sz-4) != sz-4){
 		werrstr("short read: %r");
 		free(m);
-		return nil;
+		return -1;
 	}
-	m->fd = fd;
+	m->conn = c;
 	m->sz = sz;
 	m->a = nil;
 	PBIT32(m->buf, sz);
-	return m;
+	*pm = m;
+	return 0;
 }
 
 static void
-fsversion(Fmsg *m, int *msz)
+fsversion(Fmsg *m)
 {
 	Fcall r;
 	char *p;
@@ -536,15 +549,17 @@ fsversion(Fmsg *m, int *msz)
 	p = strchr(m->version, '.');
 	if(p != nil)
 		*p = '\0';
+	r.type = Rversion;
+	r.msize = Max9p;
 	if(strcmp(m->version, "9P2000") == 0){
-		if(m->msize < *msz)
-			*msz = m->msize;
-		r.type = Rversion;
-		r.msize = *msz;
+		if(m->msize < r.msize)
+			r.msize = m->msize;
 		r.version = "9P2000";
+		m->conn->versioned = 1;
+		m->conn->iounit = r.msize;
 	}else{
-		r.type = Rversion;
 		r.version = "unknown";
+		m->conn->versioned = 0;
 	}
 	respond(m, &r);
 }
@@ -584,7 +599,7 @@ authnew(void)
 }
 
 static void
-fsauth(Fmsg *m, int iounit)
+fsauth(Fmsg *m)
 {
 	Dent *de;
 	Fcall r;
@@ -613,14 +628,14 @@ fsauth(Fmsg *m, int iounit)
 	f.qpath = de->qid.path;
 	f.pqpath = de->qid.path;
 	f.mode = -1;
-	f.iounit = iounit;
+	f.iounit = m->conn->iounit;
 	f.dent = de;
 	f.uid = -1;
 	f.duid = -1;
 	f.dgid = -1;
 	f.dmode = 0600;
 	f.auth = authnew();
-	if(dupfid(m->afid, &f) == nil){
+	if(dupfid(m->conn, m->afid, &f) == nil){
 		rerror(m, Enomem);
 		return;
 	}
@@ -710,7 +725,7 @@ fsaccess(Fid *f, ulong fmode, int fuid, int fgid, int m)
 }
 
 static void
-fsattach(Fmsg *m, int iounit)
+fsattach(Fmsg *m)
 {
 	char *e, *p, *n, dbuf[Kvmax], kvbuf[Kvmax];
 	Mount *mnt;
@@ -785,13 +800,13 @@ fsattach(Fmsg *m, int iounit)
 	f.qpath = d.qid.path;
 	f.pqpath = d.qid.path;
 	f.mode = -1;
-	f.iounit = iounit;
+	f.iounit = m->conn->iounit;
 	f.dent = de;
 	f.uid = u->id;
 	f.duid = u->id;
 	f.dgid = d.gid;
 	f.dmode = d.mode;
-	if(dupfid(m->fid, &f) == nil){
+	if(dupfid(m->conn, m->fid, &f) == nil){
 		rerror(m, Enomem);
 		return;
 	}
@@ -801,7 +816,6 @@ fsattach(Fmsg *m, int iounit)
 	r.type = Rattach;
 	r.qid = d.qid;
 	respond(m, &r);
-	return;
 }
 
 static char*
@@ -836,7 +850,7 @@ fswalk(Fmsg *m)
 	Key k;
 	int i;
 
-	if((o = getfid(m->fid)) == nil){
+	if((o = getfid(m->conn, m->fid)) == nil){
 		rerror(m, Efid);
 		return;
 	}
@@ -893,7 +907,7 @@ fswalk(Fmsg *m)
 	}
 	f = o;
 	if(m->fid != m->newfid && i == m->nwname){
-		if((f = dupfid(m->newfid, o)) == nil){
+		if((f = dupfid(m->conn, m->newfid, o)) == nil){
 			rerror(m, Enomem);
 			putfid(o);
 			return;
@@ -904,7 +918,7 @@ fswalk(Fmsg *m)
 		dent = getdent(up, &d);
 		if(dent == nil){
 			if(f != o)
-				clunkfid(f);
+				clunkfid(m->conn, f);
 			rerror(m, Enomem);
 			putfid(f);
 			return;
@@ -929,7 +943,7 @@ fsstat(Fmsg *m)
 	Kvp kv;
 	int n;
 
-	if((f = getfid(m->fid)) == nil){
+	if((f = getfid(m->conn, m->fid)) == nil){
 		rerror(m, Efid);
 		return;
 	}
@@ -965,7 +979,7 @@ fswstat(Fmsg *m)
 	User *u;
 
 	rename = 0;
-	if((f = getfid(m->fid)) == nil){
+	if((f = getfid(m->conn, m->fid)) == nil){
 		rerror(m, Efid);
 		return;
 	}
@@ -1160,7 +1174,7 @@ fsclunk(Fmsg *m)
 	Fcall r;
 	Fid *f;
 
-	if((f = getfid(m->fid)) == nil){
+	if((f = getfid(m->conn, m->fid)) == nil){
 		rerror(m, Efid);
 		return;
 	}
@@ -1173,7 +1187,7 @@ fsclunk(Fmsg *m)
 	}
 	unlock(f);
 
-	clunkfid(f);
+	clunkfid(m->conn, f);
 	r.type = Rclunk;
 	respond(m, &r);
 	putfid(f);
@@ -1194,7 +1208,7 @@ fscreate(Fmsg *m)
 		rerror(m, Ename);
 		return;
 	}
-	if((f = getfid(m->fid)) == nil){
+	if((f = getfid(m->conn, m->fid)) == nil){
 		rerror(m, Efid);
 		return;
 	}
@@ -1266,7 +1280,7 @@ fscreate(Fmsg *m)
 	de = getdent(f->qpath, &d);
 	if(de == nil){
 		if(m->fid != m->newfid)
-			clunkfid(f);
+			clunkfid(m->conn, f);
 		rerror(m, Enomem);
 		putfid(f);
 		return;
@@ -1341,11 +1355,11 @@ fsremove(Fmsg *m)
 	Fid *f;
 	char *e;
 
-	if((f = getfid(m->fid)) == nil){
+	if((f = getfid(m->conn, m->fid)) == nil){
 		rerror(m, Efid);
 		return;
 	}
-	clunkfid(f);
+	clunkfid(m->conn, f);
 
 	rlock(f->dent);
 	if((e = candelete(f)) != nil)
@@ -1390,7 +1404,7 @@ fsopen(Fmsg *m)
 	Msg mb;
 
 	mbits = mode2bits(m->mode);
-	if((f = getfid(m->fid)) == nil){
+	if((f = getfid(m->conn, m->fid)) == nil){
 		rerror(m, Efid);
 		return;
 	}
@@ -1596,7 +1610,7 @@ fsread(Fmsg *m)
 	Fcall r;
 	Fid *f;
 
-	if((f = getfid(m->fid)) == nil){
+	if((f = getfid(m->conn, m->fid)) == nil){
 		rerror(m, Efid);
 		return;
 	}
@@ -1649,7 +1663,7 @@ fswrite(Fmsg *m)
 	Fcall r;
 	Fid *f;
 
-	if((f = getfid(m->fid)) == nil){
+	if((f = getfid(m->conn, m->fid)) == nil){
 		rerror(m, Efid);
 		return;
 	}
@@ -1730,38 +1744,46 @@ fswrite(Fmsg *m)
 }
 
 void
-runfs(int wid, void *pfd)
+runfs(int, void *pfd)
 {
-	int fd, msgmax, versioned;
+	Conn *c;
+	int fd;
 	char err[128];
 	Fcall r;
 	Fmsg *m;
 
 	fd = (uintptr)pfd;
-	msgmax = Max9p;
-	versioned = 0;
+	if((c = mallocz(sizeof(*c), 1)) == nil){
+		fshangup(fd, "malloc: %r");
+		return;
+	}
+	c->fd = fd;
+	c->iounit = Max9p;
+	lock(&fs->connlk);
+	c->next = fs->conns;
+	fs->conns = c;
+	unlock(&fs->connlk);
 	while(1){
-		if((m = readmsg(fd, msgmax)) == nil){
-			fshangup(fd, "truncated message: %r");
+		if(readmsg(c, &m) < 0){
+			fshangup(fd, "read message: %r");
 			return;
 		}
-		quiesce(wid);
+		if(m == nil)
+			break;
 		if(convM2S(m->buf, m->sz, m) == 0){
 			fshangup(fd, "invalid message: %r");
 			return;
 		}
-		if(m->type != Tversion && !versioned){
+		if(m->type != Tversion && !c->versioned){
 			fshangup(fd, "version required");
 			return;
 		}
-		versioned = 1;
 		dprint("← %F\n", &m->Fcall);
 		switch(m->type){
 		/* sync setup */
-		case Tversion:	fsversion(m, &msgmax);	break;
-		case Tauth:	fsauth(m, msgmax);	break;
+		case Tversion:	fsversion(m);	break;
+		case Tauth:	fsauth(m);	break;
 		case Tclunk:	fsclunk(m);		break;
-		case Tattach:	fsattach(m, msgmax);	break;
 
 		/* mutators */
 		case Tcreate:	chsend(fs->wrchan, m);	break;
@@ -1770,6 +1792,7 @@ runfs(int wid, void *pfd)
 		case Tremove:	chsend(fs->wrchan, m);	break;
 
 		/* reads */
+		case Tattach:	chsend(fs->rdchan, m);	break;
 		case Tflush:	chsend(fs->rdchan, m);	break;
 		case Twalk:	chsend(fs->rdchan, m);	break;
 		case Tread:	chsend(fs->rdchan, m);	break;
@@ -1792,7 +1815,6 @@ runfs(int wid, void *pfd)
 			respond(m, &r);
 			break;
 		}
-		quiesce(wid);
 	}
 }
 
@@ -1856,6 +1878,7 @@ runread(int wid, void *)
 		quiesce(wid);
 		switch(m->type){
 		case Tflush:	rerror(m, Eimpl);	break;
+		case Tattach:	fsattach(m);	break;
 		case Twalk:	fswalk(m);	break;
 		case Tread:	fsread(m);	break;
 		case Tstat:	fsstat(m);	break;

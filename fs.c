@@ -1152,6 +1152,10 @@ fswstat(Fmsg *m)
 	if(*d.name != '\0'){
 		if(strcmp(d.name, de->name) != 0){
 			rename = 1;
+			if(f->pqpath == f->qpath){
+				rerror(m, Einval);
+				goto Out;
+			}
 			if(okname(d.name) == -1){
 				rerror(m, Ename);
 				goto Out;
@@ -1470,6 +1474,8 @@ candelete(Fid *f)
 
 	if(f->dent->qid.type == QTFILE)
 		return nil;
+	if(f->pqpath == f->qpath)
+		return Einval;
 	if((s = mallocz(sizeof(Scan), 1)) == nil)
 		return Enomem;
 

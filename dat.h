@@ -139,6 +139,7 @@ extern char Eauthd[];
 extern char Ephase[];
 extern char Enone[];
 extern char Enoauth[];
+extern char Einval[];
 
 extern char Ewstatb[];
 extern char Ewstatd[];

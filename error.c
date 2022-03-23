@@ -34,6 +34,7 @@ char Eauthd[]	= "authread -- not enough data";
 char Ephase[]	= "auth phase error";
 char Enone[]	= "auth -- user 'none' requires no authentication";
 char Enoauth[]	= "auth -- authentication disabled";
+char Einval[]	= "invalid operation";
 
 char Ewstatb[]	= "wstat -- unknown bits in qid.type/mode";
 char Ewstatd[]	= "wstat -- attempt to change directory";

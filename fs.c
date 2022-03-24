@@ -343,26 +343,29 @@ getdent(vlong pqid, Xdir *d)
 	for(de = fs->dtab[h]; de != nil; de = de->next){
 		if(de->qid.path == d->qid.path){
 			ainc(&de->ref);
-			unlock(&fs->dtablk);
-			return de;
+			goto Out;
 		}
 	}
 
 	if((de = mallocz(sizeof(Dent), 1)) == nil)
-		return nil;
+		goto Out;
 	de->Xdir = *d;
 	de->ref = 1;
 	de->qid = d->qid;
 	de->length = d->length;
 
-	if((e = packdkey(de->buf, sizeof(de->buf), pqid, d->name)) == nil)
-		return nil;
+	if((e = packdkey(de->buf, sizeof(de->buf), pqid, d->name)) == nil){
+		free(de);
+		de = nil;
+		goto Out;
+	}
 	de->k = de->buf;
 	de->nk = e - de->buf;
 	de->name = de->buf + 11;
 	de->next = fs->dtab[h];
 	fs->dtab[h] = de;
 
+Out:
 	unlock(&fs->dtablk);
 	return de;
 }
@@ -370,8 +373,10 @@ getdent(vlong pqid, Xdir *d)
 static void
 clunkmount(Mount *mnt)
 {
-	if(mnt != nil && adec(&mnt->ref) == 0)
+	if(mnt != nil && adec(&mnt->ref) == 0){
+		free(mnt->name);
 		free(mnt);
+	}
 }
 
 static void
@@ -380,6 +385,12 @@ clunkdent(Dent *de)
 	Dent *e, **pe;
 	u32int h;
 
+	if(de == nil)
+		return;
+	if(de->qid.type == QTAUTH && adec(&de->ref) == 0){
+		free(de);
+		return;
+	}
 	lock(&fs->dtablk);
 	if(adec(&de->ref) != 0)
 		goto Out;
@@ -460,11 +471,8 @@ dupfid(Conn *c, u32int new, Fid *f)
 	n->ref = 2; /* one for dup, one for clunk */
 	n->mode = -1;
 	n->next = nil;
-	if(n->mnt != nil)
-		ainc(&n->mnt->ref);
 
 	lock(&c->fidtablk);
-	ainc(&n->dent->ref);
 	for(o = c->fidtab[h]; o != nil; o = o->next)
 		if(o->fid == new)
 			break;
@@ -480,6 +488,9 @@ dupfid(Conn *c, u32int new, Fid *f)
 		free(n);
 		return nil;
 	}
+	if(n->mnt != nil)
+		ainc(&n->mnt->ref);
+	ainc(&n->dent->ref);
 	return n;
 }
 
@@ -615,7 +626,7 @@ fsauth(Fmsg *m)
 		return;
 	}
 	memset(de, 0, sizeof(Dent));
-	de->ref = 1;
+	de->ref = 0;
 	de->qid.type = QTAUTH;
 	de->qid.path = inc64(&fs->nextqid, 1);
 	de->qid.vers = 0;
@@ -638,6 +649,7 @@ fsauth(Fmsg *m)
 	f.auth = authnew();
 	if(dupfid(m->conn, m->afid, &f) == nil){
 		rerror(m, Enomem);
+		free(de);
 		return;
 	}
 	r.type = Rauth;
@@ -740,62 +752,58 @@ fsattach(Fmsg *m)
 	Tree *t;
 	int uid;
 
+	de = nil;
 	if((mnt = mallocz(sizeof(Mount), 1)) == nil){
 		rerror(m, Enomem);
-		return;
+		goto Out;
 	}
+	mnt->ref = 1;
 	if(m->aname[0] == '\0')
 		m->aname = "main";
 	if((mnt->name = strdup(m->aname)) == nil){
 		rerror(m, Enomem);
-		return;
+		goto Out;
 	}
+
 	rlock(&fs->userlk);
 	n = (forceuser == nil) ? m->uname : forceuser;
 	if((u = name2user(n)) == nil){
-		rerror(m, Enouser);
 		runlock(&fs->userlk);
-		return;
+		rerror(m, Enouser);
+		goto Out;
 	}
 	uid = u->id;
 	runlock(&fs->userlk);
 
 	if((t = openlabel(m->aname)) == nil){
 		rerror(m, Enosnap);
-		return;
+		goto Out;
 	}
-	if((mnt->root = newsnap(t)) == nil){
-		rerror(m, Enomem);
-		return;
-	}
+	mnt->root = newsnap(t);
 	closesnap(t);
+	if(mnt->root == nil){
+		rerror(m, Enomem);
+		goto Out;
+	}
 
 	if((p = packdkey(dbuf, sizeof(dbuf), -1ULL, "")) == nil){
 		rerror(m, Elength);
-		return;
+		goto Out;
 	}
 	dk.k = dbuf;
 	dk.nk = p - dbuf;
 	if((e = btlookup(mnt->root, &dk, &kv, kvbuf, sizeof(kvbuf))) != nil){
 		rerror(m, e);
-		return;
+		goto Out;
 	}
 	if(kv2dir(&kv, &d) == -1){
 		rerror(m, Efs);
-		return;
+		goto Out;
 	}
 	if((de = getdent(-1, &d)) == nil){
 		rerror(m, Efs);
-		return;
+		goto Out;
 	}
-
-	/*
-	 * A bit of a hack; we're duping a fid
-	 * that doesn't exist, so we'd be off
-	 * by one on the refcount. Adjust to
-	 * compensate for the dup.
-	 */
-	adec(&de->ref);
 
 	memset(&f, 0, sizeof(Fid));
 	f.fid = NOFID;
@@ -811,7 +819,7 @@ fsattach(Fmsg *m)
 	f.dmode = d.mode;
 	if(dupfid(m->conn, m->fid, &f) == nil){
 		rerror(m, Enomem);
-		return;
+		goto Out;
 	}
 
 	mnt->next = fs->mounts;
@@ -819,6 +827,10 @@ fsattach(Fmsg *m)
 	r.type = Rattach;
 	r.qid = d.qid;
 	respond(m, &r);
+
+Out:
+	clunkdent(de);
+	clunkmount(mnt);
 }
 
 static char*

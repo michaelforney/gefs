@@ -738,6 +738,7 @@ fsattach(Fmsg *m)
 	Key dk;
 	Fid f;
 	Tree *t;
+	int uid;
 
 	if((mnt = mallocz(sizeof(Mount), 1)) == nil){
 		rerror(m, Enomem);
@@ -756,6 +757,7 @@ fsattach(Fmsg *m)
 		runlock(&fs->userlk);
 		return;
 	}
+	uid = u->id;
 	runlock(&fs->userlk);
 
 	if((t = openlabel(m->aname)) == nil){
@@ -803,8 +805,8 @@ fsattach(Fmsg *m)
 	f.mode = -1;
 	f.iounit = m->conn->iounit;
 	f.dent = de;
-	f.uid = u->id;
-	f.duid = u->id;
+	f.uid = uid;
+	f.duid = uid;
 	f.dgid = d.gid;
 	f.dmode = d.mode;
 	if(dupfid(m->conn, m->fid, &f) == nil){
@@ -1492,11 +1494,15 @@ readauth(Fmsg *m, Fid *f, Fcall *r)
 	case ARdone:
 		if((ai = auth_getinfo(rpc)) == nil)
 			goto Phase;
+		rlock(&fs->userlk);
 		u = name2user(ai->cuid);
 		auth_freeAI(ai);
-		if(u == nil)
+		if(u == nil){
+			runlock(&fs->userlk);
 			return Enouser;
+		}
 		f->uid = u->id;
+		runlock(&fs->userlk);
 		return nil;
 	case ARok:
 		if(m->count < rpc->narg)

@@ -414,9 +414,9 @@ struct Gefs {
 	Rendez	syncrz;
 
 	QLock	snaplk;	/* snapshot lock */
-	Mount	*mounts;
 	Tree	*osnap;
-
+	Lock	mountlk;
+	Mount	*mounts;
 	Lock	connlk;
 	Conn	*conns;
 

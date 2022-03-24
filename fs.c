@@ -370,13 +370,69 @@ Out:
 	return de;
 }
 
+static Mount *
+getmount(char *name)
+{
+	Mount *mnt;
+	Tree *t;
+
+	lock(&fs->mountlk);
+	for(mnt = fs->mounts; mnt != nil; mnt = mnt->next)
+		if(strcmp(name, mnt->name) == 0){
+			ainc(&mnt->ref);
+			goto Out;
+		}
+	if((mnt = mallocz(sizeof(*mnt), 1)) == nil)
+		goto Out;
+	mnt->ref = 1;
+	if((mnt->name = strdup(name)) == nil){
+		free(mnt);
+		mnt = nil;
+		goto Out;
+	}
+	if((t = openlabel(name)) == nil){
+		werrstr("%s", Enosnap);
+		free(mnt->name);
+		free(mnt);
+		mnt = nil;
+		goto Out;
+	}
+	mnt->root = newsnap(t);
+	closesnap(t);
+	if(mnt->root == nil){
+		free(mnt->name);
+		free(mnt);
+		mnt = nil;
+		goto Out;
+	}
+
+	mnt->next = fs->mounts;
+	fs->mounts = mnt;
+
+Out:
+	unlock(&fs->mountlk);
+	return mnt;
+}
+
 static void
 clunkmount(Mount *mnt)
 {
-	if(mnt != nil && adec(&mnt->ref) == 0){
+	Mount *me, **p;
+
+	if(mnt == nil)
+		return;
+	lock(&fs->mountlk);
+	if(adec(&mnt->ref) == 0){
+		for(p = &fs->mounts; (me = *p) != nil; p = &me->next){
+			if(me == mnt)
+				break;
+		}
+		assert(me != nil);
+		*p = me->next;
 		free(mnt->name);
 		free(mnt);
 	}
+	unlock(&fs->mountlk);
 }
 
 static void
@@ -749,19 +805,13 @@ fsattach(Fmsg *m)
 	Kvp kv;
 	Key dk;
 	Fid f;
-	Tree *t;
 	int uid;
 
 	de = nil;
-	if((mnt = mallocz(sizeof(Mount), 1)) == nil){
-		rerror(m, Enomem);
-		goto Out;
-	}
-	mnt->ref = 1;
 	if(m->aname[0] == '\0')
 		m->aname = "main";
-	if((mnt->name = strdup(m->aname)) == nil){
-		rerror(m, Enomem);
+	if((mnt = getmount(m->aname)) == nil){
+		rerror(m, "%r");
 		goto Out;
 	}
 
@@ -774,17 +824,6 @@ fsattach(Fmsg *m)
 	}
 	uid = u->id;
 	runlock(&fs->userlk);
-
-	if((t = openlabel(m->aname)) == nil){
-		rerror(m, Enosnap);
-		goto Out;
-	}
-	mnt->root = newsnap(t);
-	closesnap(t);
-	if(mnt->root == nil){
-		rerror(m, Enomem);
-		goto Out;
-	}
 
 	if((p = packdkey(dbuf, sizeof(dbuf), -1ULL, "")) == nil){
 		rerror(m, Elength);
@@ -822,8 +861,6 @@ fsattach(Fmsg *m)
 		goto Out;
 	}
 
-	mnt->next = fs->mounts;
-	fs->mounts = mnt;
 	r.type = Rattach;
 	r.qid = d.qid;
 	respond(m, &r);

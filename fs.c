@@ -871,6 +871,11 @@ fswalk(Fmsg *m)
 	dmode = d.mode;
 	r.type = Rwalk;
 	for(i = 0; i < m->nwname; i++){
+		if(fsaccess(o, d.mode, d.uid, d.gid, DMEXEC) != 0){
+			rerror(m, Eperm);
+			putfid(o);
+			return;
+		}
 		name = m->wname[i];
 		if(strcmp(m->wname[i], "..") == 0){
 			if((e = findparent(o, &prev, &name, kbuf, sizeof(kbuf))) != nil){

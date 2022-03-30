@@ -78,6 +78,8 @@ int	endfs(void);
 int	compresslog(Arena*);
 void	setval(Blk*, Kvp*);
 
+Conn*	newconn(int, int);
+
 char*	loadusers(int, Tree*);
 User*	uid2user(int);
 User*	name2user(char*);

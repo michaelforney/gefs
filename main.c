@@ -10,6 +10,7 @@ Gefs *fs;
 
 int	ream;
 int	debug;
+int	stdio;
 int	noauth;
 int	nproc;
 char	*forceuser;
@@ -86,6 +87,7 @@ runannounce(int, void *arg)
 {
 	char *ann, adir[40], ldir[40];
 	int actl, lctl, fd;
+	Conn *c;
 
 	ann = arg;
 	if((actl = announce(ann, adir)) < 0)
@@ -101,7 +103,13 @@ runannounce(int, void *arg)
 			fprint(2, "accept %s: %r", ldir);
 			continue;
 		}
-		launch(runfs, -1, (void *)fd, "netio");
+		if(!(c = newconn(fd, fd))){
+			close(fd);
+			fprint(2, "%r");
+			continue;
+		}
+
+		launch(runfs, -1, c, "netio");
 	}
 	close(actl);
 }
@@ -118,6 +126,7 @@ main(int argc, char **argv)
 {
 	int i, srvfd, ctlfd, nann;
 	char *s, *ann[16];
+	Conn *c;
 
 	nann = 0;
 	ARGBEGIN{
@@ -137,6 +146,9 @@ main(int argc, char **argv)
 		break;
 	case 'n':
 		srvname = EARGF(usage());
+		break;
+	case 's':
+		stdio = 1;
 		break;
 	case 'A':
 		noauth = 1;
@@ -211,7 +223,15 @@ main(int argc, char **argv)
 		launch(runsync, -1, &fs->syncq[i], "syncio");
 	for(i = 0; i < nann; i++)
 		launch(runannounce, -1, ann[i], "announce");
-	if(srvfd != -1)
-		launch(runfs, -1, (void *)srvfd, "srvio");
+	if(srvfd != -1){
+		if((c = newconn(srvfd, srvfd)) == nil)
+			sysfatal("%r");
+		launch(runfs, -1, c, "srvio");
+	}
+	if(stdio){
+		if((c = newconn(0, 1)) == nil)
+			sysfatal("%r");
+		runfs(-1, c);
+	}
 	exits(nil);
 }

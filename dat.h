@@ -543,7 +543,8 @@ struct Mount {
 
 struct Conn {
 	Conn	*next;
-	int	fd;
+	int	rfd;
+	int	wfd;
 	int	iounit;
 	int	versioned;
 

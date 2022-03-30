@@ -164,7 +164,7 @@ chsend(Chan *c, void *m)
 }
 
 static void
-fshangup(int fd, char *fmt, ...)
+fshangup(Conn *c, char *fmt, ...)
 {
 	char buf[ERRMAX];
 	va_list ap;
@@ -173,7 +173,8 @@ fshangup(int fd, char *fmt, ...)
 	vsnprint(buf, sizeof(buf), fmt, ap);
 	va_end(ap);
 	fprint(2, "%s\n", buf);
-	close(fd);
+	close(c->rfd);
+	close(c->wfd);
 	abort();
 }
 
@@ -188,9 +189,9 @@ respond(Fmsg *m, Fcall *r)
 	dprint("→ %F\n", r);
 	if((n = convS2M(r, buf, sizeof(buf))) == 0)
 		abort();
-	w = write(m->conn->fd, buf, n);
+	w = write(m->conn->wfd, buf, n);
 	if(w != n)
-		fshangup(m->conn->fd, Eio);
+		fshangup(m->conn, Eio);
 	if(m->type != Tflush) {
 		lock(&fs->mflushlk);
 		fs->mflush[m->tag] = nil;
@@ -503,7 +504,7 @@ showfid(int fd, char**, int)
 
 	for(c = fs->conns; c != nil; c = c->next){
 		lock(&c->fidtablk);
-		fprint(fd, "fids:%d\n", c->fd);
+		fprint(fd, "fids:%d\n", c->rfd);
 		for(i = 0; i < Nfidtab; i++)
 			for(f = c->fidtab[i]; f != nil; f = f->next){
 				rlock(f->dent);
@@ -608,7 +609,7 @@ readmsg(Conn *c, Fmsg **pm)
 	int sz, n;
 	Fmsg *m;
 
-	n = readn(c->fd, szbuf, 4);
+	n = readn(c->rfd, szbuf, 4);
 	if(n <= 0){
 		*pm = nil;
 		return n;
@@ -624,7 +625,7 @@ readmsg(Conn *c, Fmsg **pm)
 	}
 	if((m = malloc(sizeof(Fmsg)+sz)) == nil)
 		return -1;
-	if(readn(c->fd, m->buf+4, sz-4) != sz-4){
+	if(readn(c->rfd, m->buf+4, sz-4) != sz-4){
 		werrstr("short read: %r");
 		free(m);
 		return -1;
@@ -1971,39 +1972,45 @@ fsflush(Fmsg *m)
 	unlock(&fs->mflushlk);
 }
 
-void
-runfs(int, void *pfd)
+Conn *
+newconn(int rfd, int wfd)
 {
 	Conn *c;
-	int fd;
+
+	if((c = mallocz(sizeof(*c), 1)) == nil)
+		return nil;
+	c->rfd = rfd;
+	c->wfd = wfd;
+	c->iounit = Max9p;
+	c->next = fs->conns;
+	lock(&fs->connlk);
+	fs->conns = c;
+	unlock(&fs->connlk);
+	return c;
+}
+
+void
+runfs(int, void *pc)
+{
+	Conn *c;
 	char err[128];
 	Fcall r;
 	Fmsg *m;
 
-	fd = (uintptr)pfd;
-	if((c = mallocz(sizeof(*c), 1)) == nil){
-		fshangup(fd, "malloc: %r");
-		return;
-	}
-	c->fd = fd;
-	c->iounit = Max9p;
-	lock(&fs->connlk);
-	c->next = fs->conns;
-	fs->conns = c;
-	unlock(&fs->connlk);
+	c = pc;
 	while(1){
 		if(readmsg(c, &m) < 0){
-			fshangup(fd, "read message: %r");
+			fshangup(c, "read message: %r");
 			return;
 		}
 		if(m == nil)
 			break;
 		if(convM2S(m->buf, m->sz, m) == 0){
-			fshangup(fd, "invalid message: %r");
+			fshangup(c, "invalid message: %r");
 			return;
 		}
 		if(m->type != Tversion && !c->versioned){
-			fshangup(fd, "version required");
+			fshangup(c, "version required");
 			return;
 		}
 		dprint("← %F\n", &m->Fcall);

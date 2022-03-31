@@ -14,6 +14,7 @@ int	noauth;
 int	nproc;
 char	*forceuser;
 char	*srvname = "gefs";
+char	*dev;
 int	cachesz = 512*MiB;
 
 vlong
@@ -105,7 +106,7 @@ runannounce(int, void *arg)
 static void
 usage(void)
 {
-	fprint(2, "usage: %s [-rA] [-m mem] [-s srv] [-u usr] [-a net]... dev\n", argv0);
+	fprint(2, "usage: %s [-rA] [-m mem] [-n srv] [-u usr] [-a net]... -f dev\n", argv0);
 	exits("usage");
 }
 
@@ -131,7 +132,7 @@ main(int argc, char **argv)
 	case 'd':
 		debug++;
 		break;
-	case 's':
+	case 'n':
 		srvname = EARGF(usage());
 		break;
 	case 'A':
@@ -140,11 +141,14 @@ main(int argc, char **argv)
 	case 'u':
 		forceuser = EARGF(usage());
 		break;
+	case 'f':
+		dev = EARGF(usage());
+		break;
 	default:
 		usage();
 		break;
 	}ARGEND;
-	if(argc == 0)
+	if(dev == nil)
 		usage();
 
 	/*
@@ -172,11 +176,11 @@ main(int argc, char **argv)
 	if(nproc > nelem(fs->active))
 		nproc = nelem(fs->active);
 	if(ream){
-		reamfs(argv[0]);
+		reamfs(dev);
 		exits(nil);
 	}
 
-	loadfs(argv[0]);
+	loadfs(dev);
 
 	fs->syncrz.l = &fs->synclk;
 	fs->rdchan = mkchan(32);

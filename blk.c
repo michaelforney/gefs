@@ -28,27 +28,33 @@ static int	logop(Arena *, vlong, vlong, int);
 
 static Blk magic;
 
+int
+checkflag(Blk *b, int f)
+{
+	return (b->flag & f) == f;
+}
+
 void
-setflag(Blk *b, int flg)
+setflag(Blk *b, int f)
 {
 	long ov, nv;
 
 	while(1){
 		ov = b->flag;
-		nv = ov | flg;
+		nv = ov | f;
 		if(cas(&b->flag, ov, nv))
 			break;
 	}
 }
 
 void
-clrflag(Blk *b, int flg)
+clrflag(Blk *b, int f)
 {
 	long ov, nv;
 
 	while(1){
 		ov = b->flag;
-		nv = ov & ~flg;
+		nv = ov & ~f;
 		if(cas(&b->flag, ov, nv))
 			break;
 	}
@@ -57,7 +63,7 @@ clrflag(Blk *b, int flg)
 int
 syncblk(Blk *b)
 {
-	assert(b->flag & Bfinal);
+	assert(checkflag(b, Bfinal));
 	clrflag(b, Bqueued|Bdirty);
 	return pwrite(fs->fd, b->buf, Blksz, b->bp.addr);
 }
@@ -820,8 +826,8 @@ putblk(Blk *b)
 {
 	if(b == nil || adec(&b->ref) != 0)
 		return;
-	assert(!(b->flag & Bcached));
-	assert((b->flag & Bfreed) || !(b->flag & Bdirty));
+	assert(checkflag(b, Bcached));
+	assert(checkflag(b, Bfreed) || !checkflag(b, Bdirty));
 	free(b);
 }
 
@@ -927,7 +933,7 @@ enqueue(Blk *b)
 	Arena *a;
 
 	a = getarena(b->bp.addr);
-	assert(b->flag & Bdirty);
+	assert(checkflag(b, Bdirty));
 	refblk(b);
 	finalize(b);
 	chsend(a->sync, b);
@@ -1011,7 +1017,7 @@ runsync(int, void *p)
 		}
 	
 		b = qpop(&q);
-		if(!(b->flag & Bfreed)){
+		if(!checkflag(b, Bfreed)){
 			if(syncblk(b) == -1){
 				ainc(&fs->broken);
 				fprint(2, "write: %r");

@@ -62,6 +62,7 @@ char*	btscan(Tree*, Scan*, char*, int);
 char*	btnext(Scan*, Kvp*, int*);
 void	btdone(Scan*);
 
+int	checkflag(Blk *b, int);
 void	setflag(Blk *b, int);
 void	clrflag(Blk *b, int);
 

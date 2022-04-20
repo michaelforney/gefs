@@ -432,7 +432,7 @@ packtree(char *p, int sz, Tree *t)
 		dl = &t->dead[i];
 		bp = dl->head;
 		if(dl->ins != nil){
-			assert(dl->ins->flag & Bfinal);
+			assert(checkflag(dl->ins, Bfinal));
 			bp = dl->ins->bp;
 		}
 		PBIT64(p, dl->prev);	p += 8;

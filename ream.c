@@ -98,7 +98,7 @@ initarena(Arena *a, Fshdr *fi, vlong start, vlong asz)
 	b->bp.addr = addr;
 	b->logsz = 32;
 	b->data = b->buf + _Loghdsz;
-	b->flag |= Bdirty;
+	setflag(b, Bdirty);
 
 	p = b->data + Loghashsz;
 	PBIT64(p, addr|LogFree);	p += 8;	/* addr */

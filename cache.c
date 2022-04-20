@@ -82,7 +82,7 @@ Found:
 	b->cnext = fs->chead;
 	b->cprev = nil;
 	fs->chead = b;
-	if((b->flag & Bcached) == 0){
+	if(!checkflag(b, Bcached)){
 		setflag(b, Bcached);
 		fs->ccount++;
 		refblk(b);

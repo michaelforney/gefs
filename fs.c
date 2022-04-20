@@ -853,7 +853,7 @@ fsattach(Fmsg *m)
 	f.iounit = m->conn->iounit;
 	f.dent = de;
 	f.uid = uid;
-	f.duid = uid;
+	f.duid = d.uid;
 	f.dgid = d.gid;
 	f.dmode = d.mode;
 	if(dupfid(m->conn, m->fid, &f) == nil){

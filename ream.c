@@ -97,7 +97,7 @@ initarena(Arena *a, Fshdr *fi, vlong start, vlong asz)
 	b->type = Tlog;
 	b->bp.addr = addr;
 	b->logsz = 32;
-	b->data = b->buf + _Loghdsz;
+	b->data = b->buf + Loghdsz;
 	setflag(b, Bdirty);
 
 	p = b->data + Loghashsz;

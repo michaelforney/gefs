@@ -6,7 +6,7 @@
 #include "dat.h"
 #include "fns.h"
 
-static void
+void
 cachedel_lk(vlong del)
 {
 	Bucket *bkt;
@@ -58,6 +58,8 @@ cacheblk(Blk *b)
 	for(e = bkt->b; e != nil; e = e->hnext){
 		if(b == e)
 			goto Found;
+		if(b->bp.addr == e->bp.addr)
+			print("b: %p, e: %p\n", getmalloctag(b), getmalloctag(e));
 		assert(b->bp.addr != e->bp.addr);
 	}
 	b->hnext = bkt->b;
@@ -93,14 +95,6 @@ Found:
 Cached:
 	unlock(&fs->lrulk);
 	return b;
-}
-
-void
-cachedel(vlong del)
-{
-	lock(&fs->lrulk);
-	cachedel_lk(del);
-	unlock(&fs->lrulk);
 }
 
 Blk*

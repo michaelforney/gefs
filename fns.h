@@ -17,7 +17,7 @@ Blk*	getroot(Tree*, int*);
 Blk*	getblk(Bptr, int);
 Blk*	refblk(Blk*);
 Blk*	cacheblk(Blk*);
-void	cachedel(vlong);
+void	cachedel_lk(vlong);
 Blk*	lookupblk(vlong);
 Arena*	getarena(vlong);
 void	putblk(Blk*);

@@ -65,13 +65,13 @@ enum {
 
 	Pivhdsz		= 10,
 	Leafhdsz	= 6,
-	_Loghdsz		= 2,
+	Loghdsz		= 2,
 	Loghashsz	= 8,
 	Rootsz		= 4+Ptrsz,	/* root pointer */
 	Pivsz		= Blksz - Pivhdsz,
 	Bufspc		= (Blksz - Pivhdsz) / 2,
 	Pivspc		= Blksz - Pivhdsz - Bufspc,
-	Logspc		= Blksz - _Loghdsz,
+	Logspc		= Blksz - Loghdsz,
 	Leafspc 	= Blksz - Leafhdsz,
 	Msgmax  	= 1 + (Kvmax > Kpmax ? Kvmax : Kpmax)
 };

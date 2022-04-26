@@ -23,7 +23,8 @@ struct Flushq {
 static vlong	blkalloc_lk(Arena*);
 static vlong	blkalloc(int);
 static int	blkdealloc_lk(vlong);
-static Blk*	initblk(vlong, int);
+static Blk*	blkbuf(void);
+static Blk*	initblk(Blk*, vlong, int);
 static int	logop(Arena *, vlong, vlong, int);
 
 static Blk magic;
@@ -118,7 +119,7 @@ readblk(vlong bp, int flg)
 		break;
 	case Tlog:
 	case Tdead:
-		b->data = b->buf + _Loghdsz;
+		b->data = b->buf + Loghdsz;
 		break;
 		break;
 	case Tpivot:
@@ -269,8 +270,9 @@ logappend(Arena *a, vlong off, vlong len, int op, Blk **tl)
 		pb = lb;
 		if((o = blkalloc_lk(a)) == -1)
 			return -1;
-		if((lb = initblk(o, Tlog)) == nil)
+		if((lb = blkbuf()) == nil)
 			return -1;
+		initblk(lb, o, Tlog);
 		cacheblk(lb);
 		lb->logsz = Loghashsz;
 		p = lb->data + lb->logsz;
@@ -367,13 +369,14 @@ Nextblk:
 		switch(op){
 		case LogEnd:
 			dprint("log@%d: end\n", i);
+			putblk(b);
 			return 0;
 		case LogChain:
 			bp.addr = off & ~0xff;
 			bp.hash = -1;
 			bp.gen = -1;
+			putblk(b);
 			dprint("log@%d: chain %B\n", i, bp);
-			b->logsz = i+n;
 			goto Nextblk;
 			break;
 
@@ -426,9 +429,9 @@ compresslog(Arena *a)
 	 */
 	if((ba = blkalloc_lk(a)) == -1)
 		return -1;
-	if((b = initblk(ba, Tlog)) == nil)
+	if((b = blkbuf()) == nil)
 		return -1;
-	setflag(b, Bdirty);
+	initblk(b, ba, Tlog);
 	b->logsz = Loghashsz;
 
 	p = b->data + b->logsz;
@@ -469,10 +472,7 @@ compresslog(Arena *a)
 		free(log);
 		return -1;
 	}
-	if((b = initblk(ba, Tlog)) == nil){
-		free(log);
-		return -1;
-	}
+	initblk(b, ba, Tlog);
 	for(r = (Arange*)avlmin(a->free); r != nil; r = (Arange*)avlnext(r)){
 		if(n == sz){
 			sz *= 2;
@@ -526,11 +526,15 @@ compresslog(Arena *a)
 					break;
 				}
 			}
+			putblk(b);
 			lock(a);
+			lock(&fs->lrulk);
+			cachedel_lk(bp.addr);
 			if(blkdealloc_lk(ba) == -1){
 				unlock(a);
 				return -1;
 			}
+			unlock(&fs->lrulk);
 			unlock(a);
 		}
 	}
@@ -635,28 +639,33 @@ Again:
 }
 
 static Blk*
-initblk(vlong bp, int t)
+blkbuf(void)
 {
 	Blk *b;
 
-	if((b = lookupblk(bp)) == nil){
-		if((b = malloc(sizeof(Blk))) == nil)
-			return nil;
-		setmalloctag(b, getcallerpc(&bp));
-		/*
-		 * If the block is cached,
-		 * then the cache holds a ref
-		 * to the block, so we only
-		 * want to reset the refs
-		 * on an allocation.
-		 */
-		b->ref = 1;
-		b->cnext = nil;
-		b->cprev = nil;
-		b->hnext = nil;
-		b->flag = 0;
-	}
+	if((b = malloc(sizeof(Blk))) == nil)
+		return nil;
+	/*
+	 * If the block is cached,
+	 * then the cache holds a ref
+	 * to the block, so we only
+	 * want to reset the refs
+	 * on an allocation.
+	 */
+	b->ref = 1;
+	b->cnext = nil;
+	b->cprev = nil;
+	b->hnext = nil;
+	b->flag = 0;
 
+	return b;
+}
+
+
+static Blk*
+initblk(Blk *b, vlong bp, int t)
+{
+	assert(lookupblk(bp) == nil);
 	b->type = t;
 	b->bp.addr = bp;
 	b->bp.hash = -1;
@@ -669,7 +678,7 @@ initblk(vlong bp, int t)
 		break;
 	case Tdead:
 	case Tlog:
-		b->data = b->buf + _Loghdsz;
+		b->data = b->buf + Loghdsz;
 		break;
 	case Tpivot:
 		b->data = b->buf + Pivhdsz;
@@ -699,9 +708,12 @@ newblk(int t)
 
 	if((bp = blkalloc(t)) == -1)
 		return nil;
-	if((b = initblk(bp, t)) == nil)
+	if((b = blkbuf()) == nil)
 		return nil;
+	initblk(b, bp, t);
 	setmalloctag(b, getcallerpc(&t));
+	cacheblk(b);
+	assert(b->ref == 2);
 	return b;
 }
 
@@ -769,9 +781,6 @@ getblk(Bptr bp, int flg)
 	Blk *b;
 	int i;
 
-	if((b = lookupblk(bp.addr)) != nil)
-		return cacheblk(b);
-
 	i = ihash(bp.addr) % nelem(fs->blklk);
 	qlock(&fs->blklk[i]);
 	if((b = lookupblk(bp.addr)) != nil){
@@ -826,7 +835,7 @@ putblk(Blk *b)
 {
 	if(b == nil || adec(&b->ref) != 0)
 		return;
-	assert(checkflag(b, Bcached));
+	assert(!checkflag(b, Bcached));
 	assert(checkflag(b, Bfreed) || !checkflag(b, Bdirty));
 	free(b);
 }
@@ -865,8 +874,10 @@ reclaimblk(Bptr bp)
 
 	a = getarena(bp.addr);
 	lock(a);
+	lock(&fs->lrulk);
+	cachedel_lk(bp.addr);
 	blkdealloc_lk(bp.addr);
-	cachedel(bp.addr);
+	unlock(&fs->lrulk);
 	unlock(a);
 }
 

@@ -76,7 +76,7 @@ readblk(vlong bp, int flg)
 	vlong off, rem, n;
 
 	assert(bp != -1);
-	if((b = malloc(sizeof(Blk))) == nil)
+	if((b = blkbuf()) == nil)
 		return nil;
 	off = bp;
 	rem = Blksz;
@@ -291,6 +291,7 @@ logappend(Arena *a, vlong off, vlong len, int op, Blk **tl)
 				putblk(pb);
 				return -1;
 			}
+			lrubump(pb);
 			putblk(pb);
 		}
 		*tl = lb;
@@ -438,7 +439,7 @@ compresslog(Arena *a)
 	PBIT64(p, (uvlong)LogEnd);
 	finalize(b);
 	if(syncblk(b) == -1){
-		free(b);
+		putblk(b);
 		return -1;
 	}
 
@@ -528,13 +529,11 @@ compresslog(Arena *a)
 			}
 			putblk(b);
 			lock(a);
-			lock(&fs->lrulk);
-			cachedel_lk(bp.addr);
+			cachedel(bp.addr);
 			if(blkdealloc_lk(ba) == -1){
 				unlock(a);
 				return -1;
 			}
-			unlock(&fs->lrulk);
 			unlock(a);
 		}
 	}
@@ -785,6 +784,7 @@ getblk(Bptr bp, int flg)
 	qlock(&fs->blklk[i]);
 	if((b = lookupblk(bp.addr)) != nil){
 		cacheblk(b);
+		lrubump(b);
 		qunlock(&fs->blklk[i]);
 		return b;
 	}
@@ -803,6 +803,7 @@ getblk(Bptr bp, int flg)
 	b->bp.hash = h;
 	b->bp.gen = bp.gen;
 	cacheblk(b);
+	lrubump(b);
 	qunlock(&fs->blklk[i]);
 
 	return b;
@@ -874,10 +875,8 @@ reclaimblk(Bptr bp)
 
 	a = getarena(bp.addr);
 	lock(a);
-	lock(&fs->lrulk);
-	cachedel_lk(bp.addr);
+	cachedel(bp.addr);
 	blkdealloc_lk(bp.addr);
-	unlock(&fs->lrulk);
 	unlock(a);
 }
 
@@ -1034,6 +1033,7 @@ runsync(int, void *p)
 				fprint(2, "write: %r");
 				abort();
 			}
+			lrubump(b);
 		}
 		putblk(b);
 	}

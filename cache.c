@@ -6,7 +6,7 @@
 #include "dat.h"
 #include "fns.h"
 
-void
+static void
 cachedel_lk(vlong del)
 {
 	Bucket *bkt;
@@ -22,14 +22,12 @@ cachedel_lk(vlong del)
 			break;
 		p = &b->hnext;
 	}
-	if(b == nil){
-		unlock(bkt);
-		return;
-	}
-	*p = b->hnext;
 	unlock(bkt);
+	if(b == nil)
+		return;
+	assert(checkflag(b, Bcached));
 
-	assert(b != fs->chead || b != fs->ctail);
+	*p = b->hnext;
 	if(b->cnext != nil)
 		b->cnext->cprev = b->cprev;
 	if(b->cprev != nil)
@@ -40,17 +38,26 @@ cachedel_lk(vlong del)
 		fs->chead = b->cnext;
 	b->cnext = nil;
 	b->cprev = nil;
-	clrflag(b, Bcached);
 	fs->ccount--;
+
+	clrflag(b, Bcached);
 	putblk(b);
+}
+
+void
+cachedel(vlong del)
+{
+	lock(&fs->lrulk);
+	cachedel_lk(del);
+	unlock(&fs->lrulk);
 }
 
 Blk*
 cacheblk(Blk *b)
 {
 	Bucket *bkt;
-	Blk *e, *c;
 	u32int h;
+	Blk *e;
 
 	h = ihash(b->bp.addr);
 	bkt = &fs->cache[h % fs->cmax];
@@ -58,18 +65,33 @@ cacheblk(Blk *b)
 	for(e = bkt->b; e != nil; e = e->hnext){
 		if(b == e)
 			goto Found;
-		if(b->bp.addr == e->bp.addr)
-			print("b: %p, e: %p\n", getmalloctag(b), getmalloctag(e));
 		assert(b->bp.addr != e->bp.addr);
 	}
 	b->hnext = bkt->b;
 	bkt->b = b;
+	if(!checkflag(b, Bcached)){
+		setflag(b, Bcached);
+		refblk(b);
+		fs->ccount++;
+	}
 Found:
 	unlock(bkt);
+	return b;
+}
+
+Blk*
+lrubump(Blk *b)
+{
+	Blk *c;
 
 	lock(&fs->lrulk);
+	if(checkflag(b, Bcached) == 0){
+		assert(b->cnext == nil);
+		assert(b->cprev == nil);
+		goto Done;
+	}
 	if(b == fs->chead)
-		goto Cached;
+		fs->chead = b->cnext;
 
 	if(b == fs->ctail)
 		fs->ctail = b->cprev;
@@ -84,15 +106,12 @@ Found:
 	b->cnext = fs->chead;
 	b->cprev = nil;
 	fs->chead = b;
-	if(!checkflag(b, Bcached)){
-		setflag(b, Bcached);
-		fs->ccount++;
-		refblk(b);
-	}
-	for(c = fs->ctail; c != nil && fs->ccount >= fs->cmax; c = fs->ctail)
+	for(c = fs->ctail; c != b && fs->ccount >= fs->cmax; c = fs->ctail){
+		assert(c != fs->chead);
 		cachedel_lk(c->bp.addr);
+	}
 
-Cached:
+Done:
 	unlock(&fs->lrulk);
 	return b;
 }

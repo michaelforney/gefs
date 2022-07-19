@@ -902,22 +902,21 @@ quiesce(int tid)
 		if(fs->active[i] == fs->lastactive[i])
 			allquiesced = 0;
 	}
-	if(allquiesced)
+	p = nil;
+	if(allquiesced){
+		inc64(&fs->qgen, 1);
 		for(i = 0; i < fs->nquiesce; i++)
 			fs->lastactive[i] = fs->active[i];
-	unlock(&fs->activelk);
-	if(!allquiesced)
-		return;
 
-	inc64(&fs->qgen, 1);
-	lock(&fs->freelk);
-	p = nil;
-	if(fs->freep != nil){
-		p = fs->freep->next;
-		fs->freep->next = nil;
+		lock(&fs->freelk);
+		if(fs->freep != nil){
+			p = fs->freep->next;
+			fs->freep->next = nil;
+		}
+		fs->freep = fs->freehd;
+		unlock(&fs->freelk);
 	}
-	fs->freep = fs->freehd;
-	unlock(&fs->freelk);
+	unlock(&fs->activelk);
 
 	while(p != nil){
 		n = p->next;

@@ -1,0 +1,10 @@
+TESTS=\
+	basic\
+	build\
+
+test:VQ:
+	@{cd .. && mk 6.out}
+	for(t in $TESTS){
+		echo $t...
+		./$t.rc >[2=1] >$t.log
+	}

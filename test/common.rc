@@ -1,0 +1,28 @@
+#!/bin/rc
+
+rfork ne
+
+srv=gefstest.$pid
+fs=/n/$srv
+
+fn setup{
+	if(! test -f test.fs){
+		dd -if /dev/zero -of test.fs -bs 1kk -count 2k
+		chmod +t test.fs
+	}
+	../6.out -r -f test.fs
+	../6.out -m 32 -Au glenda -f test.fs -n $srv
+	mount -c /srv/$srv $fs
+}
+
+fn assert {
+	st=$status
+	if(! ~ $#st 0){
+		echo $st >[1=2]
+		exit $st
+	}
+}
+
+fn sigexit{
+	unmount $fs
+}

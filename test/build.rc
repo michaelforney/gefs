@@ -1,0 +1,21 @@
+#!/bin/rc -e
+
+. common.rc
+
+setup
+
+cd $fs
+
+# we don't want to clobber the installed
+# libs with something corrupt, so copy
+# them in and bind them over.
+mkdir -p $cputype/lib
+dircp /$cputype/lib $cputype/lib
+bind $cputype/lib /$cputype/lib
+
+# clone our repo
+git/clone /dist/plan9front
+bind plan9front/sys/include /sys/include
+
+cd plan9front/sys/src
+mk all

@@ -805,7 +805,7 @@ fsattach(Fmsg *m)
 	Xdir d;
 	Kvp kv;
 	Key dk;
-	Fid f;
+	Fid f, *af;
 	int uid;
 
 	de = nil;
@@ -825,6 +825,22 @@ fsattach(Fmsg *m)
 	}
 	uid = u->id;
 	runlock(&fs->userlk);
+
+	if(m->afid != NOFID){
+		if((af = getfid(m->conn, m->afid)) == nil){
+			rerror(m, Efid);
+			goto Out;
+		}
+		if(af->uid != uid){
+			rerror(m, Ebadu);
+			putfid(af);
+			goto Out;
+		}
+		putfid(af);
+	}else if(!fs->noauth){
+		rerror(m, Ebadu);
+		goto Out;
+	}
 
 	if((p = packdkey(dbuf, sizeof(dbuf), -1ULL, "")) == nil){
 		rerror(m, Elength);

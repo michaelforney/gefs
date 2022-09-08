@@ -2,7 +2,6 @@
 #include <libc.h>
 #include <auth.h>
 #include <fcall.h>
-#include <pool.h>
 #include <avl.h>
 
 #include "dat.h"

@@ -33,15 +33,40 @@ inc64(vlong *v, vlong dv)
 static void
 initfs(vlong cachesz)
 {
+	char *p, *buf, *ebuf;
+	usize sz;
+	uvlong *ck;
+	Blk *b;
+
 	if((fs = mallocz(sizeof(Gefs), 1)) == nil)
 		sysfatal("malloc: %r");
 
+	fs->freerz.l = &fs->freelk;
+	fs->syncrz.l = &fs->synclk;
 	fs->noauth = noauth;
 	fs->cmax = cachesz/Blksz;
-	if(fs->cmax >= (2ULL*GiB)/sizeof(Bucket))
+	if(fs->cmax > (1<<30))
 		sysfatal("cache too big");
 	if((fs->cache = mallocz(fs->cmax*sizeof(Bucket), 1)) == nil)
 		sysfatal("malloc: %r");
+
+	/* leave room for corruption check magic */
+	sz = 8+sizeof(Blk)+8;
+	buf = sbrk(fs->cmax * sz);
+	if(buf == (void*)-1)
+		sysfatal("sbrk: %r");
+	ebuf = buf + fs->cmax*sz;
+	for(p = buf; p != ebuf; p += sz){
+		ck = (uvlong*)p;
+		*ck = HdMagic;
+
+		b = (Blk*)(p+8);
+		b->fnext = fs->free;
+		fs->free = b;
+
+		ck = (uvlong*)(b+1);
+		*ck = TlMagic;
+	}
 }
 
 static void
@@ -158,6 +183,7 @@ main(int argc, char **argv)
 	assert(4*Kpmax < Pivspc);
 	assert(2*Msgmax < Bufspc);
 	assert(Treesz < Inlmax);
+
 	initfs(cachesz);
 	initshow();
 	fmtinstall('H', encodefmt);
@@ -182,7 +208,6 @@ main(int argc, char **argv)
 
 	loadfs(dev);
 
-	fs->syncrz.l = &fs->synclk;
 	fs->rdchan = mkchan(32);
 	fs->wrchan = mkchan(32);
 	fs->nsyncers = nproc;

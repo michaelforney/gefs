@@ -239,6 +239,11 @@ enum {
 	Nmsgtype,	/* maximum message type */
 };
 
+enum {
+	HdMagic = 0x68646d6167696373,
+	TlMagic = 0x979b929e98969c8c,
+};
+
 /*
  * Wstat ops come with associated data, in the order
  * of the bit flags.
@@ -428,9 +433,14 @@ struct Gefs {
 	int	active[32];
 	int	lastactive[32];
 	Chan	*chsync[32];
-	Lock	freelk;
-	Bfree	*freep;
-	Bfree	*freehd;
+
+	QLock	freelk;
+	Rendez	freerz;
+	Blk	*free;
+
+	Lock	dealloclk;
+	Bfree	*deallocp;
+	Bfree	*deallochd;
 
 	int	fd;
 	long	broken;
@@ -594,6 +604,7 @@ struct Blk {
 	vlong	logsz;	/* for allocation log */
 	vlong	lognxt;	/* for allocation log */
 
+	uintptr	alloced;
 	uintptr	freed;	/* debug */
 
 	Bptr	bp;

@@ -24,6 +24,7 @@ static vlong	blkalloc_lk(Arena*);
 static vlong	blkalloc(int);
 static int	blkdealloc_lk(vlong);
 static Blk*	blkbuf(void);
+static void	blkfree(Blk*);
 static Blk*	initblk(Blk*, vlong, int);
 static int	logop(Arena *, vlong, vlong, int);
 
@@ -83,7 +84,7 @@ readblk(vlong bp, int flg)
 	while(rem != 0){
 		n = pread(fs->fd, b->buf, rem, off);
 		if(n <= 0){
-			free(b);
+			blkfree(b);
 			return nil;
 		}
 		off += n;
@@ -447,7 +448,7 @@ compresslog(Arena *a)
 	if(a->tail != nil){
 		finalize(a->tail);
 		if(syncblk(a->tail) == -1){
-			free(b);
+			blkfree(b);
 			return -1;
 		}
 	}
@@ -640,10 +641,23 @@ Again:
 static Blk*
 blkbuf(void)
 {
+	uvlong *p;
 	Blk *b;
 
-	if((b = malloc(sizeof(Blk))) == nil)
-		return nil;
+	qlock(&fs->freelk);
+	while(fs->free == nil)
+		rsleep(&fs->freerz);
+	b = fs->free;
+	fs->free = b->fnext;
+
+	/* check for corruption */
+	p = (uvlong*)b - 1;
+	assert(*p == HdMagic);
+
+	p = (uvlong*)(b + 1);
+	assert(*p == TlMagic);
+	qunlock(&fs->freelk);
+
 	/*
 	 * If the block is cached,
 	 * then the cache holds a ref
@@ -660,6 +674,16 @@ blkbuf(void)
 	return b;
 }
 
+static void
+blkfree(Blk *b)
+{
+	b->bp.addr = -1;
+	qlock(&fs->freelk);
+	b->fnext = fs->free;
+	fs->free = b;
+	rwakeup(&fs->freerz);
+	qunlock(&fs->freelk);
+}
 
 static Blk*
 initblk(Blk *b, vlong bp, int t)
@@ -710,8 +734,8 @@ newblk(int t)
 	if((b = blkbuf()) == nil)
 		return nil;
 	initblk(b, bp, t);
-	setmalloctag(b, getcallerpc(&t));
 	cacheblk(b);
+	b->alloced = getcallerpc(&t);
 	assert(b->ref == 2);
 	return b;
 }
@@ -733,7 +757,7 @@ dupblk(Blk *b)
 	r->logsz = b->logsz;
 	r->lognxt = b->lognxt;
 	memcpy(r->buf, b->buf, sizeof(r->buf));
-	setmalloctag(b, getcallerpc(&b));
+	b->alloced = getcallerpc(&b);
 	return r;
 }
 
@@ -792,7 +816,7 @@ getblk(Bptr bp, int flg)
 		qunlock(&fs->blklk[i]);
 		return nil;
 	}else
-		setmalloctag(b, getcallerpc(&bp));
+		b->alloced = getcallerpc(&bp);
 	h = blkhash(b);
 	if((flg&GBnochk) == 0 && h != bp.hash){
 		fprint(2, "corrupt block %B: %.16llux != %.16llux\n", bp, h, bp.hash);
@@ -838,7 +862,7 @@ putblk(Blk *b)
 		return;
 	assert(!checkflag(b, Bcached));
 	assert(checkflag(b, Bfreed) || !checkflag(b, Bdirty));
-	free(b);
+	blkfree(b);
 }
 
 void
@@ -854,10 +878,10 @@ freebp(Tree *t, Bptr bp)
 	if((f = malloc(sizeof(Bfree))) == nil)
 		return;
 	f->bp = bp;
-	lock(&fs->freelk);
-	f->next = fs->freehd;
-	fs->freehd = f;
-	unlock(&fs->freelk);
+	lock(&fs->dealloclk);
+	f->next = fs->deallochd;
+	fs->deallochd = f;
+	unlock(&fs->dealloclk);
 }
 
 void
@@ -908,13 +932,13 @@ quiesce(int tid)
 		for(i = 0; i < fs->nquiesce; i++)
 			fs->lastactive[i] = fs->active[i];
 
-		lock(&fs->freelk);
-		if(fs->freep != nil){
-			p = fs->freep->next;
-			fs->freep->next = nil;
+		lock(&fs->dealloclk);
+		if(fs->deallocp != nil){
+			p = fs->deallocp->next;
+			fs->deallocp->next = nil;
 		}
-		fs->freep = fs->freehd;
-		unlock(&fs->freelk);
+		fs->deallocp = fs->deallochd;
+		unlock(&fs->dealloclk);
 	}
 	unlock(&fs->activelk);
 

@@ -167,10 +167,10 @@ setmsg(Blk *b, Msg *m)
 	b->bufsz += msgsz(m)-2;
 
 	p = b->data + Pivspc + 2*b->nbuf;
-	o = Pivspc - b->bufsz;
+	o = Bufspc - b->bufsz;
 	PBIT16(p, o);
 
-	p = b->data + Bufspc + o;
+	p = b->data + Pivspc + o;
 	*p = m->op;		p += 1;
 	PBIT16(p, m->nk);	p += 2;
 	memcpy(p, m->k, m->nk);	p += m->nk;

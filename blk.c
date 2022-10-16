@@ -276,7 +276,8 @@ logappend(Arena *a, vlong off, vlong len, int op, Blk **tl)
 		cacheins(lb);
 		lb->logsz = Loghashsz;
 		p = lb->data + lb->logsz;
-		PBIT64(p, (uvlong)LogEnd);
+		PBIT64(p+0, o|LogAlloc1);
+		PBIT64(p+8, (uvlong)LogEnd);
 		finalize(lb);
 		if(syncblk(lb) == -1){
 			dropblk(lb);

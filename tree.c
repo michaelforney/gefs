@@ -963,7 +963,7 @@ trybalance(Tree *t, Path *p, Path *pp, int idx)
 	if(pp->op != POmod || pp->op != POmerge)
 		return 0;
 
-	m = refblk(pp->nl);
+	m = holdblk(pp->nl);
 	spc = (m->type == Tleaf) ? Leafspc : Pivspc;
 	if(idx-1 >= 0){
 		getval(p->b, idx-1, &kl);
@@ -990,9 +990,9 @@ trybalance(Tree *t, Path *p, Path *pp, int idx)
 Done:
 	ret = 0;
 Out:
-	putblk(m);
-	putblk(l);
-	putblk(r);
+	dropblk(m);
+	dropblk(l);
+	dropblk(r);
 	return ret;
 }
 
@@ -1081,9 +1081,9 @@ freepath(Tree *t, Path *path, int npath)
 			freeblk(t, p->b);
 		if(p->m != nil)
 			freeblk(t, p->m);
-		putblk(p->b);
-		putblk(p->nl);
-		putblk(p->nr);
+		dropblk(p->b);
+		dropblk(p->nl);
+		dropblk(p->nr);
 	}
 	free(path);
 }
@@ -1178,14 +1178,15 @@ fastupsert(Tree *t, Blk *b, Msg *msg, int nmsg)
 		PBIT16(p, o);
 	}
 	enqueue(r);
+
 	lock(&t->lk);
 	t->bp = r->bp;
 	t->dirty = 1;
 	unlock(&t->lk);
 
 	freeblk(t, b);
-	putblk(b);
-	putblk(r);
+	dropblk(b);
+	dropblk(r);
 	return nil;
 }
 	
@@ -1265,6 +1266,8 @@ Again:
 
 
 	assert(rb->bp.addr != 0);
+	assert(rb->bp.addr != 0);
+
 	lock(&t->lk);
 	t->ht += dh;
 	t->bp = rb->bp;
@@ -1305,11 +1308,13 @@ btlookup(Tree *t, Key *k, Kvp *r, char *buf, int nbuf)
 
 	if((b = getroot(t, &h)) == nil)
 		return Efs;
-	if((p = calloc(h, sizeof(Blk*))) == nil)
+	if((p = calloc(h, sizeof(Blk*))) == nil){
+		dropblk(b);
 		return Enomem;
+	}
 	err = Eexist;
 	ok = 0;
-	p[0] = refblk(b);
+	p[0] = holdblk(b);
 	for(i = 1; i < h; i++){
 		if(blksearch(p[i-1], k, r, &same) == -1)
 			break;
@@ -1351,8 +1356,8 @@ btlookup(Tree *t, Key *k, Kvp *r, char *buf, int nbuf)
 Out:
 	for(i = 0; i < h; i++)
 		if(p[i] != nil)
-			putblk(p[i]);
-	putblk(b);
+			dropblk(p[i]);
+	dropblk(b);
 	free(p);
 	return err;
 }
@@ -1432,7 +1437,7 @@ Again:
 			return nil;
 		}
 		if(p[i].b != nil)
-			putblk(p[i].b);
+			dropblk(p[i].b);
 		p[i].b = nil;
 		p[i].vi = 0;
 		p[i].bi = 0;
@@ -1498,6 +1503,6 @@ btdone(Scan *s)
 	int i;
 
 	for(i = 0; i < s->root.ht; i++)
-		putblk(s->path[i].b);
+		dropblk(s->path[i].b);
 	free(s->path);
 }

@@ -50,11 +50,11 @@ loadfs(char *dev)
 	Arena *a;
 	char *e;
 	Tree *t;
-	int i;
+	int i, k;
 
 	fs->osnap = nil;
 	fs->gotinfo = 0;
-	fs->narena = 8;
+	fs->narena = 1;
 	if((fs->fd = open(dev, ORDWR)) == -1)
 		sysfatal("open %s: %r", dev);
 	if((fs->arenas = calloc(1, sizeof(Arena))) == nil)
@@ -67,7 +67,8 @@ loadfs(char *dev)
 		if(!fs->gotinfo){
 			if((fs->arenas = realloc(fs->arenas, fs->narena*sizeof(Arena))) == nil)
 				sysfatal("malloc: %r");
-			memset(fs->arenas+1, 0, (fs->narena-1)*sizeof(Arena));
+			for(k = 1; k < fs->narena; k++)
+				memset(&fs->arenas[k], 0, sizeof(Arena));
 			fs->gotinfo = 1;
 		}
 	}
@@ -92,6 +93,7 @@ loadfs(char *dev)
 	fprint(2, "\tarenasz:\t%lld\n", fs->arenasz);
 	fprint(2, "\tnextqid:\t%lld\n", fs->nextqid);
 	fprint(2, "\tnextgen:\t%lld\n", fs->nextgen);
+	fprint(2, "\tblocksize:\t%lld\n", Blksz);
 	fprint(2, "\tcachesz:\t%lld MiB\n", fs->cmax*Blksz/MiB);
 	if((t = openlabel("main")) == nil)
 		sysfatal("load users: no main label");

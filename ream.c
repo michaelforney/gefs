@@ -85,15 +85,14 @@ initarena(Arena *a, Fshdr *fi, vlong start, vlong asz)
 	char *p;
 	Blk *b;
 
-	if((b = mallocz(sizeof(Blk), 1)) == nil)
-		sysfatal("ream: %r");
+	b = cachepluck();
 	addr = start+Blksz;	/* arena header */
 
 	a->head.addr = -1;
 	a->head.hash = -1;
 	a->head.gen = -1;
 
-	memset(b, 0, sizeof(Blk));
+	memset(b->buf, 0, sizeof(b->buf));
 	b->type = Tlog;
 	b->bp.addr = addr;
 	b->logsz = 32;
@@ -109,11 +108,13 @@ initarena(Arena *a, Fshdr *fi, vlong start, vlong asz)
 	finalize(b);
 	if(syncblk(b) == -1)
 		sysfatal("ream: init log");
+	dropblk(b);
 
 	bh = b->bp.hash;
 	bo = b->bp.addr;
 
-	memset(b, 0, sizeof(Blk));
+	b = cachepluck();
+	memset(b->buf, 0, sizeof(b->buf));
 	b->type = Tarena;
 	b->bp.addr = start;
 	b->data = b->buf;
@@ -127,6 +128,7 @@ initarena(Arena *a, Fshdr *fi, vlong start, vlong asz)
 	finalize(b);
 	if(syncblk(b) == -1)
 		sysfatal("ream: write arena: %r");
+	dropblk(b);
 }
 
 void
@@ -189,7 +191,7 @@ reamfs(char *dev)
 	}
 	if((tb = newblk(Tleaf)) == nil)
 		sysfatal("ream: allocate root: %r");
-	refblk(tb);
+	holdblk(tb);
 	initroot(tb);
 	finalize(tb);
 	syncblk(tb);
@@ -204,7 +206,7 @@ reamfs(char *dev)
 	 */
 	if((rb = newblk(Tleaf)) == nil)
 		sysfatal("ream: allocate snaps: %r");
-	refblk(rb);
+	holdblk(rb);
 	initsnap(rb, tb);
 	finalize(rb);
 	syncblk(rb);
@@ -212,8 +214,8 @@ reamfs(char *dev)
 	fs->snap.bp = rb->bp;
 	fs->snap.ht = 1;
 
-	putblk(tb);
-	putblk(rb);
+	dropblk(tb);
+	dropblk(rb);
 	for(i = 0; i < fs->narena; i++){
 		a = &fs->arenas[i];
 		finalize(a->tail);

@@ -266,7 +266,7 @@ rshowblk(int fd, Blk *b, int indent, int recurse)
 					sysfatal("failed load: %r");
 				if(recurse)
 					rshowblk(fd, c, indent + 1, 1);
-				putblk(c);
+				dropblk(c);
 			}else{
 				fprint(fd, "%.*s[%03d]|%P\n", 4*indent, spc, i, &kv);
 			}
@@ -322,7 +322,7 @@ showtree(int fd, char **ap, int na)
 	b = getroot(t, &h);
 	fprint(fd, "=== [%s] %B @%d\n", name, t->bp, t->ht);
 	rshowblk(fd, b, 0, 1);
-	putblk(b);
+	dropblk(b);
 	if(t != &fs->snap)
 		closesnap(t);
 }
@@ -334,7 +334,7 @@ showbp(int fd, Bptr bp, int recurse)
 
 	b = getblk(bp, GBnochk);
 	rshowblk(fd, b, 0, recurse);
-	putblk(b);
+	dropblk(b);
 }
 
 static void

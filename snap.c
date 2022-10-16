@@ -98,7 +98,7 @@ dlinsert(Dlist *dl, vlong v1, vlong v2)
 		}
 		lb->logsz = Loghashsz;
 		dl->ins = lb;
-		putblk(pb);
+		dropblk(pb);
 	}
 	p = lb->data + lb->logsz;
 	PBIT64(p, v1);	p += 8;

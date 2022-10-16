@@ -276,7 +276,7 @@ readb(Fid *f, char *d, vlong o, vlong n, vlong sz)
 	if((b = getblk(bp, GBraw)) == nil)
 		return -1;
 	memcpy(d, b->buf+fo, n);
-	putblk(b);
+	dropblk(b);
 	return n;
 }
 
@@ -309,7 +309,7 @@ writeb(Fid *f, Msg *m, Bptr *ret, char *s, vlong o, vlong n, vlong sz)
 				return -1;
 			memcpy(b->buf, t->buf, Blksz);
 			freeblk(f->mnt->root, t);
-			putblk(t);
+			dropblk(t);
 		}else if(e != Eexist){
 			werrstr("%s", e);
 			return -1;
@@ -328,7 +328,7 @@ writeb(Fid *f, Msg *m, Bptr *ret, char *s, vlong o, vlong n, vlong sz)
 
 	packbp(m->v, m->nv, &b->bp);
 	*ret = b->bp;
-	putblk(b);
+	dropblk(b);
 	return n;
 }
 
@@ -1886,7 +1886,7 @@ runwrite(int wid, void *)
 
 	while(1){
 		m = chrecv(fs->wrchan, 1);
-		quiesce(wid);
+		epochstart(wid);
 		ao = (m->a == nil) ? AOnone : m->a->op;
 		switch(ao){
 		case AOnone:
@@ -1923,7 +1923,7 @@ runwrite(int wid, void *)
 			freemsg(m);
 			break;
 		}
-		quiesce(wid);
+		epochend(wid);
 	}
 }
 
@@ -1934,7 +1934,7 @@ runread(int wid, void *)
 
 	while(1){
 		m = chrecv(fs->rdchan, 1);
-		quiesce(wid);
+		epochstart(wid);
 		switch(m->type){
 		case Tflush:	rerror(m, Eimpl);	break;
 		case Tattach:	fsattach(m);	break;
@@ -1943,7 +1943,7 @@ runread(int wid, void *)
 		case Tstat:	fsstat(m);	break;
 		case Topen:	fsopen(m);	break;
 		}
-		quiesce(wid);
+		epochend(wid);
 	}
 }
 

@@ -81,7 +81,7 @@ badblk(int fd, Blk *b, int h, Kvp *lo, Kvp *hi)
 			}
 			if(badblk(fd, c, h - 1, &x, &y))
 				fail++;
-			putblk(c);
+			dropblk(c);
 		}
 		r = keycmp(&x, &y);
 		switch(r){
@@ -187,7 +187,7 @@ checkfs(int fd)
 	if((b = getroot(&fs->snap, &height)) != nil){
 		if(badblk(fd, b, height-1, nil, 0))
 			ok = 0;
-		putblk(b);
+		dropblk(b);
 	}
 	return ok;
 }

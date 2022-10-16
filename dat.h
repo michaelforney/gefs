@@ -92,10 +92,9 @@ enum {
 
 enum {
 	Bdirty	= 1 << 0,
-	Bqueued	= 1 << 1,
-	Bfinal	= 1 << 2,
-	Bfreed	= 1 << 3,
-	Bcached	= 1 << 4,
+	Bfinal	= 1 << 1,
+	Bfreed	= 1 << 2,
+	Bcached	= 1 << 3,
 };
 
 /* internal errors */
@@ -240,8 +239,7 @@ enum {
 };
 
 enum {
-	HdMagic = 0x68646d6167696373,
-	TlMagic = 0x979b929e98969c8c,
+	Magic = 0x979b929e98969c8c,
 };
 
 /*
@@ -375,8 +373,9 @@ struct Tree {
 };
 
 struct Bfree {
-	Bptr	bp;
 	Bfree	*next;
+	Blk	*b;
+	Bptr	bp;
 };
 
 struct User {
@@ -430,17 +429,13 @@ struct Gefs {
 	int	nquiesce;
 	vlong	qgen;
 	Lock	activelk;
-	int	active[32];
+	ulong	active[32];
 	int	lastactive[32];
 	Chan	*chsync[32];
 
-	QLock	freelk;
-	Rendez	freerz;
-	Blk	*free;
-
-	Lock	dealloclk;
-	Bfree	*deallocp;
-	Bfree	*deallochd;
+	Lock	freelk;
+	Bfree	*freep;
+	Bfree	*freehd;
 
 	int	fd;
 	long	broken;
@@ -460,12 +455,14 @@ struct Gefs {
 	QLock	blklk[32];
 
 	/* protected by lrulk */
-	Lock	lrulk;
+	QLock	lrulk;
+	Rendez	lrurz;
 	Bucket	*cache;
+	Blk	*blks;	/* all blocks for debugging */
 	Blk	*chead;
 	Blk	*ctail;
-	int	ccount;
-	int	cmax;
+	usize	ccount;
+	usize	cmax;
 
 	Stats	stats;
 };
@@ -604,13 +601,20 @@ struct Blk {
 	vlong	logsz;	/* for allocation log */
 	vlong	lognxt;	/* for allocation log */
 
+	/* debug */
 	uintptr	alloced;
-	uintptr	freed;	/* debug */
+	uintptr lasthold;
+	uintptr lasthold0;
+	uintptr lasthold1;
+	uintptr lastdrop;
+	uintptr uncached;
+	uintptr	freed;
 
 	Bptr	bp;
 	long	ref;
 	char	*data;
 	char	buf[Blksz];
+	vlong	magic;
 };
 
 struct Chan {

@@ -23,8 +23,6 @@ struct Flushq {
 static vlong	blkalloc_lk(Arena*);
 static vlong	blkalloc(int);
 static int	blkdealloc_lk(vlong);
-static Blk*	blkbuf(void);
-static void	blkfree(Blk*);
 static Blk*	initblk(Blk*, vlong, int);
 static int	logop(Arena *, vlong, vlong, int);
 
@@ -66,7 +64,7 @@ int
 syncblk(Blk *b)
 {
 	assert(checkflag(b, Bfinal));
-	clrflag(b, Bqueued|Bdirty);
+	clrflag(b, Bdirty);
 	return pwrite(fs->fd, b->buf, Blksz, b->bp.addr);
 }
 
@@ -77,20 +75,20 @@ readblk(vlong bp, int flg)
 	vlong off, rem, n;
 
 	assert(bp != -1);
-	if((b = blkbuf()) == nil)
+	if((b = cachepluck()) == nil)
 		return nil;
+	b->alloced = getcallerpc(&bp);
 	off = bp;
 	rem = Blksz;
 	while(rem != 0){
 		n = pread(fs->fd, b->buf, rem, off);
 		if(n <= 0){
-			blkfree(b);
+			free(b);
 			return nil;
 		}
 		off += n;
 		rem -= n;
 	}
-	b->ref = 1;
 	b->cnext = nil;
 	b->cprev = nil;
 	b->hnext = nil;
@@ -136,6 +134,7 @@ readblk(vlong bp, int flg)
 		b->valsz = GBIT16(b->buf+4);
 		break;
 	}
+	assert(b->magic == Magic);
 	return b;
 }
 
@@ -144,7 +143,7 @@ pickarena(int hint)
 {
 	int n;
 
-	n = hint+ainc(&fs->roundrobin)/(64*1024);
+	n = hint+ainc(&fs->roundrobin)/(1024*1024);
 	return &fs->arenas[n%fs->narena];
 }
 
@@ -271,16 +270,16 @@ logappend(Arena *a, vlong off, vlong len, int op, Blk **tl)
 		pb = lb;
 		if((o = blkalloc_lk(a)) == -1)
 			return -1;
-		if((lb = blkbuf()) == nil)
+		if((lb = cachepluck()) == nil)
 			return -1;
 		initblk(lb, o, Tlog);
-		cacheblk(lb);
+		cacheins(lb);
 		lb->logsz = Loghashsz;
 		p = lb->data + lb->logsz;
 		PBIT64(p, (uvlong)LogEnd);
 		finalize(lb);
 		if(syncblk(lb) == -1){
-			putblk(lb);
+			dropblk(lb);
 			return -1;
 		}
 
@@ -289,11 +288,10 @@ logappend(Arena *a, vlong off, vlong len, int op, Blk **tl)
 			PBIT64(p, lb->bp.addr|LogChain);
 			finalize(pb);
 			if(syncblk(pb) == -1){
-				putblk(pb);
+				dropblk(pb);
 				return -1;
 			}
-			lrubump(pb);
-			putblk(pb);
+			dropblk(pb);
 		}
 		*tl = lb;
 	}
@@ -371,13 +369,13 @@ Nextblk:
 		switch(op){
 		case LogEnd:
 			dprint("log@%d: end\n", i);
-			putblk(b);
+			dropblk(b);
 			return 0;
 		case LogChain:
 			bp.addr = off & ~0xff;
 			bp.hash = -1;
 			bp.gen = -1;
-			putblk(b);
+			dropblk(b);
 			dprint("log@%d: chain %B\n", i, bp);
 			goto Nextblk;
 			break;
@@ -431,7 +429,7 @@ compresslog(Arena *a)
 	 */
 	if((ba = blkalloc_lk(a)) == -1)
 		return -1;
-	if((b = blkbuf()) == nil)
+	if((b = cachepluck()) == nil)
 		return -1;
 	initblk(b, ba, Tlog);
 	b->logsz = Loghashsz;
@@ -440,7 +438,7 @@ compresslog(Arena *a)
 	PBIT64(p, (uvlong)LogEnd);
 	finalize(b);
 	if(syncblk(b) == -1){
-		putblk(b);
+		dropblk(b);
 		return -1;
 	}
 
@@ -448,7 +446,7 @@ compresslog(Arena *a)
 	if(a->tail != nil){
 		finalize(a->tail);
 		if(syncblk(a->tail) == -1){
-			blkfree(b);
+			free(b);
 			return -1;
 		}
 	}
@@ -528,13 +526,13 @@ compresslog(Arena *a)
 					break;
 				}
 			}
-			putblk(b);
 			lock(a);
-			cachedel(bp.addr);
+			cachedel(b->bp.addr);
 			if(blkdealloc_lk(ba) == -1){
 				unlock(a);
 				return -1;
 			}
+			dropblk(b);
 			unlock(a);
 		}
 	}
@@ -639,61 +637,23 @@ Again:
 }
 
 static Blk*
-blkbuf(void)
-{
-	uvlong *p;
-	Blk *b;
-
-	qlock(&fs->freelk);
-	while(fs->free == nil)
-		rsleep(&fs->freerz);
-	b = fs->free;
-	fs->free = b->fnext;
-
-	/* check for corruption */
-	p = (uvlong*)b - 1;
-	assert(*p == HdMagic);
-
-	p = (uvlong*)(b + 1);
-	assert(*p == TlMagic);
-	qunlock(&fs->freelk);
-
-	/*
-	 * If the block is cached,
-	 * then the cache holds a ref
-	 * to the block, so we only
-	 * want to reset the refs
-	 * on an allocation.
-	 */
-	b->ref = 1;
-	b->cnext = nil;
-	b->cprev = nil;
-	b->hnext = nil;
-	b->flag = 0;
-
-	return b;
-}
-
-static void
-blkfree(Blk *b)
-{
-	b->bp.addr = -1;
-	qlock(&fs->freelk);
-	b->fnext = fs->free;
-	fs->free = b;
-	rwakeup(&fs->freerz);
-	qunlock(&fs->freelk);
-}
-
-static Blk*
 initblk(Blk *b, vlong bp, int t)
 {
-	assert(lookupblk(bp) == nil);
+	Blk *ob;
+
+	ob = cacheget(bp);
+	if(ob != nil){
+		fprint(2, "dup block: %#p %B (alloced %#llx freed %#llx lasthold: %#llx, lastdrop: %#llx)\n",
+			ob, ob->bp, ob->alloced, ob->freed, ob->lasthold, ob->lastdrop);
+		abort();
+	}
 	b->type = t;
 	b->bp.addr = bp;
 	b->bp.hash = -1;
 	b->bp.gen = fs->nextgen;
+	lock(&fs->freelk);
 	b->qgen = fs->qgen;
+	unlock(&fs->freelk);
 	switch(t){
 	case Traw:
 	case Tarena:
@@ -719,8 +679,9 @@ initblk(Blk *b, vlong bp, int t)
 	b->bufsz = 0;
 	b->logsz = 0;
 	b->lognxt = 0;
+	b->alloced = getcallerpc(&b);
 
-	return cacheblk(b);
+	return b;
 }
 
 Blk*
@@ -731,12 +692,10 @@ newblk(int t)
 
 	if((bp = blkalloc(t)) == -1)
 		return nil;
-	if((b = blkbuf()) == nil)
+	if((b = cachepluck()) == nil)
 		return nil;
 	initblk(b, bp, t);
-	cacheblk(b);
 	b->alloced = getcallerpc(&t);
-	assert(b->ref == 2);
 	return b;
 }
 
@@ -756,8 +715,8 @@ dupblk(Blk *b)
 	r->bufsz = b->bufsz;
 	r->logsz = b->logsz;
 	r->lognxt = b->lognxt;
+	r->alloced = getcallerpc(&b);
 	memcpy(r->buf, b->buf, sizeof(r->buf));
-	b->alloced = getcallerpc(&b);
 	return r;
 }
 
@@ -766,7 +725,6 @@ finalize(Blk *b)
 {
 	uvlong h;
 
-	setflag(b, Bfinal);
 	if(b->type != Traw)
 		PBIT16(b->buf, b->type);
 	switch(b->type){
@@ -795,6 +753,9 @@ finalize(Blk *b)
 	case Tarena:
 		break;
 	}
+
+	setflag(b, Bfinal);
+	cacheins(b);
 }
 
 Blk*
@@ -806,38 +767,56 @@ getblk(Bptr bp, int flg)
 
 	i = ihash(bp.addr) % nelem(fs->blklk);
 	qlock(&fs->blklk[i]);
-	if((b = lookupblk(bp.addr)) != nil){
-		cacheblk(b);
-		lrubump(b);
+	if((b = cacheget(bp.addr)) != nil){
 		qunlock(&fs->blklk[i]);
 		return b;
 	}
 	if((b = readblk(bp.addr, flg)) == nil){
 		qunlock(&fs->blklk[i]);
 		return nil;
-	}else
-		b->alloced = getcallerpc(&bp);
+	}
+	b->alloced = getcallerpc(&bp);
 	h = blkhash(b);
 	if((flg&GBnochk) == 0 && h != bp.hash){
-		fprint(2, "corrupt block %B: %.16llux != %.16llux\n", bp, h, bp.hash);
+		fprint(2, "corrupt block %p %B: %.16llux != %.16llux\n", b, bp, h, bp.hash);
 		qunlock(&fs->blklk[i]);
 		abort();
 		return nil;
 	}
 	b->bp.hash = h;
 	b->bp.gen = bp.gen;
-	cacheblk(b);
-	lrubump(b);
+	cacheins(b);
 	qunlock(&fs->blklk[i]);
 
 	return b;
 }
 
 Blk*
-refblk(Blk *b)
+holdblk(Blk *b)
 {
 	ainc(&b->ref);
+	b->lasthold = getcallerpc(&b);
 	return b;
+}
+
+void
+dropblk(Blk *b)
+{
+	assert(b == nil || b->ref > 0);
+	if(b == nil || adec(&b->ref) != 0)
+		return;
+	b->lastdrop = getcallerpc(&b);
+//	assert(b->cprev == nil && b->cnext == nil);
+	/*
+	 * While a freed block can get resurrected
+	 * before quiescence, it's unlikely -- so
+	 * it goes into the bottom of the LRU to
+	 * get selected early for reuse.
+	 */
+	if(checkflag(b, Bfreed))
+		lrubot(b);
+	else
+		lrutop(b);
 }
 
 ushort
@@ -856,21 +835,10 @@ blkfill(Blk *b)
 }
 
 void
-putblk(Blk *b)
-{
-	if(b == nil || adec(&b->ref) != 0)
-		return;
-	assert(!checkflag(b, Bcached));
-	assert(checkflag(b, Bfreed) || !checkflag(b, Bdirty));
-	blkfree(b);
-}
-
-void
 freebp(Tree *t, Bptr bp)
 {
 	Bfree *f;
 
-	dprint("[%s] free blk %B\n", (t == &fs->snap) ? "snap" : "data", bp);
 	if(t != nil && t != &fs->snap && bp.gen <= t->gen){
 		killblk(t, bp);
 		return;
@@ -878,41 +846,41 @@ freebp(Tree *t, Bptr bp)
 	if((f = malloc(sizeof(Bfree))) == nil)
 		return;
 	f->bp = bp;
-	lock(&fs->dealloclk);
-	f->next = fs->deallochd;
-	fs->deallochd = f;
-	unlock(&fs->dealloclk);
+	lock(&fs->freelk);
+	f->next = fs->freehd;
+	fs->freehd = f;
+	unlock(&fs->freelk);
 }
 
 void
 freeblk(Tree *t, Blk *b)
 {
-	b->freed = getcallerpc(&b);
+	b->freed = getcallerpc(&t);
 	setflag(b, Bfreed);
 	freebp(t, b->bp);
 }
 
 void
-reclaimblk(Bptr bp)
+epochstart(int tid)
 {
-	Arena *a;
-
-	a = getarena(bp.addr);
-	lock(a);
-	cachedel(bp.addr);
-	blkdealloc_lk(bp.addr);
-	unlock(a);
+	ainc((long*)&fs->active[tid]);
 }
 
 void
-quiesce(int tid)
+epochend(int tid)
+{
+	ainc((long*)&fs->active[tid]);
+}
+
+void
+epochclean(void)
 {
 	int i, allquiesced;
 	Bfree *p, *n;
+	Arena *a;
 
 	lock(&fs->activelk);
 	allquiesced = 1;
-	fs->active[tid]++;
 	for(i = 0; i < fs->nquiesce; i++){
 		/*
 		 * Odd parity on quiescence implies
@@ -921,30 +889,37 @@ quiesce(int tid)
 		 * that enters us into the critical
 		 * section.
 		 */
-		if((fs->active[i] & 1) == 0)
+		if((fs->active[i] & 1) != 0)
 			continue;
 		if(fs->active[i] == fs->lastactive[i])
 			allquiesced = 0;
 	}
+
 	p = nil;
 	if(allquiesced){
-		inc64(&fs->qgen, 1);
 		for(i = 0; i < fs->nquiesce; i++)
 			fs->lastactive[i] = fs->active[i];
 
-		lock(&fs->dealloclk);
-		if(fs->deallocp != nil){
-			p = fs->deallocp->next;
-			fs->deallocp->next = nil;
+		lock(&fs->freelk);
+		fs->qgen++;
+		if(fs->freep != nil){
+			p = fs->freep->next;
+			fs->freep->next = nil;
 		}
-		fs->deallocp = fs->deallochd;
-		unlock(&fs->dealloclk);
+		fs->freep = fs->freehd;
+		unlock(&fs->freelk);
 	}
 	unlock(&fs->activelk);
 
 	while(p != nil){
 		n = p->next;
-		reclaimblk(p->bp);
+		a = getarena(p->bp.addr);
+
+		lock(a);
+		cachedel(p->bp.addr);
+		blkdealloc_lk(p->bp.addr);
+		unlock(a);
+
 		free(p);
 		p = n;
 	}
@@ -967,7 +942,7 @@ enqueue(Blk *b)
 
 	a = getarena(b->bp.addr);
 	assert(checkflag(b, Bdirty));
-	refblk(b);
+	holdblk(b);
 	finalize(b);
 	chsend(a->sync, b);
 }
@@ -1030,7 +1005,7 @@ runsync(int, void *p)
 
 	c = p;
 	q.nheap = 0;
-	q.heapsz = fs->cmax;
+	q.heapsz = 2*fs->cmax/fs->narena;
 	if((q.heap = malloc(q.heapsz*sizeof(Blk*))) == nil)
 		sysfatal("alloc queue: %r");
 	while(1){
@@ -1056,9 +1031,8 @@ runsync(int, void *p)
 				fprint(2, "write: %r");
 				abort();
 			}
-			lrubump(b);
 		}
-		putblk(b);
+		dropblk(b);
 	}
 }
 

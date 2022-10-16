@@ -226,14 +226,23 @@ Out:
 }
 
 static void
-showblkdump(int fd, char **ap, int)
+showblkdump(int fd, char **ap, int na)
 {
 	Bptr bp;
+	Blk *b;
 
-	bp.addr = strtoll(ap[0], nil, 16);
-	bp.hash = -1;
-	bp.gen = -1;
-	showbp(fd, bp, 0);
+	if(na == 0){
+		for(b = fs->blks; b != fs->blks+fs->cmax; b++){
+			fprint(fd, "%#p %B:\t%#lx %#llx %#llx\n", b, b->bp, b->flag, b->alloced, b->freed);
+			b->magic = Magic;
+			lrutop(b);
+		}
+	}else{
+		bp.addr = strtoll(ap[0], nil, 16);
+		bp.hash = -1;
+		bp.gen = -1;
+		showbp(fd, bp, 0);
+	}
 }
 
 static void
@@ -289,7 +298,8 @@ Cmd cmdtab[] = {
 	{.name="show",	.sub="snap",	.minarg=0, .maxarg=1, .fn=showsnap},
 	{.name="show",	.sub="tree",	.minarg=0, .maxarg=1, .fn=showtree},
 	{.name="show",	.sub="users",	.minarg=0, .maxarg=0, .fn=showusers},
-	{.name="show",	.sub="blk",	.minarg=1, .maxarg=1, .fn=showblkdump},
+	{.name="show",	.sub="blk",	.minarg=0, .maxarg=1, .fn=showblkdump},
+	{.name="show",	.sub="blks",	.minarg=1, .maxarg=1, .fn=showblkdump},
 	{.name="debug",	.sub=nil,	.minarg=0, .maxarg=1, .fn=setdbg},
 
 	{.name=nil, .sub=nil},
@@ -306,7 +316,7 @@ runcons(int tid, void *pfd)
 	while(1){
 		if((n = read(fd, buf, sizeof(buf)-1)) == -1)
 			break;
-		quiesce(tid);
+		epochstart(tid);
 		buf[n] = 0;
 		nf = tokenize(buf, f, nelem(f));
 		if(nf == 0 || strlen(f[0]) == 0)
@@ -334,6 +344,6 @@ runcons(int tid, void *pfd)
 				fprint(fd, " %s", f[i]);
 			fprint(fd, "'\n");
 		}
-		quiesce(tid);
+		epochend(tid);
 	}
 }

@@ -15,7 +15,7 @@ int	nproc;
 char	*forceuser;
 char	*srvname = "gefs";
 char	*dev;
-int	cachesz = 512*MiB;
+vlong	cachesz = 512*MiB;
 
 vlong
 inc64(vlong *v, vlong dv)
@@ -33,15 +33,12 @@ inc64(vlong *v, vlong dv)
 static void
 initfs(vlong cachesz)
 {
-	char *p, *buf, *ebuf;
-	usize sz;
-	uvlong *ck;
-	Blk *b;
+	Blk *b, *buf;
 
 	if((fs = mallocz(sizeof(Gefs), 1)) == nil)
 		sysfatal("malloc: %r");
 
-	fs->freerz.l = &fs->freelk;
+	fs->lrurz.l = &fs->lrulk;
 	fs->syncrz.l = &fs->synclk;
 	fs->noauth = noauth;
 	fs->cmax = cachesz/Blksz;
@@ -51,22 +48,16 @@ initfs(vlong cachesz)
 		sysfatal("malloc: %r");
 
 	/* leave room for corruption check magic */
-	sz = 8+sizeof(Blk)+8;
-	buf = sbrk(fs->cmax * sz);
+	buf = sbrk(fs->cmax * sizeof(Blk));
 	if(buf == (void*)-1)
 		sysfatal("sbrk: %r");
-	ebuf = buf + fs->cmax*sz;
-	for(p = buf; p != ebuf; p += sz){
-		ck = (uvlong*)p;
-		*ck = HdMagic;
-
-		b = (Blk*)(p+8);
-		b->fnext = fs->free;
-		fs->free = b;
-
-		ck = (uvlong*)(b+1);
-		*ck = TlMagic;
+	for(b = buf; b != buf+fs->cmax; b++){
+		b->bp.addr = -1;
+		b->bp.hash = -1;
+		b->magic = Magic;
+		lrutop(b);
 	}
+	fs->blks = buf;
 }
 
 static void
@@ -197,10 +188,15 @@ main(int argc, char **argv)
 
 	if((s = getenv("NPROC")) != nil)
 		nproc = atoi(s);
-	if(nproc == 0)
+
+	/*
+	 * too few procs, we can't parallelize io,
+	 * too many, we suffer lock contention
+	 */
+	if(nproc < 2)
 		nproc = 2;
-	if(nproc > nelem(fs->active))
-		nproc = nelem(fs->active);
+	if(nproc > 6)
+		nproc = 6;
 	if(ream){
 		reamfs(dev);
 		exits(nil);
@@ -210,19 +206,19 @@ main(int argc, char **argv)
 
 	fs->rdchan = mkchan(32);
 	fs->wrchan = mkchan(32);
-	fs->nsyncers = nproc;
+	fs->nsyncers = 2;
 	if(fs->nsyncers > fs->narena)
 		fs->nsyncers = fs->narena;
 	for(i = 0; i < fs->nsyncers; i++)
-		fs->chsync[i] = mkchan(128);
+		fs->chsync[i] = mkchan(1024);
 	for(i = 0; i < fs->narena; i++)
-		fs->arenas[i].sync = fs->chsync[i%nproc];
+		fs->arenas[i].sync = fs->chsync[i%fs->nsyncers];
 	srvfd = postfd(srvname, "");
 	ctlfd = postfd(srvname, ".cmd");
 	launch(runtasks, -1, nil, "tasks");
 	launch(runcons, fs->nquiesce++, (void*)ctlfd, "ctl");
 	launch(runwrite, fs->nquiesce++, nil, "mutate");
-	for(i = 0; i < nproc; i++)
+	for(i = 0; i < 2; i++)
 		launch(runread, fs->nquiesce++, nil, "readio");
 	for(i = 0; i < fs->nsyncers; i++)
 		launch(runsync, -1, fs->chsync[i], "syncio");

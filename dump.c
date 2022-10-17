@@ -23,19 +23,19 @@ showkey(Fmt *fmt, Key *k)
 		return fmtprint(fmt, "\"\"");
 	switch(k->k[0]){
 	case Kdat:	/* qid[8] off[8] => ptr[16]:	pointer to data page */
-		n = fmtprint(fmt, "dat qid:%llx off:%llx", GBIT64(k->k+1), GBIT64(k->k+9));
+		n = fmtprint(fmt, "dat qid:%llx off:%llx", UNPACK64(k->k+1), UNPACK64(k->k+9));
 		break;
 	case Kent:	/* pqid[8] name[n] => dir[n]:	serialized Dir */
-		n = fmtprint(fmt, "ent dir:%llx, name:\"%.*s\")", GBIT64(k->k+1), k->nk-11, k->k+11);
+		n = fmtprint(fmt, "ent dir:%llx, name:\"%.*s\")", UNPACK64(k->k+1), k->nk-11, k->k+11);
 		break;
 	case Klabel:	/* name[n] => tree[24]:	snapshot ref */
 		n = fmtprint(fmt, "label name:\"%.*s\"", k->nk-1, k->k+1);
 		break;
 	case Ksnap:	/* name[n] => tree[24]:	snapshot root */
-		n = fmtprint(fmt, "snap id:\"%llx\"", GBIT64(k->k+1));
+		n = fmtprint(fmt, "snap id:\"%llx\"", UNPACK64(k->k+1));
 		break;
 	case Ksuper:	/* qid[8] => pqid[8]:		parent dir */
-		n = fmtprint(fmt, "up dir:%llx", GBIT64(k->k+1));
+		n = fmtprint(fmt, "up dir:%llx", UNPACK64(k->k+1));
 		break;
 	default:
 		n = fmtprint(fmt, "%.*H", k->nk, k->k);
@@ -55,7 +55,7 @@ showval(Fmt *fmt, Kvp *v, int op, int flg)
 	n = 0;
 	if(flg){
 		assert(v->nv == Ptrsz+2);
-		n = fmtprint(fmt, "(%B,%d)", unpackbp(v->v, v->nv), GBIT16(v->v+Ptrsz));
+		n = fmtprint(fmt, "(%B,%d)", unpackbp(v->v, v->nv), UNPACK16(v->v+Ptrsz));
 		return n;
 	}
 	if(op == Odelete || op == Oclearb){
@@ -93,31 +93,31 @@ showval(Fmt *fmt, Kvp *v, int op, int flg)
 			p = v->v;
 			ws = *p++;
 			if(ws & Owsize){
-				n += fmtprint(fmt, "size:%llx ", GBIT64(p));
+				n += fmtprint(fmt, "size:%llx ", UNPACK64(p));
 				p += 8;
 			}
 			if(ws & Owmode){
-				n += fmtprint(fmt, "mode:%uo ", GBIT32(p));
+				n += fmtprint(fmt, "mode:%uo ", UNPACK32(p));
 				p += 4;
 			}
 			if(ws & Owmtime){
-				n += fmtprint(fmt, "mtime:%llx ", GBIT64(p));
+				n += fmtprint(fmt, "mtime:%llx ", UNPACK64(p));
 				p += 8;
 			}
 			if(ws & Owatime){
-				n += fmtprint(fmt, "mtime:%llx ", GBIT64(p));
+				n += fmtprint(fmt, "mtime:%llx ", UNPACK64(p));
 				p += 8;
 			}
 			if(ws & Owuid){
-				n += fmtprint(fmt, "uid:%d ", GBIT32(p));
+				n += fmtprint(fmt, "uid:%d ", UNPACK32(p));
 				p += 4;
 			}
 			if(ws & Owgid){
-				n += fmtprint(fmt, "gid:%d ", GBIT32(p));
+				n += fmtprint(fmt, "gid:%d ", UNPACK32(p));
 				p += 4;
 			}
 			if(ws & Owmuid){
-				n += fmtprint(fmt, "muid:%d ", GBIT32(p));
+				n += fmtprint(fmt, "muid:%d ", UNPACK32(p));
 				p += 4;
 			}
 			if(p != v->v + v->nv){
@@ -133,10 +133,10 @@ showval(Fmt *fmt, Kvp *v, int op, int flg)
 		n = fmtprint(fmt, "ref: %d, ht: %d, bp: %B, prev=%lld", t.ref, t.ht, t.bp, t.dead[0].prev);
 		break;
 	case Klabel:
-		n = fmtprint(fmt, "snap id:\"%llx\"", GBIT64(v->v+1));
+		n = fmtprint(fmt, "snap id:\"%llx\"", UNPACK64(v->v+1));
 		break;
 	case Ksuper:	/* qid[8] => pqid[8]:		parent dir */
-		n = fmtprint(fmt, "super dir:%llx, name:\"%.*s\")", GBIT64(v->v+1), v->nv-11, v->v+11);
+		n = fmtprint(fmt, "super dir:%llx, name:\"%.*s\")", UNPACK64(v->v+1), v->nv-11, v->v+11);
 		break;
 	default:
 		n = fmtprint(fmt, "%.*H", v->nk, v->k);
@@ -384,7 +384,7 @@ showsnap(int fd, char **ap, int na)
 	if(na != 0){
 		sz = Snapsz;
 		id = atoll(ap[0]);
-		PBIT64(pfx+1, id);
+		PACK64(pfx+1, id);
 	}
 	if((e = btscan(&fs->snap, s, pfx, sz)) != nil){
 		fprint(fd, "scan: %s\n", e);

@@ -237,8 +237,8 @@ clearb(Fid *f, vlong o, vlong sz)
 		m.nk = sizeof(buf);
 		m.op = Oclearb;
 		m.k[0] = Kdat;
-		PBIT64(m.k+1, f->qpath);
-		PBIT64(m.k+9, o);
+		PACK64(m.k+1, f->qpath);
+		PACK64(m.k+9, o);
 		m.v = nil;
 		m.nv = 0;
 		if((e = btupsert(f->mnt->root, &m, 1)) != nil)
@@ -268,8 +268,8 @@ readb(Fid *f, char *d, vlong o, vlong n, vlong sz)
 	k.k = buf;
 	k.nk = sizeof(buf);
 	k.k[0] = Kdat;
-	PBIT64(k.k+1, f->qpath);
-	PBIT64(k.k+9, fb);
+	PACK64(k.k+1, f->qpath);
+	PACK64(k.k+9, fb);
 
 	e = lookup(f, &k, &kv, kvbuf, sizeof(kvbuf));
 	if(e != nil){
@@ -302,8 +302,8 @@ writeb(Fid *f, Msg *m, Bptr *ret, char *s, vlong o, vlong n, vlong sz)
 	fo = o & (Blksz-1);
 
 	m->k[0] = Kdat;
-	PBIT64(m->k+1, f->qpath);
-	PBIT64(m->k+9, fb);
+	PACK64(m->k+1, f->qpath);
+	PACK64(m->k+9, fb);
 
 
 	b = newblk(Traw);
@@ -1109,7 +1109,7 @@ fswstat(Fmsg *m)
 		if(d.length != de->length){
 			n.length = d.length;
 			op |= Owsize;
-			PBIT64(p, n.length);
+			PACK64(p, n.length);
 			p += 8;
 		}
 	}
@@ -1126,7 +1126,7 @@ fswstat(Fmsg *m)
 			n.mode = d.mode;
 			n.qid.type = d.mode>>24;
 			op |= Owmode;
-			PBIT32(p, n.mode);
+			PACK32(p, n.mode);
 			p += 4;
 		}
 	}
@@ -1134,7 +1134,7 @@ fswstat(Fmsg *m)
 		n.mtime = d.mtime*Nsec;
 		if(n.mtime != de->mtime){
 			op |= Owmtime;
-			PBIT64(p, n.mtime);
+			PACK64(p, n.mtime);
 			p += 8;
 		}
 	}
@@ -1150,7 +1150,7 @@ fswstat(Fmsg *m)
 		runlock(&fs->userlk);
 		if(n.uid != de->uid){
 			op |= Owuid;
-			PBIT32(p, n.uid);
+			PACK32(p, n.uid);
 			p += 4;
 		}
 	}
@@ -1166,13 +1166,13 @@ fswstat(Fmsg *m)
 		runlock(&fs->userlk);
 		if(n.gid != de->gid){
 			op |= Owgid;
-			PBIT32(p, n.gid);
+			PACK32(p, n.gid);
 			p += 4;
 		}
 	}
 	op |= Owmuid;
 	n.muid = f->uid;
-	PBIT32(p, n.muid);
+	PACK32(p, n.muid);
 	p += 4;
 
 	/* check permissions */
@@ -1534,8 +1534,8 @@ fsopen(Fmsg *m)
 		mb.op = Owstat;
 		p = buf;
 		p[0] = Owsize|Owmuid;	p += 1;
-		PBIT64(p, 0);		p += 8;
-		PBIT32(p, f->uid);	p += 4;
+		PACK64(p, 0);		p += 8;
+		PACK32(p, f->uid);	p += 4;
 		mb.k = f->dent->k;
 		mb.nk = f->dent->nk;
 		mb.v = buf;
@@ -1800,16 +1800,16 @@ fswrite(Fmsg *m)
 	*p++ = 0;
 	if(n > f->dent->length){
 		sbuf[0] |= Owsize;
-		PBIT64(p, n);
+		PACK64(p, n);
 		p += 8;
 		f->dent->length = m->offset+m->count;
 	}
 	sbuf[0] |= Owmtime;
 	f->dent->mtime = nsec();
-	PBIT64(p, f->dent->mtime);
+	PACK64(p, f->dent->mtime);
 	p += 8;
 	sbuf[0] |= Owmuid;
-	PBIT32(p, f->uid);
+	PACK32(p, f->uid);
 	p += 4;
 
 	kv[i].v = sbuf;

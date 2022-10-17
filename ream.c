@@ -100,11 +100,11 @@ initarena(Arena *a, Fshdr *fi, vlong start, vlong asz)
 	setflag(b, Bdirty);
 
 	p = b->data + Loghashsz;
-	PBIT64(p, addr|LogFree);	p += 8;	/* addr */
-	PBIT64(p, asz-Blksz);		p += 8;	/* len */
-	PBIT64(p, b->bp.addr|LogAlloc);	p += 8;	/* addr */
-	PBIT64(p, Blksz);		p += 8;	/* len */
-	PBIT64(p, (uvlong)LogEnd);	/* done */
+	PACK64(p, addr|LogFree);	p += 8;	/* addr */
+	PACK64(p, asz-Blksz);		p += 8;	/* len */
+	PACK64(p, b->bp.addr|LogAlloc);	p += 8;	/* addr */
+	PACK64(p, Blksz);		p += 8;	/* len */
+	PACK64(p, (uvlong)LogEnd);	/* done */
 	finalize(b);
 	if(syncblk(b) == -1)
 		sysfatal("ream: init log");

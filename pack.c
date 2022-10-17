@@ -24,7 +24,7 @@ unpack16(int *err, char *p, char *e, void *v)
 		*err = 1;
 		return p;
 	}
-	*(ushort*)v = GBIT16(p);
+	*(ushort*)v = UNPACK16(p);
 	return p+2;
 }
 
@@ -35,7 +35,7 @@ unpack32(int *err, char *p, char *e, void *v)
 		*err = 1;
 		return p;
 	}
-	*(uint*)v = GBIT32(p);
+	*(uint*)v = UNPACK32(p);
 	return p+4;
 }
 
@@ -46,7 +46,7 @@ unpack64(int *err, char *p, char *e, void *v)
 		*err = 1;
 		return p;
 	}
-	*(uvlong*)v = GBIT64(p);
+	*(uvlong*)v = UNPACK64(p);
 	return p+8;
 }
 
@@ -60,7 +60,7 @@ unpackstr(int *err, char *p, char *e, char **s)
 		*err = 1;
 		return p;
 	}
-	n = GBIT16(p);
+	n = UNPACK16(p);
 	if(e - p < n + 3 || p[n+2] != 0){
 		*err = 1;
 		return p;
@@ -87,7 +87,7 @@ pack16(int *err, char *p, char *e, ushort v)
 		*err = 1;
 		return p;
 	}
-	PBIT16(p, v);
+	PACK16(p, v);
 	return p+2;
 }
 
@@ -98,7 +98,7 @@ pack32(int *err, char *p, char *e, uint v)
 		*err = 1;
 		return p;
 	}
-	PBIT32(p, v);
+	PACK32(p, v);
 	return p+4;
 }
 
@@ -109,7 +109,7 @@ pack64(int *err, char *p, char *e, uvlong v)
 		*err = 1;
 		return p;
 	}
-	PBIT64(p, v);
+	PACK64(p, v);
 	return p+8;
 }
 
@@ -124,7 +124,7 @@ packstr(int *err, char *p, char *e, char *s)
 		*err = 1;
 		return p;
 	}
-	PBIT16(p+0, n);
+	PACK16(p+0, n);
 	memcpy(p+2, s, n);
 	p[2+n] = 0;
 	return p+3+n;
@@ -361,7 +361,7 @@ packsnap(char *p, int sz, vlong id)
 {
 	assert(sz >= Snapsz);
 	p[0] = Ksnap;		p += 1;
-	PBIT64(p, id);		p += 8;
+	PACK64(p, id);		p += 8;
 	return p;
 }
 
@@ -369,9 +369,9 @@ char*
 packbp(char *p, int sz, Bptr *bp)
 {
 	assert(sz >= Ptrsz);
-	PBIT64(p, bp->addr);	p += 8;
-	PBIT64(p, bp->hash);	p += 8;
-	PBIT64(p, bp->gen);	p += 8;
+	PACK64(p, bp->addr);	p += 8;
+	PACK64(p, bp->hash);	p += 8;
+	PACK64(p, bp->gen);	p += 8;
 	return p;
 }
 
@@ -381,9 +381,9 @@ unpackbp(char *p, int sz)
 	Bptr bp;
 
 	assert(sz >= Ptrsz);
-	bp.addr = GBIT64(p);	p += 8;
-	bp.hash = GBIT64(p);	p += 8;
-	bp.gen = GBIT64(p);
+	bp.addr = UNPACK64(p);	p += 8;
+	bp.hash = UNPACK64(p);	p += 8;
+	bp.gen = UNPACK64(p);
 	return bp;
 }
 
@@ -396,18 +396,18 @@ unpacktree(Tree *t, char *p, int sz)
 
 	assert(sz >= Treesz);
 	memset(t, 0, sizeof(Tree));
-	t->ref = GBIT32(p);		p += 4;
-	t->ht = GBIT32(p);		p += 4;
-	t->gen = GBIT64(p);		p += 8;
-	t->bp.addr = GBIT64(p);		p += 8;
-	t->bp.hash = GBIT64(p);		p += 8;
-	t->bp.gen = GBIT64(p);		p += 8;
+	t->ref = UNPACK32(p);		p += 4;
+	t->ht = UNPACK32(p);		p += 4;
+	t->gen = UNPACK64(p);		p += 8;
+	t->bp.addr = UNPACK64(p);		p += 8;
+	t->bp.hash = UNPACK64(p);		p += 8;
+	t->bp.gen = UNPACK64(p);		p += 8;
 	for(i = 0; i < Ndead; i++){
 		dl = &t->dead[i];
 		bp = &dl->head;
-		dl->prev = GBIT64(p);	p += 8;
-		bp->addr = GBIT64(p);	p += 8;
-		bp->hash = GBIT64(p);	p += 8;
+		dl->prev = UNPACK64(p);	p += 8;
+		bp->addr = UNPACK64(p);	p += 8;
+		bp->hash = UNPACK64(p);	p += 8;
 		bp->gen = -1;
 		t->dead[i].ins	= nil;	/* loaded on demand */
 	}
@@ -422,12 +422,12 @@ packtree(char *p, int sz, Tree *t)
 	int i;
 
 	assert(sz >= Treesz);
-	PBIT32(p, t->ref);	p += 4;
-	PBIT32(p, t->ht);	p += 4;
-	PBIT64(p, t->gen);	p += 8;
-	PBIT64(p, t->bp.addr);	p += 8;
-	PBIT64(p, t->bp.hash);	p += 8;
-	PBIT64(p, t->bp.gen);	p += 8;
+	PACK32(p, t->ref);	p += 4;
+	PACK32(p, t->ht);	p += 4;
+	PACK64(p, t->gen);	p += 8;
+	PACK64(p, t->bp.addr);	p += 8;
+	PACK64(p, t->bp.hash);	p += 8;
+	PACK64(p, t->bp.gen);	p += 8;
 	for(i = 0; i < Ndead; i++){
 		dl = &t->dead[i];
 		bp = dl->head;
@@ -435,9 +435,9 @@ packtree(char *p, int sz, Tree *t)
 			assert(checkflag(dl->ins, Bfinal));
 			bp = dl->ins->bp;
 		}
-		PBIT64(p, dl->prev);	p += 8;
-		PBIT64(p, bp.addr);	p += 8;
-		PBIT64(p, bp.hash);	p += 8;
+		PACK64(p, dl->prev);	p += 8;
+		PACK64(p, bp.addr);	p += 8;
+		PACK64(p, bp.hash);	p += 8;
 	}
 	return p;
 }
@@ -447,19 +447,19 @@ packarena(char *p, int sz, Arena *a, Fshdr *fi)
 {
 	assert(sz == Blksz);
 	memcpy(p, "gefs0001", 8);	p += 8;
-	PBIT32(p, Blksz);		p += 4;
-	PBIT32(p, Bufspc);		p += 4;
-	PBIT32(p, fi->snap.ht);		p += 4;
-	PBIT64(p, fi->snap.bp.addr);	p += 8;
-	PBIT64(p, fi->snap.bp.hash);	p += 8;
-	PBIT32(p, fi->narena);		p += 4;
-	PBIT64(p, fi->arenasz);		p += 8;
-	PBIT64(p, fi->nextqid);		p += 8;
-	PBIT64(p, fi->nextgen);		p += 8;
-	PBIT64(p, a->head.addr);	p += 8;	/* freelist addr */
-	PBIT64(p, a->head.hash);	p += 8;	/* freelist hash */
-	PBIT64(p, a->size);		p += 8;	/* arena size */
-	PBIT64(p, a->used);		p += 8;	/* arena used */
+	PACK32(p, Blksz);		p += 4;
+	PACK32(p, Bufspc);		p += 4;
+	PACK32(p, fi->snap.ht);		p += 4;
+	PACK64(p, fi->snap.bp.addr);	p += 8;
+	PACK64(p, fi->snap.bp.hash);	p += 8;
+	PACK32(p, fi->narena);		p += 4;
+	PACK64(p, fi->arenasz);		p += 8;
+	PACK64(p, fi->nextqid);		p += 8;
+	PACK64(p, fi->nextgen);		p += 8;
+	PACK64(p, a->head.addr);	p += 8;	/* freelist addr */
+	PACK64(p, a->head.hash);	p += 8;	/* freelist hash */
+	PACK64(p, a->size);		p += 8;	/* arena size */
+	PACK64(p, a->used);		p += 8;	/* arena used */
 	return p;
 }
 
@@ -474,21 +474,21 @@ unpackarena(Arena *a, Fshdr *fi, char *p, int sz)
 		return nil;
 	}
 	p += 8;
-	fi->blksz = GBIT32(p);		p += 4;
-	fi->bufspc = GBIT32(p);		p += 4;
-	fi->snap.ht = GBIT32(p);	p += 4;
-	fi->snap.bp.addr = GBIT64(p);	p += 8;
-	fi->snap.bp.hash = GBIT64(p);	p += 8;
+	fi->blksz = UNPACK32(p);		p += 4;
+	fi->bufspc = UNPACK32(p);		p += 4;
+	fi->snap.ht = UNPACK32(p);	p += 4;
+	fi->snap.bp.addr = UNPACK64(p);	p += 8;
+	fi->snap.bp.hash = UNPACK64(p);	p += 8;
 	fi->snap.bp.gen = -1;		p += 0;
-	fi->narena = GBIT32(p);		p += 4;
-	fi->arenasz = GBIT64(p);	p += 8;
-	fi->nextqid = GBIT64(p);	p += 8;
-	fi->nextgen = GBIT64(p);	p += 8;
-	a->head.addr = GBIT64(p);	p += 8;
-	a->head.hash = GBIT64(p);	p += 8;
+	fi->narena = UNPACK32(p);		p += 4;
+	fi->arenasz = UNPACK64(p);	p += 8;
+	fi->nextqid = UNPACK64(p);	p += 8;
+	fi->nextgen = UNPACK64(p);	p += 8;
+	a->head.addr = UNPACK64(p);	p += 8;
+	a->head.hash = UNPACK64(p);	p += 8;
 	a->head.gen = -1;		p += 0;
-	a->size = GBIT64(p);		p += 8;
-	a->used = GBIT64(p);		p += 8;
+	a->size = UNPACK64(p);		p += 8;
+	a->used = UNPACK64(p);		p += 8;
 	a->tail = nil;
 	return p;
 }

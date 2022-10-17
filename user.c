@@ -62,8 +62,8 @@ slurp(Tree *t, vlong path, vlong len)
 	k.nk = Offksz;
 	for(o = 0; o < len; o += Blksz){
 		k.k[0] = Kdat;
-		PBIT64(k.k+1, path);
-		PBIT64(k.k+9, o);
+		PACK64(k.k+1, path);
+		PACK64(k.k+9, o);
 		if((e = btlookup(t, &k, &kv, kvbuf, sizeof(kvbuf))) != nil)
 			return e;
 		bp = unpackbp(kv.v, kv.nv);

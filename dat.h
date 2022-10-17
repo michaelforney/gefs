@@ -216,7 +216,7 @@ enum {
 	Tleaf,
 	Tlog,
 	Tdead,
-	Tarena = 0x6567,	/* 'ge' */
+	Tarena = 0x6765,	/* 'ge' bigendian */
 };
 
 enum {

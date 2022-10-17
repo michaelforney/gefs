@@ -26,14 +26,14 @@ scandead(Dlist *l, int lblk, void (*fn)(Bptr, void*), void *dat)
 Nextblk:
 	for(i = Loghashsz; i < Logspc; i += 16){
 		p = b->data + i;
-		op = GBIT64(p) & 0xff;
+		op = UNPACK64(p) & 0xff;
 		switch(op){
 		case DlEnd:
 			return 0;
 		case DlChain:
-			bp.addr = GBIT64(p);	p += 8;
+			bp.addr = UNPACK64(p);	p += 8;
 			bp.addr &= ~0xffULL;
-			bp.hash = GBIT64(p);
+			bp.hash = UNPACK64(p);
 			bp.gen = -1;
 			if(lblk)
 				fn(b->bp, dat);
@@ -41,17 +41,17 @@ Nextblk:
 				return -1;
 			goto Nextblk;
 		case DlGraft:
-			t.head.addr = GBIT64(p);	p += 8;
+			t.head.addr = UNPACK64(p);	p += 8;
 			t.head.addr &= ~0xffULL;
-			t.head.hash = GBIT64(p);
+			t.head.hash = UNPACK64(p);
 			t.head.gen = -1;
 			t.ins = nil;
 			scandead(&t, lblk, fn, dat);
 			break;
 		case DlKill:
-			bp.addr = GBIT64(p);	p += 8;
+			bp.addr = UNPACK64(p);	p += 8;
 			bp.hash = -1;
-			bp.gen = GBIT64(p);
+			bp.gen = UNPACK64(p);
 			bp.addr &= ~0xffULL;
 			fn(bp, dat);
 			break;
@@ -101,8 +101,8 @@ dlinsert(Dlist *dl, vlong v1, vlong v2)
 		dropblk(pb);
 	}
 	p = lb->data + lb->logsz;
-	PBIT64(p, v1);	p += 8;
-	PBIT64(p, v2);	p += 8;
+	PACK64(p, v1);	p += 8;
+	PACK64(p, v2);	p += 8;
 	if(dl->head.addr == -1){
 		end = DlEnd;
 		hash = -1;
@@ -110,8 +110,8 @@ dlinsert(Dlist *dl, vlong v1, vlong v2)
 		end = dl->head.addr|DlChain;
 		hash = dl->head.hash;
 	}
-	PBIT64(p+0, end);
-	PBIT64(p+8, hash);
+	PACK64(p+0, end);
+	PACK64(p+8, hash);
 	lb->logsz = (p - lb->data);
 	return 0;
 }
@@ -162,7 +162,7 @@ openlabel(char *name)
 		return nil;
 	if(kv.nv != Snapsz)
 		return nil;
-	return opensnap(GBIT64(kv.v + 1));
+	return opensnap(UNPACK64(kv.v + 1));
 }
 
 Tree*

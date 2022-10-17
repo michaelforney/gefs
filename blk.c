@@ -83,7 +83,7 @@ readblk(vlong bp, int flg)
 	while(rem != 0){
 		n = pread(fs->fd, b->buf, rem, off);
 		if(n <= 0){
-			free(b);
+			dropblk(b);
 			return nil;
 		}
 		off += n;
@@ -94,7 +94,7 @@ readblk(vlong bp, int flg)
 	b->hnext = nil;
 	b->flag = 0;
 
-	b->type = (flg&GBraw) ? Traw : GBIT16(b->buf+0);
+	b->type = (flg&GBraw) ? Traw : UNPACK16(b->buf+0);
 	b->bp.addr = bp;
 	b->bp.hash = -1;
 	b->bp.gen = -1;
@@ -123,15 +123,15 @@ readblk(vlong bp, int flg)
 		break;
 	case Tpivot:
 		b->data = b->buf + Pivhdsz;
-		b->nval = GBIT16(b->buf+2);
-		b->valsz = GBIT16(b->buf+4);
-		b->nbuf = GBIT16(b->buf+6);
-		b->bufsz = GBIT16(b->buf+8);
+		b->nval = UNPACK16(b->buf+2);
+		b->valsz = UNPACK16(b->buf+4);
+		b->nbuf = UNPACK16(b->buf+6);
+		b->bufsz = UNPACK16(b->buf+8);
 		break;
 	case Tleaf:
 		b->data = b->buf + Leafhdsz;
-		b->nval = GBIT16(b->buf+2);
-		b->valsz = GBIT16(b->buf+4);
+		b->nval = UNPACK16(b->buf+2);
+		b->valsz = UNPACK16(b->buf+4);
 		break;
 	}
 	assert(b->magic == Magic);
@@ -276,8 +276,8 @@ logappend(Arena *a, vlong off, vlong len, int op, Blk **tl)
 		cacheins(lb);
 		lb->logsz = Loghashsz;
 		p = lb->data + lb->logsz;
-		PBIT64(p+0, o|LogAlloc1);
-		PBIT64(p+8, (uvlong)LogEnd);
+		PACK64(p+0, o|LogAlloc1);
+		PACK64(p+8, (uvlong)LogEnd);
 		finalize(lb);
 		if(syncblk(lb) == -1){
 			dropblk(lb);
@@ -286,7 +286,7 @@ logappend(Arena *a, vlong off, vlong len, int op, Blk **tl)
 
 		if(pb != nil){
 			p = pb->data + pb->logsz;
-			PBIT64(p, lb->bp.addr|LogChain);
+			PACK64(p, lb->bp.addr|LogChain);
 			finalize(pb);
 			if(syncblk(pb) == -1){
 				dropblk(pb);
@@ -305,10 +305,10 @@ logappend(Arena *a, vlong off, vlong len, int op, Blk **tl)
 	}
 	off |= op;
 	p = lb->data + lb->logsz;
-	PBIT64(p, off);
+	PACK64(p, off);
 	lb->logsz += 8;
 	if(op >= Log2wide){
-		PBIT64(p+8, len);
+		PACK64(p+8, len);
 		lb->logsz += 8;
 	}
 	/*
@@ -325,7 +325,7 @@ logappend(Arena *a, vlong off, vlong len, int op, Blk **tl)
 		logop(a, o, Blksz, LogAlloc);
 	/* this gets overwritten by the next append */
 	p = lb->data + lb->logsz;
-	PBIT64(p, (uvlong)LogEnd);
+	PACK64(p, (uvlong)LogEnd);
 	return 0;
 
 }
@@ -355,7 +355,7 @@ loadlog(Arena *a)
 Nextblk:
 	if((b = getblk(bp, GBnochk)) == nil)
 		return -1;
-	bh = GBIT64(b->data);
+	bh = UNPACK64(b->data);
 	/* the hash covers the log and offset */
 	if(bh != siphash(b->data+Loghashsz, Logspc-Loghashsz)){
 		werrstr("corrupt log");
@@ -363,7 +363,7 @@ Nextblk:
 	}
 	for(i = Loghashsz; i < Logspc; i += n){
 		d = b->data + i;
-		ent = GBIT64(d);
+		ent = UNPACK64(d);
 		op = ent & 0xff;
 		off = ent & ~0xff;
 		n = (op >= Log2wide) ? 16 : 8;
@@ -383,14 +383,14 @@ Nextblk:
 
 		case LogAlloc:
 		case LogAlloc1:
-			len = (op >= Log2wide) ? GBIT64(d+8) : Blksz;
+			len = (op >= Log2wide) ? UNPACK64(d+8) : Blksz;
 			dprint("log@%d alloc: %llx+%llx\n", i, off, len);
 			if(grabrange(a->free, off & ~0xff, len) == -1)
 				return -1;
 			break;
 		case LogFree:
 		case LogFree1:
-			len = (op >= Log2wide) ? GBIT64(d+8) : Blksz;
+			len = (op >= Log2wide) ? UNPACK64(d+8) : Blksz;
 			dprint("log@%d free: %llx+%llx\n", i, off, len);
 			if(freerange(a->free, off & ~0xff, len) == -1)
 				return -1;
@@ -436,7 +436,7 @@ compresslog(Arena *a)
 	b->logsz = Loghashsz;
 
 	p = b->data + b->logsz;
-	PBIT64(p, (uvlong)LogEnd);
+	PACK64(p, (uvlong)LogEnd);
 	finalize(b);
 	if(syncblk(b) == -1){
 		dropblk(b);
@@ -495,7 +495,7 @@ compresslog(Arena *a)
 			return -1;
 
 	p = tl->data + tl->logsz;
-	PBIT64(p, LogChain|graft);
+	PACK64(p, LogChain|graft);
 	free(log);
 	finalize(tl);
 	if(syncblk(tl) == -1)
@@ -517,7 +517,7 @@ compresslog(Arena *a)
 				return -1;
 			for(i = Loghashsz; i < Logspc; i += n){
 				p = b->data + i;
-				v = GBIT64(p);
+				v = UNPACK64(p);
 				n = ((v&0xff) >= Log2wide) ? 16 : 8;
 				if((v&0xff) == LogChain){
 					na = v & ~0xff;
@@ -727,25 +727,25 @@ finalize(Blk *b)
 	uvlong h;
 
 	if(b->type != Traw)
-		PBIT16(b->buf, b->type);
+		PACK16(b->buf, b->type);
 	switch(b->type){
 	default:
 	case Tpivot:
-		PBIT16(b->buf+2, b->nval);
-		PBIT16(b->buf+4, b->valsz);
-		PBIT16(b->buf+6, b->nbuf);
-		PBIT16(b->buf+8, b->bufsz);
+		PACK16(b->buf+2, b->nval);
+		PACK16(b->buf+4, b->valsz);
+		PACK16(b->buf+6, b->nbuf);
+		PACK16(b->buf+8, b->bufsz);
 		b->bp.hash = blkhash(b);
 		break;
 	case Tleaf:
-		PBIT16(b->buf+2, b->nval);
-		PBIT16(b->buf+4, b->valsz);
+		PACK16(b->buf+2, b->nval);
+		PACK16(b->buf+4, b->valsz);
 		b->bp.hash = blkhash(b);
 		break;
 	case Tlog:
 	case Tdead:
 		h = siphash(b->data + Loghashsz, Logspc-Loghashsz);
-		PBIT64(b->data, h);
+		PACK64(b->data, h);
 		b->bp.hash = blkhash(b);
 		break;
 	case Traw:
@@ -772,6 +772,7 @@ getblk(Bptr bp, int flg)
 		qunlock(&fs->blklk[i]);
 		return b;
 	}
+	dprint("read %B from %#llx\n", bp, getcallerpc(&bp));
 	if((b = readblk(bp.addr, flg)) == nil){
 		qunlock(&fs->blklk[i]);
 		return nil;

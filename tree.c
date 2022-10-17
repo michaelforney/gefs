@@ -100,10 +100,10 @@ getval(Blk *b, int i, Kvp *kv)
 	int o;
 
 	assert(i >= 0 && i < b->nval);
-	o = GBIT16(b->data + 2*i);
-	kv->nk = GBIT16(b->data + o);
+	o = UNPACK16(b->data + 2*i);
+	kv->nk = UNPACK16(b->data + o);
 	kv->k = b->data + o + 2;
-	kv->nv = GBIT16(kv->k + kv->nk);
+	kv->nv = UNPACK16(kv->k + kv->nk);
 	kv->v = kv->k + kv->nk + 2;
 }
 
@@ -112,7 +112,7 @@ getptr(Kvp *kv, int *fill)
 {
 	assert(kv->nv == Ptrsz || kv->nv == Ptrsz+2);
 	if(fill != nil)
-		*fill = GBIT16(kv->v + Ptrsz);
+		*fill = UNPACK16(kv->v + Ptrsz);
 	return unpackbp(kv->v, kv->nv);
 }
 
@@ -131,12 +131,12 @@ setval(Blk *b, Kvp *kv)
 	assert(2*(b->nval+1) <= off);
 
 	p = b->data + 2*b->nval;
-	PBIT16(p, off);
+	PACK16(p, off);
 
 	p = b->data + off;
-	PBIT16(p, kv->nk);		p += 2;
+	PACK16(p, kv->nk);		p += 2;
 	memcpy(p, kv->k, kv->nk);	p += kv->nk;
-	PBIT16(p, kv->nv);		p += 2;
+	PACK16(p, kv->nv);		p += 2;
 	memcpy(p, kv->v, kv->nv);
 
 	b->nval++;
@@ -153,7 +153,7 @@ setptr(Blk *b, Key *k, Bptr bp, int fill)
 	kv.v = buf;
 	kv.nv = sizeof(buf);
 	p = packbp(buf, sizeof(buf), &bp);
-	PBIT16(p, fill);
+	PACK16(p, fill);
 	setval(b, &kv);
 }
 
@@ -168,13 +168,13 @@ setmsg(Blk *b, Msg *m)
 
 	p = b->data + Pivspc + 2*b->nbuf;
 	o = Bufspc - b->bufsz;
-	PBIT16(p, o);
+	PACK16(p, o);
 
 	p = b->data + Pivspc + o;
 	*p = m->op;		p += 1;
-	PBIT16(p, m->nk);	p += 2;
+	PACK16(p, m->nk);	p += 2;
 	memcpy(p, m->k, m->nk);	p += m->nk;
-	PBIT16(p, m->nv);	p += 2;
+	PACK16(p, m->nv);	p += 2;
 	memcpy(p, m->v, m->nv);
 
 	b->nbuf++;
@@ -188,12 +188,12 @@ getmsg(Blk *b, int i, Msg *m)
 
 	assert(b->type == Tpivot);
 	assert(i >= 0 && i < b->nbuf);
-	o = GBIT16(b->data + Pivspc + 2*i);
+	o = UNPACK16(b->data + Pivspc + 2*i);
 	p = b->data + Pivspc + o;
 	m->op = *p;
-	m->nk = GBIT16(p + 1);
+	m->nk = UNPACK16(p + 1);
 	m->k = p + 3;
-	m->nv = GBIT16(p + 3 + m->nk);
+	m->nv = UNPACK16(p + 3 + m->nk);
 	m->v = p + 5 + m->nk;
 }
 
@@ -356,32 +356,32 @@ statupdate(Kvp *kv, Msg *m)
 	/* bump version */
 	d.qid.vers++;
 	if(op & Owsize){
-		d.length = GBIT64(p);
+		d.length = UNPACK64(p);
 		p += 8;
 	}
 	if(op & Owmode){
-		d.mode = GBIT32(p);
+		d.mode = UNPACK32(p);
 		d.qid.type = d.mode>>24;
 		p += 4;
 	}
 	if(op & Owmtime){
-		d.mtime = GBIT64(p);
+		d.mtime = UNPACK64(p);
 		p += 8;
 	}
 	if(op & Owatime){
-		d.atime = GBIT64(p);
+		d.atime = UNPACK64(p);
 		p += 8;
 	}
 	if(op & Owuid){
-		d.uid = GBIT32(p);
+		d.uid = UNPACK32(p);
 		p += 4;
 	}
 	if(op & Owgid){
-		d.gid = GBIT32(p);
+		d.gid = UNPACK32(p);
 		p += 4;
 	}
 	if(op & Owmuid){
-		d.muid = GBIT32(p);
+		d.muid = UNPACK32(p);
 		p += 4;
 	}
 	if(p != m->v + m->nv){
@@ -1172,10 +1172,10 @@ fastupsert(Tree *t, Blk *b, Msg *msg, int nmsg)
 		if(ri == -1)
 			ri = hi+1;
 		p = r->data + Pivspc + 2*(nbuf+i);
-		o = GBIT16(p);
+		o = UNPACK16(p);
 		p = r->data + Pivspc + 2*ri;
 		memmove(p+2, p, 2*(nbuf+i-ri));
-		PBIT16(p, o);
+		PACK16(p, o);
 	}
 	enqueue(r);
 

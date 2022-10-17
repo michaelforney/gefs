@@ -41,6 +41,7 @@ enum {
 	Nsec	= 1000LL*1000*1000,	/* nanoseconds to the second */
 	Maxname	= 256,			/* maximum size of a name element */
 	Maxent	= 9+Maxname+1,		/* maximum size of ent key, with terminator */
+	Maxtag	= 1<<16,		/* maximum tag in 9p */
 
 	/*
 	 * Kpmax must be no more than 1/4 of pivspc, or
@@ -351,6 +352,7 @@ struct Fmsg {
 	Fcall;
 	Conn	*conn;
 	int	sz;	/* the size of the message buf */
+	Fmsg	*flush;	/* the flush message */
 	Amsg	*a;	/* admin messages */
 	uchar	buf[];
 };
@@ -463,6 +465,9 @@ struct Gefs {
 	Blk	*ctail;
 	usize	ccount;
 	usize	cmax;
+
+	Lock	mflushlk;
+	Fmsg	*mflush[Maxtag];
 
 	Stats	stats;
 };

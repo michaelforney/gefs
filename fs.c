@@ -166,6 +166,7 @@ fshangup(int fd, char *fmt, ...)
 static void
 respond(Fmsg *m, Fcall *r)
 {
+	Fcall rf;
 	uchar buf[Max9p];
 	int w, n;
 
@@ -176,6 +177,14 @@ respond(Fmsg *m, Fcall *r)
 	w = write(m->conn->fd, buf, n);
 	if(w != n)
 		fshangup(m->conn->fd, Eio);
+	if(m->type != Tflush) {
+		lock(&fs->mflushlk);
+		fs->mflush[m->tag] = nil;
+		rf.type = Rflush;
+		if(m->flush != nil)
+			respond(m->flush, &rf);
+		unlock(&fs->mflushlk);
+	}
 	free(m);
 }
 
@@ -603,6 +612,7 @@ readmsg(Conn *c, Fmsg **pm)
 	m->conn = c;
 	m->sz = sz;
 	m->a = nil;
+	m->flush = nil;
 	PBIT32(m->buf, sz);
 	*pm = m;
 	return 0;
@@ -1819,6 +1829,21 @@ fswrite(Fmsg *m)
 }
 
 void
+fsflush(Fmsg *m)
+{
+	Fcall r;
+
+	lock(&fs->mflushlk);
+	if(fs->mflush[m->oldtag] != nil)
+		fs->mflush[m->oldtag]->flush = m;
+	else{
+		r.type = Rflush;
+		respond(m, &r);
+	}
+	unlock(&fs->mflushlk);
+}
+
+void
 runfs(int, void *pfd)
 {
 	Conn *c;
@@ -1854,6 +1879,11 @@ runfs(int, void *pfd)
 			return;
 		}
 		dprint("← %F\n", &m->Fcall);
+
+		lock(&fs->mflushlk);
+		fs->mflush[m->tag] = m;
+		unlock(&fs->mflushlk);
+
 		switch(m->type){
 		/* sync setup */
 		case Tversion:	fsversion(m);	break;

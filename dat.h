@@ -18,6 +18,7 @@ typedef struct Arena	Arena;
 typedef struct Arange	Arange;
 typedef struct Bucket	Bucket;
 typedef struct Chan	Chan;
+typedef struct Syncq	Syncq;
 typedef struct Tree	Tree;
 typedef struct Dlist	Dlist;
 typedef struct Mount	Mount;
@@ -216,6 +217,7 @@ enum {
 	Tleaf,
 	Tlog,
 	Tdead,
+	Tmagic,
 	Tarena = 0x6765,	/* 'ge' bigendian */
 };
 
@@ -388,6 +390,15 @@ struct User {
 	char	name[128];
 };
 
+struct Syncq {
+	QLock	lk;
+	Rendez	fullrz;
+	Rendez	emptyrz;
+	Blk	**heap;
+	int	nheap;
+	int	heapsz;
+};
+
 struct Stats {
 	vlong	cachehit;
 	vlong	cachelook;
@@ -433,7 +444,7 @@ struct Gefs {
 	Lock	activelk;
 	ulong	active[32];
 	int	lastactive[32];
-	Chan	*chsync[32];
+	Syncq	syncq[32];
 
 	Lock	freelk;
 	Bfree	*freep;
@@ -485,7 +496,7 @@ struct Arena {
 	/* freelist */
 	Bptr	head;
 	Blk	*tail;	/* tail held open for writing */
-	Chan	*sync;
+	Syncq	*sync;
 };
 
 struct Xdir {

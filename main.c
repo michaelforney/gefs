@@ -210,9 +210,9 @@ main(int argc, char **argv)
 	if(fs->nsyncers > fs->narena)
 		fs->nsyncers = fs->narena;
 	for(i = 0; i < fs->nsyncers; i++)
-		fs->chsync[i] = mkchan(1024);
+		qinit(&fs->syncq[i]);
 	for(i = 0; i < fs->narena; i++)
-		fs->arenas[i].sync = fs->chsync[i%fs->nsyncers];
+		fs->arenas[i].sync = &fs->syncq[i%fs->nsyncers];
 	srvfd = postfd(srvname, "");
 	ctlfd = postfd(srvname, ".cmd");
 	launch(runtasks, -1, nil, "tasks");
@@ -221,7 +221,7 @@ main(int argc, char **argv)
 	for(i = 0; i < 2; i++)
 		launch(runread, fs->nquiesce++, nil, "readio");
 	for(i = 0; i < fs->nsyncers; i++)
-		launch(runsync, -1, fs->chsync[i], "syncio");
+		launch(runsync, -1, &fs->syncq[i], "syncio");
 	for(i = 0; i < nann; i++)
 		launch(runannounce, -1, ann[i], "announce");
 	if(srvfd != -1)

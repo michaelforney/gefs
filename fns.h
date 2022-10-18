@@ -40,6 +40,9 @@ void	cachedel(vlong);
 Blk*	cacheget(vlong);
 Blk*	cachepluck(void);
 
+void	qinit(Syncq*);
+void	qput(Syncq*, Blk*);
+
 Arena*	getarena(vlong);
 int	syncblk(Blk*);
 void	enqueue(Blk*);

@@ -272,6 +272,9 @@ rshowblk(int fd, Blk *b, int indent, int recurse)
 			}
 		}
 		break;
+	case Tmagic:
+		fprint(fd, "magic\n");
+		break;
 	case Tarena:
 		fprint(fd, "arena -- ");
 		goto Show;

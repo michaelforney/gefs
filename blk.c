@@ -7,17 +7,10 @@
 #include "fns.h"
 
 typedef struct Range	Range;
-typedef struct Flushq	Flushq;
 
 struct Range {
 	vlong off;
 	vlong len;
-};
-
-struct Flushq {
-	Blk	**heap;
-	int	nheap;
-	int	heapsz;
 };
 
 static vlong	blkalloc_lk(Arena*);
@@ -25,8 +18,6 @@ static vlong	blkalloc(int);
 static int	blkdealloc_lk(vlong);
 static Blk*	initblk(Blk*, vlong, int);
 static int	logop(Arena *, vlong, vlong, int);
-
-static Blk magic;
 
 int
 checkflag(Blk *b, int f)
@@ -139,11 +130,13 @@ readblk(vlong bp, int flg)
 }
 
 static Arena*
-pickarena(int hint)
+pickarena(int hint, int tries)
 {
 	int n;
 
-	n = hint+ainc(&fs->roundrobin)/(1024*1024);
+	n = hint*7;
+	n += tries;
+	n += ainc(&fs->roundrobin)/(1024*1024);
 	return &fs->arenas[n%fs->narena];
 }
 
@@ -447,7 +440,7 @@ compresslog(Arena *a)
 	if(a->tail != nil){
 		finalize(a->tail);
 		if(syncblk(a->tail) == -1){
-			free(b);
+			dropblk(b);
 			return -1;
 		}
 	}
@@ -606,7 +599,7 @@ blkalloc(int hint)
 
 	tries = 0;
 Again:
-	a = pickarena(hint+tries);
+	a = pickarena(hint, tries);
 	if(a == nil || tries == fs->narena){
 		werrstr("no empty arenas");
 		return -1;
@@ -728,6 +721,11 @@ finalize(Blk *b)
 
 	if(b->type != Traw)
 		PACK16(b->buf, b->type);
+
+	lock(&fs->freelk);
+	b->qgen = fs->qgen;
+	unlock(&fs->freelk);
+
 	switch(b->type){
 	default:
 	case Tpivot:
@@ -751,6 +749,7 @@ finalize(Blk *b)
 	case Traw:
 		b->bp.hash = blkhash(b);
 		break;
+	case Tmagic:
 	case Tarena:
 		break;
 	}
@@ -808,7 +807,6 @@ dropblk(Blk *b)
 	if(b == nil || adec(&b->ref) != 0)
 		return;
 	b->lastdrop = getcallerpc(&b);
-//	assert(b->cprev == nil && b->cnext == nil);
 	/*
 	 * While a freed block can get resurrected
 	 * before quiescence, it's unlikely -- so
@@ -946,16 +944,29 @@ enqueue(Blk *b)
 	assert(checkflag(b, Bdirty));
 	holdblk(b);
 	finalize(b);
-	chsend(a->sync, b);
+	qput(a->sync, b);
 }
 
-static void
-qput(Flushq *q, Blk *b)
+void
+qinit(Syncq *q)
+{
+	q->fullrz.l = &q->lk;
+	q->emptyrz.l = &q->lk;
+	q->nheap = 0;
+	q->heapsz = fs->cmax;
+	if((q->heap = malloc(q->heapsz*sizeof(Blk*))) == nil)
+		sysfatal("alloc queue: %r");
+
+}
+
+void
+qput(Syncq *q, Blk *b)
 {
 	int i;
 
-	if(q->nheap == q->heapsz)
-		abort();
+	qlock(&q->lk);
+	while(q->nheap == q->heapsz)
+		rsleep(&q->fullrz);
 	for(i = q->nheap; i > 0; i = (i-1)/2){
 		if(blkcmp(b, q->heap[(i-1)/2]) == 1)
 			break;
@@ -963,19 +974,22 @@ qput(Flushq *q, Blk *b)
 	}
 	q->heap[i] = b;
 	q->nheap++;
+	rwakeup(&q->emptyrz);
+	qunlock(&q->lk);
 }
 
 static Blk*
-qpop(Flushq *q)
+qpop(Syncq *q)
 {
 	int i, l, r, m;
 	Blk *b, *t;
 
-	if(q->nheap == 0)
-		return nil;
+	qlock(&q->lk);
+	while(q->nheap == 0)
+		rsleep(&q->emptyrz);
 	b = q->heap[0];
 	if(--q->nheap == 0)
-		return b;
+		goto Out;
 
 	i = 0;
 	q->heap[0] = q->heap[q->nheap];
@@ -994,6 +1008,9 @@ qpop(Flushq *q)
 		q->heap[i] = t;
 		i = m;
 	}
+Out:
+	rwakeup(&q->fullrz);
+	qunlock(&q->lk);
 	return b;
 
 }
@@ -1001,32 +1018,19 @@ qpop(Flushq *q)
 void
 runsync(int, void *p)
 {
-	Flushq q;
-	Chan *c;
+	Syncq *q;
 	Blk *b;
 
-	c = p;
-	q.nheap = 0;
-	q.heapsz = 2*fs->cmax/fs->narena;
-	if((q.heap = malloc(q.heapsz*sizeof(Blk*))) == nil)
-		sysfatal("alloc queue: %r");
+	q = p;
 	while(1){
-		while(q.nheap < q.heapsz){
-			b = chrecv(c, q.nheap == 0);
-			if(b == &magic){
-				qlock(&fs->synclk);
-				if(--fs->syncing == 0)
-					rwakeupall(&fs->syncrz);
-				qunlock(&fs->synclk);
-				continue;
-			}				
-			if(b != nil)
-				qput(&q, b);
-			if(b == nil || q.nheap == q.heapsz)
-				break;
-		}
-	
-		b = qpop(&q);
+		b = qpop(q);
+		if(b->type == Tmagic){
+			qlock(&fs->synclk);
+			if(--fs->syncing == 0)
+				rwakeupall(&fs->syncrz);
+			qunlock(&fs->synclk);
+			continue;
+		}				
 		if(!checkflag(b, Bfreed)){
 			if(syncblk(b) == -1){
 				ainc(&fs->broken);
@@ -1042,12 +1046,16 @@ void
 sync(void)
 {
 	Arena *a;
+	Blk *b;
 	int i;
 
 	qlock(&fs->synclk);
 	fs->syncing = fs->nsyncers;
-	for(i = 0; i < fs->nsyncers; i++)
-		chsend(fs->chsync[i], &magic);
+	for(i = 0; i < fs->nsyncers; i++){
+		b = cachepluck();
+		b->type = Tmagic;
+		qput(&fs->syncq[0], b);
+	}
 	while(fs->syncing != 0)
 		rsleep(&fs->syncrz);
 	for(i = 0; i < fs->narena; i++){

@@ -1970,6 +1970,7 @@ runwrite(int wid, void *)
 			break;
 		}
 		epochend(wid);
+		epochclean();
 	}
 }
 

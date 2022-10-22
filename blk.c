@@ -13,7 +13,7 @@ struct Range {
 	vlong len;
 };
 
-static vlong	blkalloc_lk(Arena*);
+static vlong	blkalloc_lk(Arena*, int);
 static vlong	blkalloc(int);
 static int	blkdealloc_lk(vlong);
 static Blk*	initblk(Blk*, vlong, int);
@@ -261,7 +261,7 @@ logappend(Arena *a, vlong off, vlong len, int op, Blk **tl)
 	 */
 	if(lb == nil || lb->logsz >= Logspc - 40){
 		pb = lb;
-		if((o = blkalloc_lk(a)) == -1)
+		if((o = blkalloc_lk(a, 1)) == -1)
 			return -1;
 		if((lb = cachepluck()) == nil)
 			return -1;
@@ -421,7 +421,7 @@ compresslog(Arena *a)
 	 * because otherwise we have a deadlock
 	 * allocating the block.
 	 */
-	if((ba = blkalloc_lk(a)) == -1)
+	if((ba = blkalloc_lk(a, 1)) == -1)
 		return -1;
 	if((b = cachepluck()) == nil)
 		return -1;
@@ -462,7 +462,7 @@ compresslog(Arena *a)
 	 * so we don't record this block as
 	 * available when we compress the log.
 	 */
-	if((ba = blkalloc_lk(a)) == -1){
+	if((ba = blkalloc_lk(a, 1)) == -1){
 		free(log);
 		return -1;
 	}
@@ -543,7 +543,7 @@ compresslog(Arena *a)
  * the alloc log.
  */
 static vlong
-blkalloc_lk(Arena *a)
+blkalloc_lk(Arena *a, int force)
 {
 	Avltree *t;
 	Arange *r;
@@ -551,8 +551,12 @@ blkalloc_lk(Arena *a)
 
 	t = a->free;
 	r = (Arange*)t->root;
-	if(r == nil)
+	if(!force && a->size - a->used <= a->reserve)
 		return -1;
+	if(r == nil){
+		fprint(2, "out of space");
+		abort();
+	}
 
 	/*
 	 * A bit of sleight of hand here:
@@ -618,7 +622,7 @@ Again:
 	 */
 	tries++;
 	lock(a);
-	if((b = blkalloc_lk(a)) == -1){
+	if((b = blkalloc_lk(a, 0)) == -1){
 		unlock(a);
 		goto Again;
 	}

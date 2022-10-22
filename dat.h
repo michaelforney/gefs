@@ -493,6 +493,7 @@ struct Arena {
 	vlong	nq;
 	vlong	size;
 	vlong	used;
+	vlong	reserve;
 	/* freelist */
 	Bptr	head;
 	Blk	*tail;	/* tail held open for writing */

@@ -63,6 +63,9 @@ loadfs(char *dev)
 		a = &fs->arenas[i];
 		if((loadarena(a, &fi, i*fs->arenasz)) == -1)
 			sysfatal("loadfs: %r");
+		a->reserve = a->size / 1024;
+		if(a->reserve < 32*MiB)
+			a->reserve = 32*MiB;
 		mergeinfo(fs, &fi);
 		if(!fs->gotinfo){
 			if((fs->arenas = realloc(fs->arenas, fs->narena*sizeof(Arena))) == nil)
@@ -90,7 +93,7 @@ loadfs(char *dev)
 	fprint(2, "load %s:\n", dev);
 	fprint(2, "\tsnaptree:\t%B\n", fs->snap.bp);
 	fprint(2, "\tnarenas:\t%d\n", fs->narena);
-	fprint(2, "\tarenasz:\t%lld\n", fs->arenasz);
+	fprint(2, "\tarenasz:\t%lld MiB\n", fs->arenasz/MiB);
 	fprint(2, "\tnextqid:\t%lld\n", fs->nextqid);
 	fprint(2, "\tnextgen:\t%lld\n", fs->nextgen);
 	fprint(2, "\tblocksize:\t%lld\n", Blksz);

@@ -1888,7 +1888,8 @@ runfs(int, void *pfd)
 		/* sync setup */
 		case Tversion:	fsversion(m);	break;
 		case Tauth:	fsauth(m);	break;
-		case Tclunk:	fsclunk(m);		break;
+		case Tclunk:	fsclunk(m);	break;
+		case Tflush:	fsflush(m);	break;
 
 		/* mutators */
 		case Tcreate:	chsend(fs->wrchan, m);	break;
@@ -1898,7 +1899,6 @@ runfs(int, void *pfd)
 
 		/* reads */
 		case Tattach:	chsend(fs->rdchan, m);	break;
-		case Tflush:	chsend(fs->rdchan, m);	break;
 		case Twalk:	chsend(fs->rdchan, m);	break;
 		case Tread:	chsend(fs->rdchan, m);	break;
 		case Tstat:	chsend(fs->rdchan, m);	break;
@@ -1983,7 +1983,6 @@ runread(int wid, void *)
 		m = chrecv(fs->rdchan, 1);
 		epochstart(wid);
 		switch(m->type){
-		case Tflush:	rerror(m, Eimpl);	break;
 		case Tattach:	fsattach(m);	break;
 		case Twalk:	fswalk(m);	break;
 		case Tread:	fsread(m);	break;

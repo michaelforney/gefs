@@ -1033,9 +1033,7 @@ runsync(int, void *p)
 			if(--fs->syncing == 0)
 				rwakeupall(&fs->syncrz);
 			qunlock(&fs->synclk);
-			continue;
-		}				
-		if(!checkflag(b, Bfreed)){
+		}else if(!checkflag(b, Bfreed)){
 			if(syncblk(b) == -1){
 				ainc(&fs->broken);
 				fprint(2, "write: %r");
@@ -1061,7 +1059,7 @@ sync(void)
 		lock(&fs->freelk);
 		b->qgen = ++fs->qgen;
 		unlock(&fs->freelk);
-		qput(&fs->syncq[0], b);
+		qput(&fs->syncq[i], b);
 	}
 	while(fs->syncing != 0)
 		rsleep(&fs->syncrz);

@@ -134,7 +134,7 @@ pickarena(int hint, int tries)
 {
 	int n;
 
-	n = hint*7;
+	n = hint;
 	n += tries;
 	n += ainc(&fs->roundrobin)/(1024*1024);
 	return &fs->arenas[n%fs->narena];

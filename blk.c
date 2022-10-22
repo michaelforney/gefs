@@ -1058,6 +1058,9 @@ sync(void)
 	for(i = 0; i < fs->nsyncers; i++){
 		b = cachepluck();
 		b->type = Tmagic;
+		lock(&fs->freelk);
+		b->qgen = ++fs->qgen;
+		unlock(&fs->freelk);
 		qput(&fs->syncq[0], b);
 	}
 	while(fs->syncing != 0)

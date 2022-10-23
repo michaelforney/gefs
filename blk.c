@@ -243,7 +243,7 @@ static int
 logappend(Arena *a, vlong off, vlong len, int op, Blk **tl)
 {
 	Blk *pb, *lb;
-	vlong o;
+	vlong o, ao;
 	char *p;
 
 	assert(off % Blksz == 0);
@@ -266,12 +266,13 @@ logappend(Arena *a, vlong off, vlong len, int op, Blk **tl)
 		if((lb = cachepluck()) == nil)
 			return -1;
 		initblk(lb, o, Tlog);
-		cacheins(lb);
+
 		lb->logsz = Loghashsz;
 		p = lb->data + lb->logsz;
 		PACK64(p+0, o|LogAlloc1);
 		PACK64(p+8, (uvlong)LogEnd);
 		finalize(lb);
+
 		if(syncblk(lb) == -1){
 			dropblk(lb);
 			return -1;
@@ -309,13 +310,15 @@ logappend(Arena *a, vlong off, vlong len, int op, Blk **tl)
 	 * to be recorded. If we're compressing
 	 * a log, it needs to go to the tail of
 	 * the new log, rather than after the
-	 * current allocation.
-	 *
-	 * Because we've just grown the log, we
-	 * know it won't recurse.
+	 * current allocation. so that we don't
+	 * reorder allocs and frees.
 	 */
-	if(o != -1)
-		logop(a, o, Blksz, LogAlloc);
+	if(o != -1){
+		p = lb->data + lb->logsz;
+		ao = o|LogAlloc1;
+		PACK64(p, ao);
+		lb->logsz += 8;
+	}
 	/* this gets overwritten by the next append */
 	p = lb->data + lb->logsz;
 	PACK64(p, (uvlong)LogEnd);

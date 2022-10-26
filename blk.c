@@ -776,7 +776,6 @@ getblk(Bptr bp, int flg)
 		qunlock(&fs->blklk[i]);
 		return b;
 	}
-	dprint("read %B from %#llx\n", bp, getcallerpc(&bp));
 	if((b = readblk(bp.addr, flg)) == nil){
 		qunlock(&fs->blklk[i]);
 		return nil;

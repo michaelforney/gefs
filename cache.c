@@ -67,6 +67,8 @@ lrubot(Blk *b)
 		fs->ctail->cnext = b;
 	if(fs->chead == nil)
 		fs->chead = b;
+	b->bp.addr = -1;
+	b->bp.hash = -1;
 	b->cprev = fs->ctail;
 	fs->ctail = b;
 	rwakeup(&fs->lrurz);
@@ -110,6 +112,8 @@ cachedel(vlong addr)
 	for(b = bkt->b; b != nil; b = b->hnext){
 		if(b->bp.addr == addr){
 			*p = b->hnext;
+			b->bp.addr = -1;
+			b->bp.hash = -1;
 			clrflag(b, Bcached);
 			b->hnext = nil;
 			break;

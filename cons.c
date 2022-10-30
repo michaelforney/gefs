@@ -328,7 +328,7 @@ runcons(int tid, void *pfd)
 				continue;
 			ap++; na--;
 			if(c->sub != nil){
-				if(strcmp(c->sub, *ap) != 0)
+				if(na == 0 || strcmp(c->sub, *ap) != 0)
 					continue;
 				ap++;
 				na--;

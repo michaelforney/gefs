@@ -23,33 +23,19 @@ static int	logop(Arena *, vlong, vlong, int);
 int
 checkflag(Blk *b, int f)
 {
-	return (b->flag & f) == f;
+	return (agetl(&b->flag) & f) == f;
 }
 
 void
 setflag(Blk *b, int f)
 {
-	long ov, nv;
-
-	while(1){
-		ov = b->flag;
-		nv = ov | f;
-		if(acasl(&b->flag, ov, nv))
-			break;
-	}
+	atomic_fetch_or(&b->flag, f);
 }
 
 void
 clrflag(Blk *b, int f)
 {
-	long ov, nv;
-
-	while(1){
-		ov = b->flag;
-		nv = ov & ~f;
-		if(acasl(&b->flag, ov, nv))
-			break;
-	}
+	atomic_fetch_and(&b->flag, ~f);
 }
 
 int
@@ -84,7 +70,7 @@ readblk(vlong bp, int flg)
 	b->cnext = nil;
 	b->cprev = nil;
 	b->hnext = nil;
-	b->flag = 0;
+	atomic_init(&b->flag, 0);
 
 	b->type = (flg&GBraw) ? Traw : UNPACK16(b->buf+0);
 	b->bp.addr = bp;
@@ -802,8 +788,13 @@ holdblk(Blk *b)
 void
 dropblk(Blk *b)
 {
-	assert(b == nil || b->ref > 0);
-	if(b == nil || adec(&b->ref) != 0)
+	long ref;
+
+	if(b == nil)
+		return;
+	ref = adec(&b->ref);
+	assert(ref >= 0);
+	if(ref != 0)
 		return;
 	b->lastdrop1 = b->lastdrop0;
 	b->lastdrop0 = b->lastdrop;
@@ -1018,7 +1009,7 @@ Out:
 }
 
 void
-runsync(int, void *p)
+runsync(int wid, void *p)
 {
 	Syncq *q;
 	Blk *b;

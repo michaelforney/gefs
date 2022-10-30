@@ -3,6 +3,7 @@
 #include <auth.h>
 #include <fcall.h>
 #include <avl.h>
+#include <sys/socket.h>
 
 #include "dat.h"
 #include "fns.h"
@@ -91,7 +92,7 @@ filldumpdir(Xdir *d)
 	memset(d, 0, sizeof(Xdir));
 	d->name = "/";
 	d->qid.path = Qdump;
-	d->qid.vers = fs->nextgen;
+	d->qid.vers = agetv(&fs->nextgen);
 	d->qid.type = QTDIR;
 	d->mode = 0555;
 	d->atime = 0;
@@ -135,8 +136,10 @@ mkchan(int size)
 	if((c = mallocz(sizeof(Chan) + size*sizeof(void*), 1)) == nil)
 		sysfatal("create channel");
 	c->size = size;
-	c->avail = size;
-	c->count = 0;
+	if(sem_init(&c->avail, 0, size) != 0)
+		sysfatal("sem_init avail failed");
+	if(sem_init(&c->count, 0, 0) != 0)
+		sysfatal("sem_init count failed");
 	c->rp = c->args;
 	c->wp = c->args;
 	return c;
@@ -147,35 +150,31 @@ void*
 chrecv(Chan *c)
 {
 	void *a;
-	long v;
 
-	v = agetl(&c->count);
-	if(v == 0 || !acasl(&c->count, v, v-1))
-		semacquire(&c->count, 1);
+	if(sem_wait(&c->count) != 0)
+		abort();
 	lock(&c->rl);
 	a = *c->rp;
 	if(++c->rp >= &c->args[c->size])
 		c->rp = c->args;
 	unlock(&c->rl);
-	semrelease(&c->avail, 1);
+	if(sem_post(&c->avail) != 0)
+		abort();
 	return a;
 }
 
 void
 chsend(Chan *c, void *m)
 {
-	long v;
-
-	v = agetl(&c->avail);
-	if(v == 0 || !acasl(&c->avail, v, v-1))
-		semacquire(&c->avail, 1);
+	if(sem_wait(&c->avail) != 0)
+		abort();
 	lock(&c->wl);
 	*c->wp = m;
 	if(++c->wp >= &c->args[c->size])
 		c->wp = c->args;
 	unlock(&c->wl);
-	semrelease(&c->count, 1);
-
+	if(sem_post(&c->count) != 0)
+		abort();
 }
 
 static void
@@ -392,7 +391,7 @@ getdent(vlong pqid, Xdir *d)
 	if((de = mallocz(sizeof(Dent), 1)) == nil)
 		goto Out;
 	de->Xdir = *d;
-	de->ref = 1;
+	atomic_init(&de->ref, 1);
 	de->qid = d->qid;
 	de->length = d->length;
 
@@ -430,7 +429,7 @@ getmount(char *name)
 		}
 	if((mnt = mallocz(sizeof(*mnt), 1)) == nil)
 		goto Out;
-	mnt->ref = 1;
+	atomic_init(&mnt->ref, 1);
 	if((mnt->name = strdup(name)) == nil){
 		free(mnt);
 		mnt = nil;
@@ -524,7 +523,7 @@ showfid(int fd, char**, int)
 			for(f = c->fidtab[i]; f != nil; f = f->next){
 				rlock(f->dent);
 				fprint(fd, "\tfid[%d]: %d [refs=%ld, k=%K, qid=%Q]\n",
-					i, f->fid, f->dent->ref, &f->dent->Key, f->dent->qid);
+					i, f->fid, agetl(&f->dent->ref), &f->dent->Key, f->dent->qid);
 				runlock(f->dent);
 			}
 		unlock(&c->fidtablk);
@@ -570,7 +569,7 @@ dupfid(Conn *c, u32int new, Fid *f)
 
 	*n = *f;
 	n->fid = new;
-	n->ref = 2; /* one for dup, one for clunk */
+	atomic_init(&n->ref, 2); /* one for dup, one for clunk */
 	n->mode = -1;
 	n->next = nil;
 
@@ -679,6 +678,7 @@ fsversion(Fmsg *m)
 	respond(m, &r);
 }
 
+#if 0
 void
 authfree(AuthRpc *auth)
 {
@@ -712,10 +712,14 @@ authnew(void)
 	}
 	return rpc;
 }
+#endif
 
 static void
 fsauth(Fmsg *m)
 {
+	rerror(m, Eauth);
+	return;
+#if 0
 	Dent *de;
 	Fcall r;
 	Fid f;
@@ -729,7 +733,7 @@ fsauth(Fmsg *m)
 		return;
 	}
 	memset(de, 0, sizeof(Dent));
-	de->ref = 0;
+	atomic_init(&de->ref, 0);
 	de->qid.type = QTAUTH;
 	de->qid.path = aincv(&fs->nextqid, 1);
 	de->qid.vers = 0;
@@ -758,6 +762,7 @@ fsauth(Fmsg *m)
 	r.type = Rauth;
 	r.aqid = de->qid;
 	respond(m, &r);
+#endif
 }
 
 static int
@@ -987,7 +992,7 @@ fswalk(Fmsg *m)
 	up = o->qpath;
 	prev = o->qpath;
 	rlock(o->dent);
-	d = *o->dent;
+	d = o->dent->Xdir;
 	runlock(o->dent);
 	duid = d.uid;
 	dgid = d.gid;
@@ -1154,7 +1159,7 @@ fswstat(Fmsg *m)
 	op = 0;
 
 	/* check validity of updated fields and construct Owstat message */
-	if(d.qid.path != ~0 || d.qid.vers != ~0){
+	if(d.qid.path != 0xffffffffffffffff || d.qid.vers != 0xffffffff){
 		if(d.qid.path != de->qid.path){
 			rerror(m, Ewstatp);
 			goto Out;
@@ -1178,7 +1183,7 @@ fswstat(Fmsg *m)
 			n.name = d.name;
 		}
 	}
-	if(d.length != ~0){
+	if(d.length != 0xffffffffffffffff){
 		if(d.length < 0){
 			rerror(m, Ewstatl);
 			goto Out;
@@ -1190,7 +1195,7 @@ fswstat(Fmsg *m)
 			p += 8;
 		}
 	}
-	if(d.mode != ~0){
+	if(d.mode != 0xffffffff){
 		if((d.mode^de->mode) & DMDIR){
 			rerror(m, Ewstatd);
 			goto Out;
@@ -1207,7 +1212,7 @@ fswstat(Fmsg *m)
 			p += 4;
 		}
 	}
-	if(d.mtime != ~0){
+	if(d.mtime != 0xffffffff){
 		n.mtime = d.mtime*Nsec;
 		if(n.mtime != de->mtime){
 			op |= Owmtime;
@@ -1639,6 +1644,7 @@ fsopen(Fmsg *m)
 	putfid(f);
 }
 
+#if 0
 static char*
 readauth(Fmsg *m, Fid *f, Fcall *r)
 {
@@ -1676,6 +1682,7 @@ readauth(Fmsg *m, Fid *f, Fcall *r)
 		return Ephase;
 	}
 }
+#endif
 
 static char*
 readsnap(Fmsg *m, Fid *f, Fcall *r)
@@ -1858,9 +1865,10 @@ fsread(Fmsg *m)
 		putfid(f);
 		return;
 	}
+	/*
 	if(f->dent->qid.type & QTAUTH)
 		e = readauth(m, f, &r);
-	else if(f->dent->qid.path == Qdump)
+	else */if(f->dent->qid.path == Qdump)
 		e = readsnap(m, f, &r);
 	else if(f->dent->qid.type & QTDIR)
 		e = readdir(m, f, &r);
@@ -1874,6 +1882,7 @@ fsread(Fmsg *m)
 	putfid(f);
 }
 
+#if 0
 static char*
 writeauth(Fmsg *m, Fid *f, Fcall *r)
 {
@@ -1888,7 +1897,7 @@ writeauth(Fmsg *m, Fid *f, Fcall *r)
 	return nil;
 
 }
-
+#endif
 
 static void
 fswrite(Fmsg *m)
@@ -1911,6 +1920,7 @@ fswrite(Fmsg *m)
 		putfid(f);
 		return;
 	}
+	/*
 	if(f->dent->qid.type == QTAUTH){
 		e = writeauth(m, f, &r);
 		if(e != nil)
@@ -1920,6 +1930,7 @@ fswrite(Fmsg *m)
 		putfid(f);
 		return;
 	}		
+	*/
 
 	wlock(f->dent);
 	p = m->data;
@@ -2096,11 +2107,11 @@ runwrite(int wid, void *)
 		ao = (m->a == nil) ? AOnone : m->a->op;
 		switch(ao){
 		case AOnone:
-			if(fs->rdonly){
+			if(agetl(&fs->rdonly)){
 				rerror(m, Erdonly);
 				return;
 			}
-			if(fs->broken){
+			if(agetl(&fs->broken)){
 				rerror(m, Efs);
 				return;
 			}
@@ -2156,7 +2167,7 @@ runtasks(int, void *)
 	Amsg *a;
 
 	while(1){
-		sleep(5000);
+		sleep(5);
 		m = mallocz(sizeof(Fmsg), 1);
 		a = mallocz(sizeof(Amsg), 1);
 		if(m == nil || a == nil){

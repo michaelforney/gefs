@@ -5,6 +5,7 @@
 
 #include "dat.h"
 #include "fns.h"
+#include "atomic.h"
 
 static void
 lrudel(Blk *b)
@@ -32,7 +33,7 @@ lrutop(Blk *b)
 	 * its now in use.
 	 */
 	assert(b->magic == Magic);
-	if(b->ref != 0){
+	if(agetl(&b->ref) != 0){
 		qunlock(&fs->lrulk);
 		return;
 	}
@@ -58,7 +59,7 @@ lrubot(Blk *b)
 	 * its now in use.
 	 */
 	assert(b->magic == Magic);
-	if(b->ref != 0){
+	if(agetl(&b->ref) != 0){
 		qunlock(&fs->lrulk);
 		return;
 	}
@@ -164,7 +165,7 @@ cachepluck(void)
 
 	b = fs->ctail;
 	assert(b->magic == Magic);
-	assert(b->ref == 0);
+	assert(agetl(&b->ref) == 0);
 	cachedel(b->bp.addr);
 	lrudel(b);
 	b->flag = 0;

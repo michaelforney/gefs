@@ -57,7 +57,7 @@ loadfs(char *dev)
 		sysfatal("malloc: %r");
 	if((mnt->name = strdup("dump")) == nil)
 		sysfatal("malloc: %r");
-	mnt->ref = 1;
+	atomic_init(&mnt->ref, 1);
 	mnt->root = nil;
 	mnt->gen = -1;
 	mnt->root = &fs->snap;

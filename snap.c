@@ -196,7 +196,7 @@ opensnap(vlong id)
 		goto Error;
 	if(unpacktree(t, kv.v, kv.nv) == nil)
 		goto Error;
-	t->memref = 1;
+	atomic_init(&t->memref, 1);
 	t->snext = fs->opensnap;
 	fs->opensnap = t;
 	qunlock(&fs->snaplk);
@@ -425,7 +425,7 @@ newsnap(Tree *t)
 	gen = aincv(&fs->nextgen, 1);
 	memset(&r->lk, 0, sizeof(r->lk));
 	r->snext = fs->opensnap;
-	r->memref = 1;
+	atomic_init(&r->memref, 1);
 	r->ref = 0;
 	r->ht = t->ht;
 	r->bp = t->bp;

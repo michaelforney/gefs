@@ -138,15 +138,14 @@ reamfs(char *dev)
 	Blk *rb, *tb;
 	Mount *mnt;
 	Arena *a;
-	Dir *d;
 	int i;
+	struct stat st;
 
 	if((fs->fd = open(dev, ORDWR)) == -1)
 		sysfatal("open %s: %r", dev);
-	if((d = dirfstat(fs->fd)) == nil)
-		sysfatal("ream: %r");
-	sz = d->length;
-	free(d);
+	if(fstat(fs->fd, &st) != 0)
+		sysfatal("stat: %s", strerror(errno));
+	sz = st.st_size;
 	if(sz < 64*MiB)
 		sysfatal("ream: disk too small");
 	if((mnt = mallocz(sizeof(Mount), 1)) == nil)

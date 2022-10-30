@@ -5,6 +5,7 @@
 
 #include "dat.h"
 #include "fns.h"
+#include "atomic.h"
 
 char*
 unpack8(int *err, char *p, char *e, void *v)
@@ -454,8 +455,8 @@ packarena(char *p, int sz, Arena *a, Fshdr *fi)
 	PACK64(p, fi->snap.bp.hash);	p += 8;
 	PACK32(p, fi->narena);		p += 4;
 	PACK64(p, fi->arenasz);		p += 8;
-	PACK64(p, fi->nextqid);		p += 8;
-	PACK64(p, fi->nextgen);		p += 8;
+	PACK64(p, agetv(&fi->nextqid));	p += 8;
+	PACK64(p, agetv(&fi->nextgen));	p += 8;
 	PACK64(p, a->head.addr);	p += 8;	/* freelist addr */
 	PACK64(p, a->head.hash);	p += 8;	/* freelist hash */
 	PACK64(p, a->size);		p += 8;	/* arena size */
@@ -482,8 +483,8 @@ unpackarena(Arena *a, Fshdr *fi, char *p, int sz)
 	fi->snap.bp.gen = -1;		p += 0;
 	fi->narena = UNPACK32(p);		p += 4;
 	fi->arenasz = UNPACK64(p);	p += 8;
-	fi->nextqid = UNPACK64(p);	p += 8;
-	fi->nextgen = UNPACK64(p);	p += 8;
+	atomic_init(&fi->nextqid, UNPACK64(p));	p += 8;
+	atomic_init(&fi->nextgen, UNPACK64(p));	p += 8;
 	a->head.addr = UNPACK64(p);	p += 8;
 	a->head.hash = UNPACK64(p);	p += 8;
 	a->head.gen = -1;		p += 0;

@@ -6,6 +6,7 @@
 
 #include "dat.h"
 #include "fns.h"
+#include "atomic.h"
 
 char	spc[128];
 
@@ -423,15 +424,18 @@ showcache(int fd, char**, int)
 	Bucket *bkt;
 	Blk *b;
 	int i;
+	long ref;
 
 	for(i = 0; i < fs->cmax; i++){
 		bkt = &fs->cache[i];
 		lock(bkt);
 		if(bkt->b != nil)
 			fprint(fd, "bkt%d\n", i);
-		for(b = bkt->b; b != nil; b = b->hnext)
-			if(b->ref != 1)
-				fprint(fd, "\t%p[ref=%ld, t=%d] => %B\n", b, b->ref, b->type, b->bp);
+		for(b = bkt->b; b != nil; b = b->hnext){
+			ref = agetl(&b->ref);
+			if(agetl(&b->ref) != 1)
+				fprint(fd, "\t%p[ref=%ld, t=%d] => %B\n", b, ref, b->type, b->bp);
+		}
 		unlock(bkt);
 	}
 }

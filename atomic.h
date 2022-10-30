@@ -1,17 +1,62 @@
-long	agetl(long*);
-vlong	agetv(vlong*);
-void*	agetp(void**);
+static inline long
+agetl(atomic_long *p)
+{
+	return atomic_load(p);
+}
 
-long	asetl(long*, long);
-vlong	asetv(vlong*, vlong);
-void*	asetp(void**, void*);
+static inline vlong
+agetv(atomic_llong* p)
+{
+	return atomic_load(p);
+}
 
-long	aincl(long*, long);
-vlong	aincv(vlong*, vlong);
-void*	aincp(void**, void*);
+static inline void *
+agetp(void *_Atomic*p)
+{
+	return atomic_load(p);
+}
 
-long	acasl(long*, long, long);
-vlong	acasv(vlong*, vlong, vlong);
-void*	acasp(void**, void*, void*);
+static inline long
+asetl(atomic_long *p, long v)
+{
+	atomic_store(p, v);
+	return v;
+}
 
-void	coherence(void);
+static inline vlong
+asetv(atomic_llong *p, vlong v)
+{
+	atomic_store(p, v);
+	return v;
+}
+
+static inline void*
+asetp(void *_Atomic*p, void *v)
+{
+	atomic_store(p, v);
+	return v;
+}
+
+static inline long
+aincl(atomic_long *p, vlong v)
+{
+	return atomic_fetch_add(p, v);
+}
+
+static inline vlong
+aincv(atomic_llong *p, vlong v)
+{
+	return atomic_fetch_add(p, v);
+}
+
+static inline void*
+aincp(void *_Atomic*p, void *v)
+{
+	return atomic_fetch_add(p, v);
+}
+
+static inline void
+coherence(void)
+{
+	atomic_thread_fence(memory_order_relaxed);
+}

@@ -11,20 +11,17 @@ extern Gefs*	fs;
 extern int	debug;
 extern char*	forceuser;
 
-#define	UNPACK8(p)	(((uchar*)(p))[0])
-#define	UNPACK16(p)	((((uchar*)(p))[0]<<8)|(((uchar*)(p))[1]))
-#define	UNPACK32(p)	((((uchar*)(p))[0]<<24)|(((uchar*)(p))[1]<<16)|\
-				(((uchar*)(p))[2]<<8)|(((uchar*)(p))[3]))
-#define	UNPACK64(p)	(((u64int)((((uchar*)(p))[0]<<24)|(((uchar*)(p))[1]<<16)|\
-				(((uchar*)(p))[2]<<8)|(((uchar*)(p))[3])))<<32 |\
-			((u64int)((((uchar*)(p))[4]<<24)|(((uchar*)(p))[5]<<16)|\
-				(((uchar*)(p))[6]<<8)|(((uchar*)(p))[7]))))
+#include "intpack.h"
 
-#define	PACK8(p,v)	do{(p)[0]=(v);}while(0)
-#define	PACK16(p,v)	do{(p)[0]=(v)>>8;(p)[1]=(v);}while(0)
-#define	PACK32(p,v)	do{(p)[0]=(v)>>24;(p)[1]=(v)>>16;(p)[2]=(v)>>8;(p)[3]=(v);}while(0)
-#define	PACK64(p,v)	do{(p)[0]=(v)>>56;(p)[1]=(v)>>48;(p)[2]=(v)>>40;(p)[3]=(v)>>32;\
-			   (p)[4]=(v)>>24;(p)[5]=(v)>>16;(p)[6]=(v)>>8;(p)[7]=(v);}while(0)
+#define	UNPACK8(p)	getbe8(p)
+#define	UNPACK16(p)	getbe16(p)
+#define	UNPACK32(p)	getbe32(p)
+#define	UNPACK64(p)	getbe64(p)
+
+#define	PACK8(p,v)	putbe8(p,v)
+#define	PACK16(p,v)	putbe16(p,v)
+#define	PACK32(p,v)	putbe32(p,v)
+#define	PACK64(p,v)	putbe64(p,v)
 
 Blk*	newblk(int type);
 Blk*	dupblk(Blk*);

@@ -373,7 +373,7 @@ struct Tree {
 	Lock	lk;
 	Tree	*snext;
 
-	long	memref;	/* number of in-memory references to this */
+	atomic_long memref;	/* number of in-memory references to this */
 	int	dirty;
 	int	ref;	/* number of on-disk references to this */
 	int	ht;
@@ -420,8 +420,8 @@ struct Fshdr {
 	Tree	snap;
 	int	narena;
 	vlong	arenasz;
-	vlong	nextqid;
-	vlong	nextgen;
+	atomic_llong	nextqid;
+	atomic_llong	nextgen;
 };
 
 /*
@@ -432,7 +432,7 @@ struct Gefs {
 	Fshdr;
 	/* arena allocation */
 	Arena	*arenas;
-	long	roundrobin;
+	atomic_long roundrobin;
 	long	syncing;
 	long	nsyncers;
 
@@ -453,17 +453,17 @@ struct Gefs {
 
 	int	nworker;
 	Lock	freelk;
-	vlong	qgen;
-	long	epoch;
-	long	lepoch[32];
+	atomic_llong	qgen;
+	atomic_long	epoch;
+	atomic_long	lepoch[32];
 	Bfree	*limbo[3];
 
 	Syncq	syncq[32];
 
 
 	int	fd;
-	long	broken;
-	long	rdonly;
+	atomic_long broken;
+	atomic_long rdonly;
 	int	noauth;
 	int	noperm;
 
@@ -530,7 +530,7 @@ struct Dent {
 	Key;
 	Xdir;
 	Dent	*next;
-	long	ref;
+	atomic_long ref;
 
 	char	buf[Maxent];
 };
@@ -538,7 +538,7 @@ struct Dent {
 struct Mount {
 	Lock;
 	Mount	*next;
-	long	ref;
+	atomic_long ref;
 	vlong	gen;
 	char	*name;
 	Tree	*root;
@@ -572,7 +572,7 @@ struct Fid {
 	u32int	fid;
 	vlong	qpath;
 	vlong	pqpath;
-	long	ref;
+	atomic_long ref;
 	int	mode;
 	int	iounit;
 
@@ -618,7 +618,7 @@ struct Blk {
 	/* Freelist entry */
 	Blk	*fnext;
 
-	long	flag;
+	atomic_long flag;
 	long	qgen;
 
 	/* serialized to disk in header */
@@ -646,7 +646,7 @@ struct Blk {
 	uintptr	freed;
 
 	Bptr	bp;
-	long	ref;
+	atomic_long	ref;
 	char	*data;
 	char	buf[Blksz];
 	vlong	magic;
@@ -654,8 +654,8 @@ struct Blk {
 
 struct Chan {
 	int	size;	/* size of queue */
-	long	count;	/* how many in queue (semaphore) */
-	long	avail;	/* how many available to send (semaphore) */
+	sem_t	count;	/* how many in queue (semaphore) */
+	sem_t	avail;	/* how many available to send (semaphore) */
 	Lock	rl, wl;	/* circular pointers */
 	void	**rp;
 	void	**wp;

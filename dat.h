@@ -79,6 +79,10 @@ enum {
 };
 
 enum {
+	Eactive	= 1UL<<30,	/* epoch active flag */
+};
+
+enum {
 	/*
 	 * dent: pqid[8] qid[8] -- a directory entry key.
 	 * ptr:  off[8] hash[8] -- a key for an Dir block.
@@ -439,16 +443,16 @@ struct Gefs {
 
 	Chan	*wrchan;
 	Chan	*rdchan;
-	int	nquiesce;
+
+	int	nworker;
+	Lock	freelk;
 	vlong	qgen;
-	Lock	activelk;
-	ulong	active[32];
-	int	lastactive[32];
+	long	epoch;
+	long	lepoch[32];
+	Bfree	*limbo[3];
+
 	Syncq	syncq[32];
 
-	Lock	freelk;
-	Bfree	*freep;
-	Bfree	*freehd;
 
 	int	fd;
 	long	broken;
@@ -619,12 +623,17 @@ struct Blk {
 	vlong	lognxt;	/* for allocation log */
 
 	/* debug */
-	uintptr	alloced;
 	uintptr lasthold;
 	uintptr lasthold0;
 	uintptr lasthold1;
+
 	uintptr lastdrop;
+	uintptr lastdrop0;
+	uintptr lastdrop1;
+
+	uintptr cached;
 	uintptr uncached;
+	uintptr	alloced;
 	uintptr	freed;
 
 	Bptr	bp;

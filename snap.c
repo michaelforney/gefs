@@ -5,6 +5,7 @@
 
 #include "dat.h"
 #include "fns.h"
+#include "atomic.h"
 
 int
 scandead(Dlist *l, int lblk, void (*fn)(Bptr, void*), void *dat)
@@ -396,7 +397,7 @@ newsnap(Tree *t)
 
 	if((r = calloc(sizeof(Tree), 1)) == nil)
 		return nil;
-	gen = inc64(&fs->nextgen, 1);
+	gen = aincv(&fs->nextgen, 1);
 	memset(&r->lk, 0, sizeof(r->lk));
 	r->snext = fs->osnap;
 	r->memref = 1;

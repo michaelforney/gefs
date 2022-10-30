@@ -132,14 +132,12 @@ cacheget(vlong off)
 
 	h = ihash(off);
 
-	inc64(&fs->stats.cachelook, 1);
 	bkt = &fs->cache[h % fs->cmax];
 
 	qlock(&fs->lrulk);
 	lock(bkt);
 	for(b = bkt->b; b != nil; b = b->hnext){
 		if(b->bp.addr == off){
-			inc64(&fs->stats.cachehit, 1);
  			holdblk(b);
 			lrudel(b);
 			b->lasthold = getcallerpc(&off);

@@ -17,19 +17,6 @@ char	*srvname = "gefs";
 char	*dev;
 vlong	cachesz = 512*MiB;
 
-vlong
-inc64(vlong *v, vlong dv)
-{
-	vlong ov, nv;
-
-	while(1){
-		ov = *v;
-		nv = ov + dv;
-		if(cas64((u64int*)v, ov, nv))
-			return ov;
-	}
-}
-
 static void
 initfs(vlong cachesz)
 {
@@ -65,7 +52,7 @@ launch(void (*f)(int, void *), int wid, void *arg, char *text)
 {
 	int pid;
 
-	assert(wid == -1 || wid < nelem(fs->active));
+	assert(wid == -1 || wid < nelem(fs->lepoch));
 	pid = rfork(RFPROC|RFMEM|RFNOWAIT);
 	if (pid < 0)
 		sysfatal("can't fork: %r");
@@ -216,10 +203,10 @@ main(int argc, char **argv)
 	srvfd = postfd(srvname, "");
 	ctlfd = postfd(srvname, ".cmd");
 	launch(runtasks, -1, nil, "tasks");
-	launch(runcons, fs->nquiesce++, (void*)ctlfd, "ctl");
-	launch(runwrite, fs->nquiesce++, nil, "mutate");
+	launch(runcons, fs->nworker++, (void*)ctlfd, "ctl");
+	launch(runwrite, fs->nworker++, nil, "mutate");
 	for(i = 0; i < 2; i++)
-		launch(runread, fs->nquiesce++, nil, "readio");
+		launch(runread, fs->nworker++, nil, "readio");
 	for(i = 0; i < fs->nsyncers; i++)
 		launch(runsync, -1, &fs->syncq[i], "syncio");
 	for(i = 0; i < nann; i++)

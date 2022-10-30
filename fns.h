@@ -159,7 +159,7 @@ int	Kconv(Fmt*);
 int	Qconv(Fmt*);
 
 Chan*	mkchan(int);
-void*	chrecv(Chan*, int);
+void*	chrecv(Chan*);
 void	chsend(Chan*, void*);
 void	runfs(int, void*);
 void	runwrite(int, void*);
@@ -167,9 +167,3 @@ void	runread(int, void*);
 void	runcons(int, void*);
 void	runtasks(int, void*);
 void	runsync(int, void*);
-
-/* it's in libc... */
-extern int cas(long*, long, long);
-extern int fasp(void***, void*);
-extern int cas64(u64int*, u64int, u64int);
-vlong	inc64(vlong*, vlong);

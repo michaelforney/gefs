@@ -18,9 +18,12 @@ OFILES=\
 	snap.$O\
 	tree.$O\
 	user.$O\
+	\
+	atomic-$objtype.$O
 
 HFILES=\
 	dat.h\
-	fns.h
+	fns.h\
+	atomic.h
 
 </sys/src/cmd/mkone

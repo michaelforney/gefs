@@ -7,6 +7,7 @@
 
 #include "dat.h"
 #include "fns.h"
+#include "atomic.h"
 
 static char*	clearb(Fid*, vlong, vlong);
 
@@ -111,18 +112,14 @@ mkchan(int size)
 }
 
 void*
-chrecv(Chan *c, int block)
+chrecv(Chan *c)
 {
 	void *a;
 	long v;
 
-	v = c->count;
-	if(v == 0 || cas(&c->count, v, v-1) == 0){
-		if(block)
-			semacquire(&c->count, 1);
-		else
-			return nil;
-	}
+	v = agetl(&c->count);
+	if(v == 0 || !acasl(&c->count, v, v-1))
+		semacquire(&c->count, 1);
 	lock(&c->rl);
 	a = *c->rp;
 	if(++c->rp >= &c->args[c->size])
@@ -137,8 +134,8 @@ chsend(Chan *c, void *m)
 {
 	long v;
 
-	v = c->avail;
-	if(v == 0 || cas(&c->avail, v, v-1) == 0)
+	v = agetl(&c->avail);
+	if(v == 0 || !acasl(&c->avail, v, v-1))
 		semacquire(&c->avail, 1);
 	lock(&c->wl);
 	*c->wp = m;
@@ -695,7 +692,7 @@ fsauth(Fmsg *m)
 	memset(de, 0, sizeof(Dent));
 	de->ref = 0;
 	de->qid.type = QTAUTH;
-	de->qid.path = inc64(&fs->nextqid, 1);
+	de->qid.path = aincv(&fs->nextqid, 1);
 	de->qid.vers = 0;
 	de->length = 0;
 	de->k = nil;
@@ -1319,7 +1316,7 @@ fscreate(Fmsg *m)
 		d.qid.type |= QTEXCL;
 	if(m->perm & DMTMP)
 		d.qid.type |= QTTMP;
-	d.qid.path = inc64(&fs->nextqid, 1);
+	d.qid.path = aincv(&fs->nextqid, 1);
 	d.qid.vers = 0;
 	d.mode = m->perm;
 	if(m->perm & DMDIR)
@@ -1931,7 +1928,7 @@ runwrite(int wid, void *)
 	int ao;
 
 	while(1){
-		m = chrecv(fs->wrchan, 1);
+		m = chrecv(fs->wrchan);
 		epochstart(wid);
 		ao = (m->a == nil) ? AOnone : m->a->op;
 		switch(ao){
@@ -1980,7 +1977,7 @@ runread(int wid, void *)
 	Fmsg *m;
 
 	while(1){
-		m = chrecv(fs->rdchan, 1);
+		m = chrecv(fs->rdchan);
 		epochstart(wid);
 		switch(m->type){
 		case Tattach:	fsattach(m);	break;

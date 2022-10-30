@@ -5,6 +5,7 @@
 
 #include "dat.h"
 #include "fns.h"
+#include "atomic.h"
 
 typedef struct Range	Range;
 
@@ -33,7 +34,7 @@ setflag(Blk *b, int f)
 	while(1){
 		ov = b->flag;
 		nv = ov | f;
-		if(cas(&b->flag, ov, nv))
+		if(acasl(&b->flag, ov, nv))
 			break;
 	}
 }
@@ -46,7 +47,7 @@ clrflag(Blk *b, int f)
 	while(1){
 		ov = b->flag;
 		nv = ov & ~f;
-		if(cas(&b->flag, ov, nv))
+		if(acasl(&b->flag, ov, nv))
 			break;
 	}
 }
@@ -650,9 +651,6 @@ initblk(Blk *b, vlong bp, int t)
 	b->bp.addr = bp;
 	b->bp.hash = -1;
 	b->bp.gen = fs->nextgen;
-	lock(&fs->freelk);
-	b->qgen = fs->qgen;
-	unlock(&fs->freelk);
 	switch(t){
 	case Traw:
 	case Tarena:
@@ -727,10 +725,6 @@ finalize(Blk *b)
 	if(b->type != Traw)
 		PACK16(b->buf, b->type);
 
-	lock(&fs->freelk);
-	b->qgen = fs->qgen;
-	unlock(&fs->freelk);
-
 	switch(b->type){
 	default:
 	case Tpivot:
@@ -796,10 +790,13 @@ getblk(Bptr bp, int flg)
 	return b;
 }
 
+
 Blk*
 holdblk(Blk *b)
 {
 	ainc(&b->ref);
+	b->lasthold1 = b->lasthold0;
+	b->lasthold0 = b->lasthold;
 	b->lasthold = getcallerpc(&b);
 	return b;
 }
@@ -810,6 +807,8 @@ dropblk(Blk *b)
 	assert(b == nil || b->ref > 0);
 	if(b == nil || adec(&b->ref) != 0)
 		return;
+	b->lastdrop1 = b->lastdrop0;
+	b->lastdrop0 = b->lastdrop;
 	b->lastdrop = getcallerpc(&b);
 	/*
 	 * While a freed block can get resurrected
@@ -839,81 +838,79 @@ blkfill(Blk *b)
 }
 
 void
-freebp(Tree *t, Bptr bp)
+deferfree(Tree *t, Bptr bp, Blk *b)
 {
 	Bfree *f;
+	ulong ge;
 
 	if(t != nil && t != &fs->snap && bp.gen <= t->gen){
 		killblk(t, bp);
 		return;
 	}
+
 	if((f = malloc(sizeof(Bfree))) == nil)
 		return;
 	f->bp = bp;
-	lock(&fs->freelk);
-	f->next = fs->freehd;
-	fs->freehd = f;
-	unlock(&fs->freelk);
+	f->b = b;
+
+	ge = agetl(&fs->epoch);
+	f->next = fs->limbo[ge];
+	fs->limbo[ge] = f;
+}
+
+void
+freebp(Tree *t, Bptr bp)
+{
+	deferfree(t, bp, nil);
 }
 
 void
 freeblk(Tree *t, Blk *b)
 {
+	holdblk(b);
 	b->freed = getcallerpc(&t);
 	setflag(b, Bfreed);
-	freebp(t, b->bp);
+	deferfree(t, b->bp, b);
 }
 
 void
 epochstart(int tid)
 {
-	ainc((long*)&fs->active[tid]);
+	ulong ge;
+
+	ge = agetl(&fs->epoch);
+	asetl(&fs->lepoch[tid], ge | Eactive);
 }
 
 void
 epochend(int tid)
 {
-	ainc((long*)&fs->active[tid]);
+	ulong le;
+
+	le = agetl(&fs->lepoch[tid]);
+	asetl(&fs->lepoch[tid], le &~ Eactive);
 }
 
 void
 epochclean(void)
 {
-	int i, allquiesced;
+	ulong e, ge;
 	Bfree *p, *n;
 	Arena *a;
+	int i;
 
-	lock(&fs->activelk);
-	allquiesced = 1;
-	for(i = 0; i < fs->nquiesce; i++){
-		/*
-		 * Odd parity on quiescence implies
-		 * that we're between the exit from
-		 * and waiting for the next message
-		 * that enters us into the critical
-		 * section.
-		 */
-		if((fs->active[i] & 1) != 0)
-			continue;
-		if(fs->active[i] == fs->lastactive[i])
-			allquiesced = 0;
+	ge = agetl(&fs->epoch);
+	for(i = 0; i < fs->nworker; i++){
+		e = agetl(&fs->lepoch[i]);
+		if((e & Eactive) && e != (ge | Eactive))
+			return;
 	}
+	lock(&fs->freelk);
+	p = fs->limbo[(ge+1)%3];
+	fs->limbo[(ge+1)%3] = nil;
+	unlock(&fs->freelk);
+	asetl(&fs->epoch, (ge+1) % 3);
 
-	p = nil;
-	if(allquiesced){
-		for(i = 0; i < fs->nquiesce; i++)
-			fs->lastactive[i] = fs->active[i];
-
-		lock(&fs->freelk);
-		fs->qgen++;
-		if(fs->freep != nil){
-			p = fs->freep->next;
-			fs->freep->next = nil;
-		}
-		fs->freep = fs->freehd;
-		unlock(&fs->freelk);
-	}
-	unlock(&fs->activelk);
 
 	while(p != nil){
 		n = p->next;
@@ -922,6 +919,8 @@ epochclean(void)
 		lock(a);
 		cachedel(p->bp.addr);
 		blkdealloc_lk(p->bp.addr);
+		if(p->b != nil)
+			dropblk(p->b);
 		unlock(a);
 
 		free(p);
@@ -944,6 +943,7 @@ enqueue(Blk *b)
 {
 	Arena *a;
 
+	b->qgen = aincv(&fs->qgen, 1);
 	a = getarena(b->bp.addr);
 	assert(checkflag(b, Bdirty));
 	holdblk(b);
@@ -1036,7 +1036,7 @@ runsync(int, void *p)
 		}else if(!checkflag(b, Bfreed)){
 			if(syncblk(b) == -1){
 				ainc(&fs->broken);
-				fprint(2, "write: %r");
+				fprint(2, "write: %r\n");
 				abort();
 			}
 		}
@@ -1057,7 +1057,6 @@ sync(void)
 		b = cachepluck();
 		b->type = Tmagic;
 		lock(&fs->freelk);
-		b->qgen = ++fs->qgen;
 		unlock(&fs->freelk);
 		qput(&fs->syncq[i], b);
 	}

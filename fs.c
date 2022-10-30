@@ -71,6 +71,23 @@ snapfs(int fd, char *old, char *new)
 }
 
 static void
+filldumpdir(Xdir *d)
+{
+	memset(d, 0, sizeof(Xdir));
+	d->name = "/";
+	d->qid.path = Qdump;
+	d->qid.vers = fs->nextgen;
+	d->qid.type = QTDIR;
+	d->mode = 0555;
+	d->atime = 0;
+	d->mtime = 0;
+	d->length = 0;
+	d->uid = -1;
+	d->gid = -1;
+	d->muid = -1;
+}
+
+static void
 freemsg(Fmsg *m)
 {
 	free(m->a);
@@ -202,17 +219,19 @@ rerror(Fmsg *m, char *fmt, ...)
 
 
 static char*
-lookup(Fid *f, Key *k, Kvp *kv, char *buf, int nbuf)
+lookup(Mount *mnt, Key *k, Kvp *kv, char *buf, int nbuf)
 {
 	char *e;
 	Tree *r;
 
-	if(f->mnt == nil)
+	if(mnt == nil)
 		return Eattach;
-	lock(f->mnt);
-	r = f->mnt->root;
+
+	lock(mnt);
+	r = mnt->root;
 	ainc(&r->memref);
-	unlock(f->mnt);
+	unlock(mnt);
+
 	e = btlookup(r, k, kv, buf, nbuf);
 	closesnap(r);
 	return e;
@@ -268,7 +287,7 @@ readb(Fid *f, char *d, vlong o, vlong n, vlong sz)
 	PACK64(k.k+1, f->qpath);
 	PACK64(k.k+9, fb);
 
-	e = lookup(f, &k, &kv, kvbuf, sizeof(kvbuf));
+	e = lookup(f->mnt, &k, &kv, kvbuf, sizeof(kvbuf));
 	if(e != nil){
 		if(e != Eexist){
 			werrstr(e);
@@ -308,7 +327,7 @@ writeb(Fid *f, Msg *m, Bptr *ret, char *s, vlong o, vlong n, vlong sz)
 		return -1;
 	t = nil;
 	if(fb < sz && (fo != 0 || n != Blksz)){
-		e = lookup(f, m, &kv, buf, sizeof(buf));
+		e = lookup(f->mnt, m, &kv, buf, sizeof(buf));
 		if(e == nil){
 			bp = unpackbp(kv.v, kv.nv);
 			if((t = getblk(bp, GBraw)) == nil)
@@ -383,6 +402,10 @@ getmount(char *name)
 	Mount *mnt;
 	Tree *t;
 
+	if(strcmp(name, "dump") == 0){
+		ainc(&fs->snapmnt->ref);
+		return fs->snapmnt;
+	}
 	lock(&fs->mountlk);
 	for(mnt = fs->mounts; mnt != nil; mnt = mnt->next)
 		if(strcmp(name, mnt->name) == 0){
@@ -849,19 +872,24 @@ fsattach(Fmsg *m)
 		goto Out;
 	}
 
-	if((p = packdkey(dbuf, sizeof(dbuf), -1ULL, "")) == nil){
-		rerror(m, Elength);
-		goto Out;
-	}
-	dk.k = dbuf;
-	dk.nk = p - dbuf;
-	if((e = btlookup(mnt->root, &dk, &kv, kvbuf, sizeof(kvbuf))) != nil){
-		rerror(m, e);
-		goto Out;
-	}
-	if(kv2dir(&kv, &d) == -1){
-		rerror(m, Efs);
-		goto Out;
+	if(strcmp(m->aname, "dump") == 0){
+		memset(&d, 0, sizeof(d));
+		filldumpdir(&d);
+	}else{
+		if((p = packdkey(dbuf, sizeof(dbuf), -1ULL, "")) == nil){
+			rerror(m, Elength);
+			goto Out;
+		}
+		dk.k = dbuf;
+		dk.nk = p - dbuf;
+		if((e = btlookup(mnt->root, &dk, &kv, kvbuf, sizeof(kvbuf))) != nil){
+			rerror(m, e);
+			goto Out;
+		}
+		if(kv2dir(&kv, &d) == -1){
+			rerror(m, Efs);
+			goto Out;
+		}
 	}
 	if((de = getdent(-1, &d)) == nil){
 		rerror(m, Efs);
@@ -905,7 +933,7 @@ findparent(Fid *f, vlong *qpath, char **name, char *buf, int nbuf)
 		return Elength;
 	k.k = kbuf;
 	k.nk = p - kbuf;
-	if((e = lookup(f, &k, &kv, buf, nbuf)) != nil)
+	if((e = lookup(f->mnt, &k, &kv, buf, nbuf)) != nil)
 		return e;
 	if((*name = unpackdkey(kv.v, kv.nv, qpath)) == nil)
 		return Efs;
@@ -920,6 +948,7 @@ fswalk(Fmsg *m)
 	vlong up, prev;
 	Fid *o, *f;
 	Dent *dent;
+	Mount *mnt;
 	Fcall r;
 	Xdir d;
 	Kvp kv;
@@ -936,6 +965,7 @@ fswalk(Fmsg *m)
 		return;
 	}
 	e = nil;
+	mnt = o->mnt;
 	up = o->qpath;
 	prev = o->qpath;
 	rlock(o->dent);
@@ -952,30 +982,47 @@ fswalk(Fmsg *m)
 			return;
 		}
 		name = m->wname[i];
-		if(strcmp(m->wname[i], "..") == 0){
-			if((e = findparent(o, &prev, &name, kbuf, sizeof(kbuf))) != nil){
-				rerror(m, e);
+		if(d.qid.path == Qdump){
+			if((mnt = getmount(m->wname[i])) == nil){
+				putfid(o);
+				return;
+			}
+			if((p = packdkey(kbuf, sizeof(kbuf), -1ULL, "")) == nil){
+				clunkmount(mnt);
+				putfid(o);
+				return;
+			}
+		}else{
+			if(strcmp(m->wname[i], "..") == 0){
+				if(o->pqpath == Qdump){
+					mnt = fs->snapmnt;
+					filldumpdir(&d);
+					goto Found;
+				}else if((e = findparent(o, &prev, &name, kbuf, sizeof(kbuf))) != nil){
+					rerror(m, e);
+					putfid(o);
+					return;
+				}
+			}
+			if((p = packdkey(kbuf, sizeof(kbuf), prev, name)) == nil){
+				rerror(m, Elength);
 				putfid(o);
 				return;
 			}
 		}
-		if((p = packdkey(kbuf, sizeof(kbuf), prev, name)) == nil){
-			rerror(m, Elength);
-			putfid(o);
-			return;
-		}
 		k.k = kbuf;
 		k.nk = p - kbuf;
-		if((e = lookup(o, &k, &kv, kvbuf, sizeof(kvbuf))) != nil)
+		if((e = lookup(mnt, &k, &kv, kvbuf, sizeof(kvbuf))) != nil)
 			break;
-		duid = d.uid;
-		dgid = d.gid;
-		dmode = d.mode;
 		if(kv2dir(&kv, &d) == -1){
 			rerror(m, Efs);
 			putfid(o);
 			return;
 		}
+Found:
+		duid = d.uid;
+		dgid = d.gid;
+		dmode = d.mode;
 		up = prev;
 		prev = d.qid.path;
 		r.wqid[i] = d.qid;
@@ -996,13 +1043,23 @@ fswalk(Fmsg *m)
 		putfid(o);
 	}
 	if(i > 0 && i == m->nwname){
-		dent = getdent(up, &d);
+		lock(f);
+		if(up == Qdump)
+			dent = getdent(-1ULL, &d);
+		else
+			dent = getdent(up, &d);
 		if(dent == nil){
 			if(f != o)
 				clunkfid(m->conn, f);
 			rerror(m, Enomem);
+			unlock(f);
 			putfid(f);
 			return;
+		}
+		if(mnt != f->mnt){
+			clunkmount(f->mnt);
+			ainc(&mnt->ref);
+			f->mnt = mnt;
 		}
 		f->qpath = r.wqid[i-1].path;
 		f->pqpath = up;
@@ -1010,6 +1067,7 @@ fswalk(Fmsg *m)
 		f->duid = duid;
 		f->dgid = dgid;
 		f->dmode = dmode;
+		unlock(f);
 	}
 	respond(m, &r);
 	putfid(f);
@@ -1063,7 +1121,7 @@ fswstat(Fmsg *m)
 	}
 	de = f->dent;
 	wlock(de);
-	if(de->qid.type & QTAUTH){
+	if((de->qid.type & QTAUTH) || (de->qid.path & Qdump)){
 		rerror(m, Emode);
 		goto Out;
 	}
@@ -1256,7 +1314,6 @@ fsclunk(Fmsg *m)
 		rerror(m, Efid);
 		return;
 	}
-
 	lock(f);
 	if(f->scan != nil){
 		btdone(f->scan);
@@ -1486,15 +1543,20 @@ fsopen(Fmsg *m)
 		rerror(m, Efid);
 		return;
 	}
-	if((e = lookup(f, f->dent, &kv, buf, sizeof(buf))) != nil){
-		rerror(m, e);
-		putfid(f);
-		return;
-	}
-	if(kv2dir(&kv, &d) == -1){
-		rerror(m, Efs);
-		putfid(f);
-		return;
+
+	if((f->qpath & Qdump) != 0){
+		filldumpdir(&d);
+	}else{
+		if((e = lookup(f->mnt, f->dent, &kv, buf, sizeof(buf))) != nil){
+			rerror(m, e);
+			putfid(f);
+			return;
+		}
+		if(kv2dir(&kv, &d) == -1){
+			rerror(m, Efs);
+			putfid(f);
+			return;
+		}
 	}
 	if(fsaccess(f, d.mode, d.uid, d.gid, mbits) == -1){
 		rerror(m, Eperm);
@@ -1587,6 +1649,73 @@ readauth(Fmsg *m, Fid *f, Fcall *r)
 	Phase:
 		return Ephase;
 	}
+}
+
+static char*
+readsnap(Fmsg *m, Fid *f, Fcall *r)
+{
+	char pfx[1], *p, *e;
+	int n, ns, done;
+	Scan *s;
+	Xdir d;
+
+	s = f->scan;
+	if(s != nil && s->offset != 0 && s->offset != m->offset)
+		return Edscan;
+	if(s == nil || m->offset == 0){
+		if((s = mallocz(sizeof(Scan), 1)) == nil)
+			return Enomem;
+		pfx[0] = Klabel;
+		if((e = btscan(&fs->snap, s, pfx, 1)) != nil){
+			btdone(s);
+			free(s);
+			return e;
+		}
+
+		lock(f);
+		if(f->scan != nil){
+			btdone(f->scan);
+			free(f->scan);
+		}
+		f->scan = s;
+		unlock(f);
+	}
+	if(s->done){
+		r->count = 0;
+		return nil;
+	}
+	p = r->data;
+	n = m->count;
+	d = f->dent->Xdir;
+	if(s->overflow){
+		memcpy(d.name, s->kv.k+1, s->kv.nk-1);
+		d.name[s->kv.nk-1] = 0;
+		d.qid.path = UNPACK64(s->kv.v + 1);
+		if((ns = dir2statbuf(&d, p, n)) == -1){
+			r->count = 0;
+			return nil;
+		}
+		s->overflow = 0;
+		p += ns;
+		n -= ns;
+	}
+	while(1){
+		if((e = btnext(s, &s->kv, &done)) != nil)
+			return e;
+		if(done)
+			break;
+		memcpy(d.name, s->kv.k+1, s->kv.nk-1);
+		d.name[s->kv.nk-1] = 0;
+		d.qid.path = UNPACK64(s->kv.v + 1);
+		if((ns = dir2statbuf(&d, p, n)) == -1){
+			s->overflow = 1;
+			break;
+		}
+		p += ns;
+		n -= ns;
+	}
+	r->count = p - r->data;
+	return nil;
 }
 
 static char*
@@ -1705,6 +1834,8 @@ fsread(Fmsg *m)
 	}
 	if(f->dent->qid.type & QTAUTH)
 		e = readauth(m, f, &r);
+	else if(f->dent->qid.path == Qdump)
+		e = readsnap(m, f, &r);
 	else if(f->dent->qid.type & QTDIR)
 		e = readdir(m, f, &r);
 	else
@@ -1950,15 +2081,11 @@ runwrite(int wid, void *)
 			}
 			break;
 		case AOsync:
-			if(m->a->fd != -1)
-				fprint(m->a->fd, "syncing [readonly: %d]\n", m->a->halt);
 			if(m->a->halt)
 				ainc(&fs->rdonly);
 			for(mnt = fs->mounts; mnt != nil; mnt = mnt->next)
 				updatemount(mnt);
 			sync();
-			if(m->a->fd != -1)
-				fprint(m->a->fd, "sync done\n");
 			freemsg(m);
 			break;
 		case AOsnap:

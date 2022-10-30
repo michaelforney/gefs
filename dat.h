@@ -103,6 +103,10 @@ enum {
 	Bcached	= 1 << 3,
 };
 
+enum {
+	Qdump = 1ULL << 63,
+};
+
 /* internal errors */
 #define Efs	(abort(), "fs broke")
 extern char Eimpl[];
@@ -435,9 +439,10 @@ struct Gefs {
 	Rendez	syncrz;
 
 	QLock	snaplk;	/* snapshot lock */
-	Tree	*osnap;
+	Tree	*opensnap;
 	Lock	mountlk;
 	Mount	*mounts;
+	Mount	*snapmnt;
 	Lock	connlk;
 	Conn	*conns;
 

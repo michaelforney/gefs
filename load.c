@@ -46,13 +46,24 @@ loadarena(Arena *a, Fshdr *fi, vlong o)
 void
 loadfs(char *dev)
 {
+	Mount *mnt;
 	Fshdr fi;
 	Arena *a;
 	char *e;
 	Tree *t;
 	int i, k;
 
-	fs->osnap = nil;
+	if((mnt = mallocz(sizeof(*mnt), 1)) == nil)
+		sysfatal("malloc: %r");
+	if((mnt->name = strdup("dump")) == nil)
+		sysfatal("malloc: %r");
+	mnt->ref = 1;
+	mnt->root = nil;
+	mnt->gen = -1;
+	mnt->root = &fs->snap;
+
+	fs->opensnap = nil;
+	fs->snapmnt = mnt;
 	fs->gotinfo = 0;
 	fs->narena = 1;
 	if((fs->fd = open(dev, ORDWR)) == -1)

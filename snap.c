@@ -175,7 +175,7 @@ opensnap(vlong id)
 	Key k;
 
 	qlock(&fs->snaplk);
-	for(t = fs->osnap; t != nil; t = t->snext){
+	for(t = fs->opensnap; t != nil; t = t->snext){
 		if(t->gen == id){
 			ainc(&t->memref);
 			qunlock(&fs->snaplk);
@@ -195,8 +195,8 @@ opensnap(vlong id)
 	if(unpacktree(t, kv.v, kv.nv) == nil)
 		goto Error;
 	t->memref = 1;
-	t->snext = fs->osnap;
-	fs->osnap = t;
+	t->snext = fs->opensnap;
+	fs->opensnap = t;
 	qunlock(&fs->snaplk);
 	return t;
 
@@ -225,8 +225,8 @@ closesnap(Tree *t)
 //FIXME: 	putblk(ins);
 	}
 
-	p = &fs->osnap;
-	for(te = fs->osnap; te != nil; te = te->snext){
+	p = &fs->opensnap;
+	for(te = fs->opensnap; te != nil; te = te->snext){
 		if(te == t)
 			break;
 		p = &te->snext;
@@ -275,6 +275,8 @@ modifylabel(int op, char *name, vlong id)
 	char *p, *e, kbuf[Keymax], vbuf[Snapsz];
 	Msg m;
 
+	if(strcmp(name, "dump") == 0)
+		return Ename;
 	if(op == Oinsert)
 		e = refsnap(id);
 	else
@@ -399,7 +401,7 @@ newsnap(Tree *t)
 		return nil;
 	gen = aincv(&fs->nextgen, 1);
 	memset(&r->lk, 0, sizeof(r->lk));
-	r->snext = fs->osnap;
+	r->snext = fs->opensnap;
 	r->memref = 1;
 	r->ref = 0;
 	r->ht = t->ht;
@@ -414,7 +416,7 @@ newsnap(Tree *t)
 		r->dead[i].head.gen = -1;
 		r->dead[i].ins = nil;
 	}
-	fs->osnap = r;
+	fs->opensnap = r;
 
 	return r;
 }
